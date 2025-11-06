@@ -106,8 +106,8 @@
     }
 
     .btn-collapse {
-        background: rgba(255, 255, 255, 0.2);
-        border: 2px solid white;
+        background: var(--primary-color);
+        border: 2px solid var(--primary-color);
         color: white;
         padding: 0.75rem 1.75rem;
         border-radius: var(--border-radius);
@@ -117,8 +117,11 @@
     }
 
     .btn-collapse:hover {
-        background: white;
-        color: var(--primary-dark);
+        background: var(--primary-dark);
+        border-color: var(--primary-dark);
+        color: white;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
 
     @media (max-width: 768px) {
