@@ -19,9 +19,11 @@ __license__ = "GPLv3"
 
 import logging
 from collections import defaultdict
-from flask import Flask, render_template, request, session, url_for, flash, redirect
+from flask import Flask, render_template, request, session, url_for, flash, redirect, jsonify
 from functools import wraps
 import re
+import os
+import yaml
 import mdb
 
 app = Flask(__name__)
@@ -171,6 +173,266 @@ def render_settings(action):
         raise ValueError(e)
 
 
+@app.route('/settings/ui_save/', methods=['POST'])
+@login_required
+def settings_ui_save():
+    """Save settings from UI form"""
+    try:
+        # Back up the config file first
+        with open(config, "r") as src, open(config + ".bak", "w") as dest:
+            dest.write(src.read())
+
+        # Get form data
+        form_data = request.form.to_dict()
+
+        # Build YAML config from form data
+        yaml_config = mdb.form_data_to_yaml(form_data)
+
+        # Write to config file
+        with open(config, "w") as f:
+            f.write(yaml_config)
+
+        return jsonify({'success': True, 'message': 'Settings saved successfully'})
+    except Exception as e:
+        logging.error(f"Error saving settings from UI: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/settings/load_ui/', methods=['GET'])
+@login_required
+def settings_load_ui():
+    """Load settings in UI format"""
+    try:
+        config_data = mdb.get_config(config)
+        return jsonify({'success': True, 'config': config_data})
+    except Exception as e:
+        logging.error(f"Error loading config for UI: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/settings/export/', methods=['GET'])
+@login_required
+def settings_export():
+    """Export configuration as YAML"""
+    try:
+        config_data = mdb.get_config(config)
+        yaml_content = mdb.dict_to_yaml(config_data)
+        return jsonify({'success': True, 'yaml': yaml_content})
+    except Exception as e:
+        logging.error(f"Error exporting config: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/settings/import/', methods=['POST'])
+@login_required
+def settings_import():
+    """Import configuration from uploaded YAML"""
+    try:
+        # Get uploaded YAML content
+        yaml_content = request.form.get('yaml_content', '')
+
+        # Validate YAML syntax
+        mdb.validate_yaml(yaml_content)
+
+        # Back up current config
+        with open(config, "r") as src, open(config + ".bak", "w") as dest:
+            dest.write(src.read())
+
+        # Write new config
+        with open(config, "w") as f:
+            f.write(yaml_content)
+
+        return jsonify({'success': True, 'message': 'Configuration imported successfully'})
+    except Exception as e:
+        logging.error(f"Error importing config: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/proxysql/config_diff/', methods=['GET', 'POST'])
+@login_required
+def render_config_diff():
+    """Render Configuration Diff page"""
+    return render_template('config_diff.html')
+
+
+@app.route('/proxysql/config_diff/get', methods=['POST'])
+@login_required
+def get_config_diff():
+    """Get configuration differences across Disk/Memory/Runtime"""
+    try:
+        diff_data = mdb.get_config_diff()
+        return jsonify({'success': True, 'diff': diff_data})
+    except Exception as e:
+        logging.error(f"Error getting config diff: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/update_config_skip_variables', methods=['POST'])
+@login_required
+def update_config_skip_variables():
+    """Update config_diff_skip_variable in config.yml"""
+    try:
+        data = request.get_json()
+        skip_variables = data.get('skip_variables', [])
+
+        # Load current config
+        config_data = mdb.get_config(config)
+
+        # Update skip_variables in global section
+        if 'global' not in config_data:
+            config_data['global'] = {}
+        config_data['global']['config_diff_skip_variable'] = skip_variables
+
+        # Save config back to file
+        with open(config, 'w') as f:
+            yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
+
+        logging.info(f"Updated config_diff_skip_variable: {skip_variables}")
+        return jsonify({'success': True})
+    except Exception as e:
+        logging.error(f"Error updating config skip variables: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+
+# API Routes for Inline Editing
+@app.route('/api/update_row', methods=['POST'])
+@login_required
+def api_update_row():
+    try:
+        data = request.get_json()
+        server = data['server']
+        database = data['database']
+        table = data['table']
+        row_index = data['rowIndex']
+        column_names = data['columnNames']
+        row_data = data['data']
+
+        logging.debug("=" * 80)
+        logging.debug("API REQUEST: /api/update_row")
+        logging.debug("=" * 80)
+        logging.debug(f"Server: {server}")
+        logging.debug(f"Database: {database}")
+        logging.debug(f"Table: {table}")
+        logging.debug(f"Row Index: {row_index}")
+        logging.debug(f"Column Names: {column_names}")
+        logging.debug(f"Row Data: {row_data}")
+        logging.debug("=" * 80)
+
+        result = mdb.update_row(db, server, database, table, row_index, column_names, row_data)
+        logging.debug(f"Update result: {result}")
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"API error in update_row: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/delete_row', methods=['POST'])
+@login_required
+def api_delete_row():
+    try:
+        data = request.get_json()
+        server = data['server']
+        database = data['database']
+        table = data['table']
+        row_index = data['rowIndex']
+
+        logging.debug("=" * 80)
+        logging.debug("API REQUEST: /api/delete_row")
+        logging.debug("=" * 80)
+        logging.debug(f"Server: {server}")
+        logging.debug(f"Database: {database}")
+        logging.debug(f"Table: {table}")
+        logging.debug(f"Row Index: {row_index}")
+        logging.debug("=" * 80)
+
+        result = mdb.delete_row(db, server, database, table, row_index)
+        logging.debug(f"Delete result: {result}")
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"API error in delete_row: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/insert_row', methods=['POST'])
+@login_required
+def api_insert_row():
+    try:
+        data = request.get_json()
+        server = data['server']
+        database = data['database']
+        table = data['table']
+        column_names = data['columnNames']
+        row_data = data['data']
+
+        logging.debug("=" * 80)
+        logging.debug("API REQUEST: /api/insert_row")
+        logging.debug("=" * 80)
+        logging.debug(f"Server: {server}")
+        logging.debug(f"Database: {database}")
+        logging.debug(f"Table: {table}")
+        logging.debug(f"Column Names: {column_names}")
+        logging.debug(f"Row Data: {row_data}")
+        logging.debug("=" * 80)
+
+        result = mdb.insert_row(db, server, database, table, column_names, row_data)
+        logging.debug(f"Insert result: {result}")
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"API error in insert_row: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/get_schema', methods=['GET'])
+@login_required
+def api_get_schema():
+    """Get table schema including CHECK constraints and default values."""
+    try:
+        table_name = request.args.get('table', '')
+        if not table_name:
+            return jsonify({'success': False, 'error': 'Table name required'})
+
+        # Get server from session
+        server = session.get('server', 'default')
+        database = session.get('database', 'main')
+
+        schema_info = mdb.get_table_schema(db, server, database, table_name)
+        return jsonify({'success': True, 'schema': schema_info})
+    except Exception as e:
+        logging.error(f"Schema extraction error: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/execute_proxysql_command', methods=['POST'])
+@login_required
+def api_execute_proxysql_command():
+    """Execute ProxySQL administrative commands (LOAD/SAVE)."""
+    try:
+        sql = request.form.get('sql', '')
+        if not sql:
+            return jsonify({'success': False, 'error': 'SQL command required'})
+
+        # Get server from session
+        server = session.get('server', 'proxysql')
+
+        # Execute the SQL commands
+        error = mdb.execute_change(db, server, sql)
+
+        if error:
+            # Convert error to string if it's an exception object
+            error_msg = str(error) if error else 'Unknown error'
+            logging.error(f"ProxySQL command execution error: {error_msg}")
+            return jsonify({'success': False, 'error': error_msg})
+        else:
+            logging.info(f"ProxySQL command executed successfully: {sql[:100]}")
+            return jsonify({'success': True})
+
+    except Exception as e:
+        logging.error(f"API error in execute_proxysql_command: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)})
+
+
 @app.errorhandler(Exception)
 def handle_exception(e):
     print(e)
@@ -178,4 +440,4 @@ def handle_exception(e):
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', use_debugger=False)
+    app.run(host='0.0.0.0', use_debugger=True)

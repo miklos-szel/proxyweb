@@ -1,130 +1,837 @@
 {% extends 'list_dbs.html' %}
 
-
 {% block show_table_info %}
+<style>
+    .action-toolbar {
+        background: white;
+        padding: 2rem;
+        border-radius: var(--border-radius);
+        box-shadow: var(--box-shadow);
+        margin-bottom: 2rem;
+        display: flex;
+        gap: 1.25rem;
+        flex-wrap: wrap;
+        align-items: center;
+    }
 
-    {% if not session['read_only'] %}
+    .info-panel {
+        background: #f8f9fa;
+        border-left: 4px solid #6b9fb5;
+        padding: 1rem 1.25rem;
+        border-radius: 4px;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        border: 1px solid #e0e0e0;
+    }
 
-        {% block sql_editor %}
+    .info-panel .panel-icon {
+        color: #6b9fb5;
+        margin-right: 0.5rem;
+    }
 
-                        <div class="dropdown" role="menu">
-                            <button class="btn btn-outline-primary" dropdown-toggle
-                            " type="button" id="adhoc" data-toggle="dropdown"
-                            aria-haspopup="true" aria-expanded="false">
-                            Queries
+    /* Ensure info panel is hidden by default on page load */
+    #queryInfo:not(.show) {
+        display: none !important;
+    }
+
+    .sql-editor-card {
+        background: white;
+        border-radius: var(--border-radius);
+        box-shadow: var(--box-shadow);
+        margin-bottom: 2rem;
+        overflow: hidden;
+    }
+
+    .sql-editor-header {
+        background: white;
+        color: #333;
+        padding: 0.5rem 1rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid #e0e0e0;
+    }
+
+    .sql-editor-header h5 {
+        margin: 0;
+        font-weight: 600;
+        font-size: 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .sql-editor-toggle {
+        background: none;
+        border: none;
+        color: #495057;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        padding: 0.25rem 0.5rem;
+        font-size: 1rem;
+        display: inline-flex;
+        align-items: center;
+        border-radius: 4px;
+    }
+
+    .sql-editor-toggle:hover {
+        background: #e9ecef;
+        color: #333;
+    }
+
+    .sql-editor-toggle i {
+        transition: transform 0.3s ease;
+        font-size: 0.875rem;
+    }
+
+    .sql-editor-toggle.expanded i {
+        transform: rotate(90deg);
+    }
+
+    .sql-editor-body {
+        padding: 1rem;
+        background: white;
+    }
+
+    .editor-controls {
+        position: relative;
+        display: inline-block;
+        clear: both;
+    }
+
+    .editor-controls .btn {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        white-space: nowrap;
+    }
+
+    /* Nested Dropdown Styles */
+    .editor-controls .dropdown-menu {
+        padding: 0.75rem 0;
+        position: absolute;
+        z-index: 1060;
+        max-height: 80vh;
+        overflow-y: auto;  /* Keep vertical scrolling for long menus */
+    }
+
+    .editor-controls .dropdown-submenu {
+        position: relative;
+    }
+
+    .editor-controls .dropdown-item {
+        padding: 0.75rem 1.25rem;
+        position: relative;
+        font-size: 0.95rem;
+    }
+
+    .editor-controls .dropdown-item.has-submenu::after {
+        content: '\f105';
+        font-family: 'Font Awesome 5 Free';
+        font-weight: 900;
+        position: absolute;
+        right: 0.75rem;
+        top: 50%;
+        transform: translateY(-50%);
+        color: rgba(0, 0, 0, 0.3);
+        transition: transform 0.2s ease;
+    }
+
+    .editor-controls .dropdown-item.has-submenu:hover::after,
+    .editor-controls .dropdown-item.has-submenu:focus::after {
+        transform: translateY(-50%) rotate(90deg);
+        color: #6b9fb5;
+    }
+
+    .editor-controls .submenu,
+    .submenu {
+        position: fixed;  /* Changed to fixed to break out of parent overflow */
+        min-width: 320px;
+        max-height: 90vh;
+        overflow-y: auto;
+        overflow-x: hidden;
+        background: white;
+        border: 2px solid #6b9fb5;
+        border-radius: 0.375rem;
+        box-shadow: 0 0.5rem 1.5rem rgba(107, 159, 181, 0.3);
+        padding: 0.5rem 0;
+        display: none;
+        z-index: 1070;
+        scroll-behavior: smooth;
+    }
+
+    .editor-controls .submenu.show,
+    .submenu.show {
+        display: block;
+        animation: slideIn 0.15s ease-out;
+    }
+
+    @keyframes slideIn {
+        from {
+            opacity: 0;
+            transform: translateX(-10px);
+        }
+        to {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    }
+
+    /* Visual indicator that submenu is open */
+    .editor-controls .dropdown-item.has-submenu.active {
+        background-color: #e8f0f4;
+        color: #6b9fb5;
+    }
+
+    .editor-controls .submenu .dropdown-item,
+    .submenu .dropdown-item {
+        padding: 0.75rem 1.25rem;
+        font-size: 0.95rem;
+    }
+
+    .editor-controls .submenu .dropdown-item:hover,
+    .editor-controls .submenu .dropdown-item:focus,
+    .submenu .dropdown-item:hover,
+    .submenu .dropdown-item:focus {
+        background-color: #f8f9fa;
+        color: var(--primary-color);
+    }
+
+    .editor-controls .submenu .dropdown-divider,
+    .submenu .dropdown-divider {
+        margin: 0.5rem 0;
+    }
+
+    /* Query History section styling */
+    .editor-controls .dropdown-header {
+        font-weight: 600;
+        color: var(--dark-color);
+        font-size: 0.875rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 0.75rem 1.25rem;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 991px) {
+        .editor-controls .submenu {
+            position: static;
+            box-shadow: none;
+            border: none;
+            padding-left: 1.5rem;
+            margin-left: 0;
+        }
+    }
+
+    .table-container {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        overflow: hidden;
+        margin-bottom: 1.5rem;
+        border: 1px solid #e0e0e0;
+    }
+
+    .table-header {
+        background: #f8f9fa;
+        padding: 1.25rem 1.5rem;
+        border-bottom: 1px solid #e0e0e0;
+    }
+
+    .table-header h4 {
+        margin: 0;
+        font-weight: 600;
+        color: #333;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 1.1rem;
+    }
+
+    .alert-custom {
+        border: none;
+        border-radius: var(--border-radius);
+        padding: 2rem;
+        margin-bottom: 2rem;
+        box-shadow: var(--box-shadow);
+    }
+
+    .alert-custom pre {
+        background: #1e293b;
+        color: #e2e8f0;
+        padding: 1.5rem;
+        border-radius: var(--border-radius);
+        margin-top: 0.75rem;
+        overflow-x: auto;
+        font-size: 0.95rem;
+        line-height: 1.7;
+    }
+
+    .table-stats {
+        display: flex;
+        gap: 1.5rem;
+        flex-wrap: wrap;
+        margin-top: 1rem;
+    }
+
+    .stat-item {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.9rem;
+        color: #666;
+    }
+
+    .stat-item strong {
+        color: #333;
+    }
+
+    @media (max-width: 768px) {
+        .action-toolbar {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .editor-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .table-stats {
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+    }
+</style>
+
+{% if not session['read_only'] %}
+    <div class="sql-editor-card">
+        <div class="sql-editor-header">
+            <h5><i class="fas fa-code"></i> SQL Query Editor
+                <button class="sql-editor-toggle" type="button" id="sqlEditorToggle" aria-expanded="false" aria-controls="sqlEditorCollapse">
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+            </h5>
+        </div>
+
+        <div class="collapse" id="sqlEditorCollapse">
+            <div class="collapse" id="queryInfo">
+                <div class="info-panel">
+                    <p id="infotarget" class="mb-0">
+                        <i class="fas fa-info-circle panel-icon"></i>
+                        Select a query from the dropdown to load it here
+                    </p>
+                </div>
+            </div>
+
+            <div class="sql-editor-body">
+                <div class="editor-controls mb-3">
+                    <div class="d-flex align-items-center gap-2">
+                        <button class="btn btn-outline-primary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#queryInfo" aria-expanded="false">
+                            <i class="fas fa-info-circle"></i> Info
+                        </button>
+                        <div class="dropdown">
+                            <button class="btn btn-outline-primary btn-sm dropdown-toggle" type="button" id="quickQueriesBtn" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                                <i class="fas fa-history"></i> Quick Queries
                             </button>
-                            <ul class="dropdown-menu multi-level" role="menu" aria-labelledby="dropdownMenu">
-                                {% for item in session['misc']|sort %}
-                                    <li class="dropdown-divider"></li>
-                                    <li class="dropdown-submenu">
-                                    <a class="dropdown-item" class="dropdown-item" tabindex="-1" href="#">{{ item }}</a>
-                                    <ul class="dropdown-menu">
-
-                                        {% for subitem in session['misc'][item] %}
-                                            <li class="dropdown-item"><a class="dropdown-item"
-                                                                         onclick="
-                                                                                 let {{ item }}_{{ loop.index }}=unEscape({{ item }}_item_{{ loop.index }})
-                                                                                 document.getElementById('sql').value={{ item }}_{{ loop.index }}.replace(/;/g,';\r\n');
-                                                                                 document.getElementById('sql').focus();
-                                                                                 document.getElementById('infotarget').innerText='{{ subitem['info']|safe }}';
-                                                                                 return false;"
-                                                                         href="#">{{ subitem['title'] }} </a></li>
-                                        {% endfor %}
-                                    </ul>
-
-                                {% endfor %}
-
-                                <li class="dropdown-divider"></li>
-                                {% if session['history'] %}
-                                    <li class="dropdown-submenu">
-                                    <a class="dropdown-item font-weight-bold" class="dropdown-item" tabindex="-1" href="#">query
-                                        history</a>
-                                    <ul class="dropdown-menu">
-
-                                    {% for item in session['history'][:25]|reverse %}
-                                        <li class="dropdown-item"><a class="dropdown-item"
-                                                                     onclick="history_item_{{ loop.index }}=unEscape(history_item_{{ loop.index }})
-                                                                             document.getElementById('sql').value=history_item_{{ loop.index }}.replace(/;/g,';\r\n');;
-                                                                             {#document.getElementById('collapse4242').style.display='none';#}
-                                                                             document.getElementById('sql').focus();
-                                                                             return false;"
-                                                                     href="#">{{ loop.index }}. {{ item|truncate(80, True) }} </a>
+                            <ul class="dropdown-menu" aria-labelledby="quickQueriesBtn">
+                                {% if session['history'] and session['history']|length > 0 %}
+                                    <li><h6 class="dropdown-header">Query History</h6></li>
+                                    {% for item in session['history'][:10]|reverse %}
+                                        <li>
+                                            <a class="dropdown-item" href="#" onclick="loadQuery(window['history_item_{{ loop.index }}']); return false;">
+                                                <i class="fas fa-clock me-2"></i>{{ loop.index }}. {{ item|truncate(60, True) }}
+                                            </a>
                                         </li>
                                     {% endfor %}
+                                    <li><hr class="dropdown-divider"></li>
                                 {% endif %}
-
-
-                                </ul>
-                                </li>
+                                {% for item in session['misc']|sort %}
+                                    <li class="dropdown-submenu">
+                                        <a class="dropdown-item has-submenu" href="#" role="button" onclick="return false;">
+                                            <i class="fas fa-folder me-2"></i>{{ item|title }}
+                                        </a>
+                                        <ul class="submenu">
+                                            {% for subitem in session['misc'][item] %}
+                                                <li>
+                                                    <a class="dropdown-item" href="#" onclick="loadQueryWithInfo('{{ item }}_item_{{ loop.index }}', '{{ item }}_info_{{ loop.index }}'); return false;">
+                                                        <i class="fas fa-bolt me-2"></i>{{ subitem['title'] }}
+                                                    </a>
+                                                </li>
+                                            {% endfor %}
+                                        </ul>
+                                    </li>
+                                {% endfor %}
                             </ul>
-                            <button class=" btn-outline-primary waves-effect btn-floating " type="button" data-toggle="collapse"
-                                    data-target="#collapse4242"
-                                    aria-expanded="false" aria-controls="collapse"><i
-                                    class="fa-solid fa-circle-info  fa-lg"></i>
-                            </button>
                         </div>
-
-                        <!-- Collapsible element -->
-                        <div class="collapse text-left dark-grey-text" id="collapse4242">
-                            <div class="container my-3 py-3 z-depth-1">
-                                <p id="infotarget" class="font-weight-bold "></p>
-                                <section class="dark-grey-text "></section>
-                            </div>
-                        </div>
-
-            <form action="/{{ session["server"] }}/{{ session['database'] }}/{{ session['table'] }}/sql/" method="post">
-                <div class="form-group  text-monospace blue-border-focus ">
-                    <label for="exampleFormControlTextarea1"></label>
-                    <textarea class="form-control" name="sql" id="sql" rows="7"></textarea>
+                    </div>
                 </div>
-                <button type="submit" class="btn btn-primary">Submit</button>
-            </form>
 
-            {% if error %}
-                <div class="note note-danger">
-                    <pre><strong>SQL: </strong>{{ session['sql'] }}</pre>
-                    <strong>Error! </strong>{{ error }}
-                </div>
-            {% endif %}
+                <form action="/{{ session['server'] }}/{{ session['database'] }}/{{ session['table'] }}/sql/" method="post">
+                    <div class="mb-4">
+                        <textarea class="form-control font-monospace" name="sql" id="sql" rows="8" placeholder="Enter your SQL query here..." style="font-family: 'Courier New', monospace; font-size: 0.95rem; line-height: 1.6;"></textarea>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-play"></i> Execute Query
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" onclick="document.getElementById('sql').value = '';">
+                            <i class="fas fa-eraser"></i> Clear
+                        </button>
+                    </div>
+                </form>
 
-            {% if message %}
-                <div class="note note-success">
-                    <pre><strong>SQL:</BR></strong>{{ session['sql'] }}</pre>
-                    <strong>Success: </strong>{{ message }}
-                </div>
-            {% endif %}
+                {% if error %}
+                    <div class="alert-custom alert-danger mt-3">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        <strong>Query Error</strong>
+                        <pre>{{ session['sql'] }}</pre>
+                        <strong>{{ error }}</strong>
+                    </div>
+                {% endif %}
 
-        {% endblock %}
+                {% if message %}
+                    <div class="alert-custom alert-success mt-3">
+                        <i class="fas fa-check-circle me-2"></i>
+                        <strong>Success</strong>
+                        <pre>{{ session['sql'] }}</pre>
+                        <strong>{{ message }}</strong>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+{% endif %}
 
-    {% endif %}
+<div class="table-container">
+    <div class="table-header">
+        <h4>
+            <i class="fas fa-table"></i>
+            {{ session['table'] }} Table
+        </h4>
+        <div class="table-stats">
+            <div class="stat-item">
+                <i class="fas fa-database"></i>
+                <span><strong>Database:</strong> {{ session['database'] }}</span>
+            </div>
+            <div class="stat-item">
+                <i class="fas fa-server"></i>
+                <span><strong>Server:</strong> {{ session['server'] }}</span>
+            </div>
+            <div class="stat-item">
+                <i class="fas fa-list"></i>
+                <span><strong>Columns:</strong> {{ content['column_names']|length }}</span>
+            </div>
+            <div class="stat-item">
+                <i class="fas fa-rows"></i>
+                <span><strong>Rows:</strong> {{ content['rows']|length }}</span>
+            </div>
+        </div>
+    </div>
 
+    <!-- Add Row button will be inserted here by JavaScript -->
+    <div id="add-row-container" class="mb-3" style="display: none;">
+        <button type="button" class="btn btn-success btn-lg" onclick="addNewRow()">
+            <i class="fas fa-plus"></i> Add Row
+        </button>
+    </div>
 
-    <table id="proxywebtable" class=" table table-striped  table-bordered table-sm" cellspacing="0" width="100%">
-        <thead>
-        <tr>
-            {% for column_name in content['column_names'] %}
-                <th class="th-sm">{{ column_name }}
-
-                </th>
-            {% endfor %}
-        </tr>
-        </thead>
-
-        <tbody>
-        {% for row in content['rows'] %}
-            <tr>
-                {% for column in row %}
-                    <td style="max-width:850px;"> {{ column }}</td>
+    <div class="table-responsive">
+        <table id="proxywebtable" class="table table-hover table-striped mb-0">
+            <thead>
+                <tr>
+                    {% for column_name in content['column_names'] %}
+                        <th>{{ column_name }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in content['rows'] %}
+                    <tr>
+                        {% for column in row %}
+                            <td>{{ column }}</td>
+                        {% endfor %}
+                    </tr>
                 {% endfor %}
-            </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
 
-        {% endfor %}
+<script>
+// Check localStorage immediately when the script loads, before DOMContentLoaded
+(function() {
+    const STORAGE_KEY = 'proxyweb_sql_editor_collapsed';
+    const collapseElement = document.getElementById('sqlEditorCollapse');
+    const toggleButton = document.getElementById('sqlEditorToggle');
 
-        </tbody>
-    </table>
+    if (collapseElement && toggleButton) {
+        const savedState = localStorage.getItem(STORAGE_KEY);
+
+        // Apply state immediately if it exists
+        if (savedState === 'false') {
+            collapseElement.classList.add('show');
+            toggleButton.classList.add('expanded');
+            toggleButton.setAttribute('aria-expanded', 'true');
+        } else if (savedState === 'true') {
+            collapseElement.classList.remove('show');
+            toggleButton.classList.remove('expanded');
+            toggleButton.setAttribute('aria-expanded', 'false');
+        }
+    }
+})();
+
+// Helper functions for loading queries
+function loadQuery(sql) {
+
+    // Hide all submenus immediately
+    document.querySelectorAll('.submenu').forEach(s => {
+        s.classList.remove('show');
+    });
+    document.querySelectorAll('.has-submenu').forEach(t => {
+        t.classList.remove('active');
+    });
+
+    // Close the main dropdown
+    const dropdownButton = document.getElementById('quickQueriesBtn');
+    if (dropdownButton) {
+        const bsDropdown = bootstrap.Dropdown.getInstance(dropdownButton);
+        if (bsDropdown) {
+            bsDropdown.hide();
+        }
+    }
+
+    // Handle if sql is undefined or null
+    if (!sql) {
+        return;
+    }
+
+    const textarea = document.getElementById('sql');
+    if (!textarea) {
+        return;
+    }
+
+    textarea.value = sql.replace(/;/g, ';\n');
+    textarea.focus();
+
+    // Expand the SQL editor if collapsed
+    const collapseElement = document.getElementById('sqlEditorCollapse');
+    if (collapseElement && !collapseElement.classList.contains('show')) {
+        collapseElement.classList.add('show');
+        const toggleButton = document.getElementById('sqlEditorToggle');
+        if (toggleButton) {
+            toggleButton.setAttribute('aria-expanded', 'true');
+            toggleButton.classList.add('expanded');
+        }
+    }
+
+}
+
+function loadQueryWithInfo(sqlVarName, infoVarName) {
+
+    // Hide all submenus immediately
+    document.querySelectorAll('.submenu').forEach(s => {
+        s.classList.remove('show');
+    });
+    document.querySelectorAll('.has-submenu').forEach(t => {
+        t.classList.remove('active');
+    });
+
+    // Close the main dropdown
+    const dropdownButton = document.getElementById('quickQueriesBtn');
+    if (dropdownButton) {
+        const bsDropdown = bootstrap.Dropdown.getInstance(dropdownButton);
+        if (bsDropdown) {
+            bsDropdown.hide();
+        }
+    }
+
+    // Evaluate variable names from global scope
+    const sql = window[sqlVarName];
+    const info = window[infoVarName];
+
+    if (!sql) {
+        return;
+    }
+
+    if (!info) {
+    }
 
 
-    </br>
+    // Load the SQL into textarea (but don't close dropdown again since we already did it above)
+    const textarea = document.getElementById('sql');
+    if (textarea) {
+        textarea.value = sql.replace(/;/g, ';\n');
+        textarea.focus();
+    }
 
+    // Expand the SQL editor if collapsed
+    const collapseElement = document.getElementById('sqlEditorCollapse');
+    if (collapseElement && !collapseElement.classList.contains('show')) {
+        collapseElement.classList.add('show');
+        const toggleButton = document.getElementById('sqlEditorToggle');
+        if (toggleButton) {
+            toggleButton.setAttribute('aria-expanded', 'true');
+            toggleButton.classList.add('expanded');
+        }
+    }
+
+    // Update the info panel content (but don't show it automatically)
+    const infoTarget = document.getElementById('infotarget');
+    if (infoTarget && info) {
+        infoTarget.innerHTML = '<i class="fas fa-info-circle panel-icon"></i>' + info;
+    }
+}
+
+// Define SQL query variables and info variables for quick access
+{% for item in session['misc']|sort %}
+{% for subitem in session['misc'][item] %}
+window['{{ item }}_item_{{ loop.index }}'] = {{ subitem['sql']|tojson }};
+window['{{ item }}_info_{{ loop.index }}'] = {{ subitem['info']|tojson }};
+{% endfor %}
+{% endfor %}
+
+// Define history query variables
+{% if session['history'] and session['history']|length > 0 %}
+{% for item in session['history'][:10]|reverse %}
+window['history_item_{{ loop.index }}'] = {{ item|tojson }};
+{% endfor %}
+{% endif %}
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Ensure info panel is always collapsed on page load
+    const queryInfo = document.getElementById('queryInfo');
+    if (queryInfo) {
+        queryInfo.classList.remove('show');
+        // Also ensure the toggle button reflects the collapsed state
+        const infoToggleBtn = document.querySelector('[data-bs-target="#queryInfo"]');
+        if (infoToggleBtn) {
+            infoToggleBtn.setAttribute('aria-expanded', 'false');
+        }
+    }
+
+    const STORAGE_KEY = 'proxyweb_sql_editor_collapsed';
+    const toggleButton = document.getElementById('sqlEditorToggle');
+    const collapseElement = document.getElementById('sqlEditorCollapse');
+
+    if (toggleButton && collapseElement) {
+        // Check if state was already applied by the immediate script
+        const savedState = localStorage.getItem(STORAGE_KEY);
+
+        // Only restore state if we have a saved preference and it wasn't already applied
+        if (savedState !== null && savedState !== undefined) {
+            const shouldBeCollapsed = savedState === 'true';
+
+            // If state in localStorage doesn't match current state, update it
+            const isCurrentlyExpanded = collapseElement.classList.contains('show');
+
+            if (shouldBeCollapsed && isCurrentlyExpanded) {
+                collapseElement.classList.remove('show');
+                toggleButton.setAttribute('aria-expanded', 'false');
+                toggleButton.classList.remove('expanded');
+            } else if (!shouldBeCollapsed && !isCurrentlyExpanded) {
+                collapseElement.classList.add('show');
+                toggleButton.setAttribute('aria-expanded', 'true');
+                toggleButton.classList.add('expanded');
+            }
+        } else {
+            // Default to collapsed if no saved state
+            collapseElement.classList.remove('show');
+            toggleButton.setAttribute('aria-expanded', 'false');
+            toggleButton.classList.remove('expanded');
+        }
+
+        // Wait for Bootstrap's collapse to initialize, then ensure state is correct
+        setTimeout(function() {
+            if (savedState === 'false') {
+                collapseElement.classList.add('show');
+                toggleButton.classList.add('expanded');
+                toggleButton.setAttribute('aria-expanded', 'true');
+            } else if (savedState === 'true') {
+                collapseElement.classList.remove('show');
+                toggleButton.classList.remove('expanded');
+                toggleButton.setAttribute('aria-expanded', 'false');
+            }
+        }, 50);
+
+        // Listen for collapse events and save state
+        collapseElement.addEventListener('show.bs.collapse', function() {
+            toggleButton.setAttribute('aria-expanded', 'true');
+            toggleButton.classList.add('expanded');
+            localStorage.setItem(STORAGE_KEY, 'false');
+        });
+
+        collapseElement.addEventListener('hide.bs.collapse', function() {
+            toggleButton.setAttribute('aria-expanded', 'false');
+            toggleButton.classList.remove('expanded');
+            localStorage.setItem(STORAGE_KEY, 'true');
+        });
+
+        // Handle toggle button click
+        toggleButton.addEventListener('click', function(e) {
+            e.preventDefault();
+
+            if (collapseElement.classList.contains('show')) {
+                collapseElement.classList.remove('show');
+                toggleButton.setAttribute('aria-expanded', 'false');
+                toggleButton.classList.remove('expanded');
+                localStorage.setItem(STORAGE_KEY, 'true');
+            } else {
+                collapseElement.classList.add('show');
+                toggleButton.setAttribute('aria-expanded', 'true');
+                toggleButton.classList.add('expanded');
+                localStorage.setItem(STORAGE_KEY, 'false');
+            }
+        });
+    }
+
+    // Handle nested dropdown submenus - simplified click-only logic
+    const dropdownSubmenus = document.querySelectorAll('.editor-controls .dropdown-submenu');
+
+    dropdownSubmenus.forEach((submenuItem, index) => {
+        const trigger = submenuItem.querySelector('.has-submenu');
+        const submenu = submenuItem.querySelector('.submenu');
+
+        if (!trigger || !submenu) {
+            return;
+        }
+
+
+        // Store original parent for cleanup
+        const originalParent = submenu.parentElement;
+
+        // Show submenu on hover (desktop)
+        submenuItem.addEventListener('mouseenter', function() {
+
+            // Close all other submenus first and remove active class
+            document.querySelectorAll('.submenu').forEach(s => {
+                if (s !== submenu) {
+                    s.classList.remove('show');
+                }
+            });
+            document.querySelectorAll('.has-submenu').forEach(t => {
+                t.classList.remove('active');
+            });
+
+            // Move submenu to body to escape parent overflow context
+            if (submenu.parentElement !== document.body) {
+                document.body.appendChild(submenu);
+            }
+
+            // Use requestAnimationFrame to ensure positioning after dropdown is rendered
+            requestAnimationFrame(() => {
+                // Get the parent dropdown menu position
+                const dropdownMenu = trigger.closest('.dropdown-menu');
+                const dropdownRect = dropdownMenu.getBoundingClientRect();
+                const triggerRect = trigger.getBoundingClientRect();
+
+                // Position submenu to the right of the entire dropdown menu
+                submenu.style.left = (dropdownRect.right + 5) + 'px';  // Right of parent dropdown + 5px gap
+                submenu.style.top = triggerRect.top + 'px';            // Align with top of trigger item
+
+
+                submenu.classList.add('show');
+                trigger.classList.add('active');
+            });
+        });
+
+        // Don't close immediately on mouseleave - wait for submenu's own mouseleave
+
+        // Click on trigger - ensure submenu stays open (don't toggle if already shown by hover)
+        trigger.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation(); // Prevent dropdown from closing
+
+            const isAlreadyVisible = submenu.classList.contains('show');
+
+            // Close all other submenus first and remove active class
+            document.querySelectorAll('.submenu').forEach(s => {
+                if (s !== submenu) {
+                    s.classList.remove('show');
+                }
+            });
+            document.querySelectorAll('.has-submenu').forEach(t => {
+                if (t !== trigger) {
+                    t.classList.remove('active');
+                }
+            });
+
+            // Move submenu to body to escape parent overflow context
+            if (submenu.parentElement !== document.body) {
+                document.body.appendChild(submenu);
+            }
+
+            // Use requestAnimationFrame to ensure positioning after dropdown is rendered
+            requestAnimationFrame(() => {
+                // Get the parent dropdown menu position
+                const dropdownMenu = trigger.closest('.dropdown-menu');
+                const dropdownRect = dropdownMenu.getBoundingClientRect();
+                const triggerRect = trigger.getBoundingClientRect();
+
+                // Position submenu to the right of the entire dropdown menu
+                submenu.style.left = (dropdownRect.right + 5) + 'px';  // Right of parent dropdown + 5px gap
+                submenu.style.top = triggerRect.top + 'px';            // Align with top of trigger item
+
+
+                // Always ensure this submenu is shown (don't toggle off if already visible)
+                submenu.classList.add('show');
+                trigger.classList.add('active');
+            });
+
+            if (!isAlreadyVisible) {
+            } else {
+            }
+        });
+
+        // Keep submenu open when hovering over it
+        submenu.addEventListener('mouseenter', function() {
+            submenu.classList.add('show');
+            trigger.classList.add('active');
+        });
+
+        // Hide submenu when mouse leaves the submenu itself
+        submenu.addEventListener('mouseleave', function(e) {
+
+            // Use a longer delay and check if mouse went back to parent or is truly gone
+            setTimeout(() => {
+                // Check if mouse is back on the parent item or still on submenu
+                const mouseStillOnParent = submenuItem.matches(':hover');
+                const mouseStillOnSubmenu = submenu.matches(':hover');
+
+
+                if (!mouseStillOnParent && !mouseStillOnSubmenu) {
+                    submenu.classList.remove('show');
+                    trigger.classList.remove('active');
+                } else {
+                }
+            }, 500);  // Longer delay to allow for mouse movement
+        });
+
+        // Prevent submenu items from closing the main dropdown
+        submenu.addEventListener('click', function(e) {
+            // Don't stop propagation here - let the onclick handler work
+        });
+    });
+
+    // Close all submenus when main dropdown closes
+    const mainDropdown = document.getElementById('quickQueriesBtn');
+    if (mainDropdown) {
+        const dropdownElement = mainDropdown.nextElementSibling;
+        if (dropdownElement) {
+            dropdownElement.addEventListener('hidden.bs.dropdown', function() {
+                document.querySelectorAll('.submenu').forEach(submenu => {
+                    submenu.classList.remove('show');
+                });
+                document.querySelectorAll('.has-submenu').forEach(trigger => {
+                    trigger.classList.remove('active');
+                });
+            });
+        }
+    }
+
+
+});
+</script>
 
 {% endblock %}

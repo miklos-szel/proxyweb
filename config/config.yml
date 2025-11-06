@@ -1,100 +1,96 @@
 global:
-  hide_tables: [ '' ]
-  default_server: "proxysql"
+  default_server: proxysql
   read_only: false
-
+  hide_tables:
+  - .*aurora.*
+  - .*galera.*
+  - .*pgsql.*
+  - .*mysql_firewall.*
+  - mysql_collations
+  config_diff_skip_variable:
+  - admin-cluster_mysql_servers_diffs_before_sync
+  - mysql-server_capabilities
+  - pgsql-interfaces
 servers:
   proxysql:
     dsn:
-      - { "host": "host.docker.internal", "user": "radmin", "passwd": "radmin", "port": "16033", "db": "main"}
-    #hide_tables: [ 'mysql_aws_aurora_hostgroups', 'mysql_server_aws_aurora_failovers', 'mysql_server_aws_aurora_check_status', 'mysql_server_group_replication_log', 'mysql_galera_hostgroups', 'runtime_mysql_galera_hostgroups', 'mysql_server_aws_aurora_log' , 'mysql_server_aws_aurora_log', 'runtime_mysql_aws_aurora_hostgroups', 'runtime_mysql_server_aws_aurora_failovers', 'runtime_mysql_server_aws_aurora_check_status', 'runtime_mysql_server_group_replication_log', 'runtime_mysql_server_aws_aurora_log', 'runtime_mysql_server_aws_aurora_log', 'mysql_collations', 'mysql_firewall_whitelist_rules', 'mysql_firewall_whitelist_sqli_fingerprints', 'mysql_firewall_whitelist_users', 'mysql_query_rules_fast_routing', 'mysql_group_replication_hostgroups', 'restapi_routes', 'runtime_mysql_collations', 'runtime_mysql_firewall_whitelist_rules', 'runtime_mysql_firewall_whitelist_sqli_fingerprints', 'runtime_mysql_firewall_whitelist_users', 'runtime_mysql_query_rules_fast_routing', 'runtime_mysql_group_replication_hostgroups', 'runtime_restapi_routes', 'scheduler','mysql_server_galera_log' ]
-    
-#   proxysql_local_docker:
-#     dsn:
-#       - { "host": "host.docker.internal", "user": "admin", "passwd": "admin", "port": "6032", "db": "main"}
-#     hide_tables: [ 'mysql_aws_aurora_hostgroups', 'mysql_server_aws_aurora_failovers', 'mysql_server_aws_aurora_check_status', 'mysql_server_group_replication_log', 'mysql_galera_hostgroups', 'runtime_mysql_galera_hostgroups', 'mysql_server_aws_aurora_log' , 'mysql_server_aws_aurora_log', 'runtime_mysql_aws_aurora_hostgroups', 'runtime_mysql_server_aws_aurora_failovers', 'runtime_mysql_server_aws_aurora_check_status', 'runtime_mysql_server_group_replication_log', 'runtime_mysql_server_aws_aurora_log', 'runtime_mysql_server_aws_aurora_log', 'mysql_collations', 'mysql_firewall_whitelist_rules', 'mysql_firewall_whitelist_sqli_fingerprints', 'mysql_firewall_whitelist_users', 'mysql_query_rules_fast_routing', 'mysql_group_replication_hostgroups', 'restapi_routes', 'runtime_mysql_collations', 'runtime_mysql_firewall_whitelist_rules', 'runtime_mysql_firewall_whitelist_sqli_fingerprints', 'runtime_mysql_firewall_whitelist_users', 'runtime_mysql_query_rules_fast_routing', 'runtime_mysql_group_replication_hostgroups', 'runtime_restapi_routes', 'scheduler','mysql_server_galera_log' ]
-#   proxysql_local_docker_no_host:
-#     dsn:
-#       - { "host": "172.17.0.1", "user": "radmin", "passwd": "radmin", "port": "6032", "db": "main"}
-#   proxysql_remote_read_only:
-#     dsn:
-#       - { "host": "10.77.10.23, "user": "radmin", "passwd": "radmin", "port": "6032", "db": "main"}
-#     read_only: true
-## it's possible to hide tables that won't be used  - like aurora, galera related ones
-#   proxysql_remote_with_hidden_tables:
-#     dsn:
-#       - { "host": "10.77.10.24", "user": "arthur", "passwd": "zaphod", "port": "6032", "db": "main"}
-#     hide_tables: [ 'mysql_aws_aurora_hostgroups', 'mysql_server_aws_aurora_failovers', 'mysql_server_aws_aurora_check_status', 'mysql_server_group_replication_log', 'mysql_galera_hostgroups', 'runtime_mysql_galera_hostgroups', 'mysql_server_aws_aurora_log' , 'mysql_server_aws_aurora_log', 'runtime_mysql_aws_aurora_hostgroups', 'runtime_mysql_server_aws_aurora_failovers', 'runtime_mysql_server_aws_aurora_check_status', 'runtime_mysql_server_group_replication_log', 'runtime_mysql_server_aws_aurora_log', 'runtime_mysql_server_aws_aurora_log', 'mysql_collations', 'mysql_firewall_whitelist_rules', 'mysql_firewall_whitelist_sqli_fingerprints', 'mysql_firewall_whitelist_users', 'mysql_query_rules_fast_routing', 'mysql_group_replication_hostgroups', 'restapi_routes', 'runtime_mysql_collations', 'runtime_mysql_firewall_whitelist_rules', 'runtime_mysql_firewall_whitelist_sqli_fingerprints', 'runtime_mysql_firewall_whitelist_users', 'runtime_mysql_query_rules_fast_routing', 'runtime_mysql_group_replication_hostgroups', 'runtime_restapi_routes', 'scheduler','mysql_server_galera_log' ]
-
+    - host: host.docker.internal
+      user: radmin
+      passwd: radmin
+      port: 16032
+      db: main
+auth:
+  admin_user: admin
+  admin_password: admin42
+flask:
+  SECRET_KEY: 0UqamflpTo3eZ4Rz
+  SEND_FILE_MAX_AGE_DEFAULT: 0
+  TEMPLATES_AUTO_RELOAD: true
 misc:
   apply_config:
-    - { "title": "LOAD EVERYTHING TO RUNTIME",
-        "info": "Load all config items from memory to runtime. \\n https://proxysql.com/documentation/configuring-proxysql/",
-        "sql": "LOAD MYSQL USERS TO RUNTIME;LOAD MYSQL SERVERS TO RUNTIME;LOAD MYSQL QUERY RULES TO RUNTIME;LOAD MYSQL VARIABLES TO RUNTIME;LOAD ADMIN VARIABLES TO RUNTIME;LOAD PROXYSQL SERVERS TO RUNTIME;LOAD SCHEDULER TO RUNTIME;"
-    }
-    - { "title": "SAVE EVERYTHING TO DISK",
-        "info": "Save all config items from memory to runtime. \\n https://proxysql.com/documentation/configuring-proxysql/",
-        "sql": "SAVE MYSQL USERS TO DISK;SAVE MYSQL SERVERS TO DISK;SAVE MYSQL QUERY RULES TO DISK;SAVE MYSQL VARIABLES TO DISK;SAVE ADMIN VARIABLES TO DISK;SAVE PROXYSQL SERVERS TO DISK;SAVE SCHEDULER TO DISK;"
-        }
-    - { "title": "LOAD EVERYTHING FROM DISK",
-        "info": "Load everything from disk to memory. \\n https://proxysql.com/documentation/configuring-proxysql/",
-        "sql": "LOAD MYSQL USERS FROM DISK;LOAD MYSQL SERVERS FROM DISK;LOAD MYSQL QUERY RULES FROM DISK;LOAD MYSQL VARIABLES FROM DISK;LOAD ADMIN VARIABLES FROM DISK;LOAD PROXYSQL SERVERS FROM DISK;LOAD SCHEDULER FROM DISK;"
-        }
-    - { "title": "Export config to file",
-        "info": "Dump the config on the DISK to a standard proxysql.cnf." ,
-        "sql": "SELECT CONFIG INTO OUTFILE  /var/lib/proxysql/proxysql.cfg"
-        }
-
+  - title: LOAD EVERYTHING TO RUNTIME
+    info: 'Load all config items from memory to runtime. https://proxysql.com/documentation/configuring-proxysql/ '
+    sql: LOAD MYSQL USERS TO RUNTIME; LOAD MYSQL SERVERS TO RUNTIME; LOAD MYSQL QUERY
+      RULES TO RUNTIME; LOAD MYSQL VARIABLES TO RUNTIME; LOAD ADMIN VARIABLES TO RUNTIME;
+      LOAD PROXYSQL SERVERS TO RUNTIME; LOAD SCHEDULER TO RUNTIME;
+  - title: SAVE EVERYTHING TO DISK
+    info: 'Save all config items from memory to runtime. https://proxysql.com/documentation/configuring-proxysql/ '
+    sql: SAVE MYSQL USERS TO DISK; SAVE MYSQL SERVERS TO DISK; SAVE MYSQL QUERY RULES
+      TO DISK; SAVE MYSQL VARIABLES TO DISK; SAVE ADMIN VARIABLES TO DISK; SAVE PROXYSQL
+      SERVERS TO DISK; SAVE SCHEDULER TO DISK;
+  - title: LOAD EVERYTHING FROM DISK
+    info: 'Load everything from disk to memory. https://proxysql.com/documentation/configuring-proxysql/ '
+    sql: LOAD MYSQL USERS FROM DISK; LOAD MYSQL SERVERS FROM DISK; LOAD MYSQL QUERY
+      RULES FROM DISK; LOAD MYSQL VARIABLES FROM DISK; LOAD ADMIN VARIABLES FROM DISK;
+      LOAD PROXYSQL SERVERS FROM DISK; LOAD SCHEDULER FROM DISK;
+  - title: Export config to file
+    info: Dump the config on the DISK to a standard proxysql.cnf.
+    sql: SELECT CONFIG INTO OUTFILE /var/lib/proxysql/proxysql.cfg
   update_config:
-    - { "title": "Add a new hostgroup",
-        "info": "Add a new replication hostgroup to the mysql_replication_hostgroups. \\nhttps://proxysql.com/documentation/proxysql-configuration/",
-        "sql": "INSERT INTO mysql_replication_hostgroups (writer_hostgroup,reader_hostgroup,comment) VALUES (1,2,'cluster1');"
-    }
-    - { "title": "Add a new mysql server",
-        "info": "Add a new servers to the mysql_servers.  \\nhttps://proxysql.com/documentation/proxysql-configuration/",
-        "sql": "INSERT INTO mysql_servers(hostgroup_id,hostname,port) VALUES (1,'db1',3306);"
-    }
-
-    - { "title": "Add a new mysql user",
-        "info": "Add a new mysql user to the mysql_users. \\nhttps://proxysql.com/documentation/proxysql-configuration/",
-        "sql": "INSERT INTO mysql_users(username,password,default_hostgroup,max_connections) VALUES ('world','world',1,200);"
-    }
-
-    - { "title": "Add a new mysql_query_rule",
-        "info": "Add a new rule to the mysql_query_rules.  \\nhttps://proxysql.com/documentation/proxysql-configuration/",
-        "sql": "INSERT INTO mysql_query_rules (rule_id,active,match_digest,destination_hostgroup,apply) VALUES (1,1,'^SELECT.*FOR UPDATE',1,1),(2,1,'^SELECT',2,1);"
-    }
-    - { "title": "Update a global config variable",
-        "info": "Modify a variable.  \\nhttps://proxysql.com/documentation/proxysql-configuration/",
-        "sql": "set mysql-max_connections = '4096';"
-    }
-#The  datatables javascript  will order by desc  by the first column so the first column the query return with should be the one in the order by expression
+  - title: Add a new hostgroup
+    info: 'Add a new replication hostgroup to the mysql_replication_hostgroups. https://proxysql.com/documentation/proxysql-configuration/ '
+    sql: INSERT INTO mysql_replication_hostgroups (writer_hostgroup,reader_hostgroup,comment)
+      VALUES (1,2,'cluster1');
+  - title: Add a new mysql server
+    info: 'Add a new servers to the mysql_servers. https://proxysql.com/documentation/proxysql-configuration/ '
+    sql: INSERT INTO mysql_servers(hostgroup_id,hostname,port) VALUES (1,'db1',3306);
+  - title: Add a new mysql user
+    info: 'Add a new mysql user to the mysql_users. https://proxysql.com/documentation/proxysql-configuration/ '
+    sql: INSERT INTO mysql_users(username,password,default_hostgroup,max_connections)
+      VALUES ('world','world',1,200);
+  - title: Add a new mysql_query_rule
+    info: 'Add a new rule to the mysql_query_rules. https://proxysql.com/documentation/proxysql-configuration/ '
+    sql: INSERT INTO mysql_query_rules (rule_id,active,match_digest,destination_hostgroup,apply)
+      VALUES (1,1,'^SELECT.*FOR UPDATE',1,1),(2,1,'^SELECT',2,1);
+  - title: Update a global config variable
+    info: 'Modify a variable. https://proxysql.com/documentation/proxysql-configuration/ '
+    sql: set mysql-max_connections = '4096';
   adhoc_report:
-    - { "title": "Top 10 SELECTs by sum_time",
-        "info": "Examining queries with big sum_time(number of execution * time to run) is a good place to start when optimizing queries.",
-        "sql": "SELECT sum_time,digest,username,schemaname, SUBSTR(digest_text,0,80),count_star FROM stats_mysql_query_digest WHERE digest_text like  'SELECT%' ORDER BY sum_time DESC LIMIT 10;"
-    }
-
-    - { "title": "Top 10 SELECTs by count_star",
-        "info": "Caching/rewriting/even removing  frequently running queries can improve the overall performance significantly. ProxySQL supports all of these methods.",
-        "sql": "SELECT count_star,digest,username,schemaname, SUBSTR(digest_text,0,80),sum_time FROM stats_mysql_query_digest WHERE digest_text like  'SELECT%' ORDER BY count_star DESC LIMIT 10;"
-    }
-    - { "title": "Top 10 WRITE queries",
-        "info": "This helps identifying the most frequently running writes",
-        "sql": "SELECT count_star, digest,username,schemaname, SUBSTR(digest_text,0,80),sum_time FROM stats_mysql_query_digest where digest_text like  'INSERT%' or digest_text like 'DELETE%' or digest_text like 'UPDATE%' order by count_star DESC LIMIT 10;" }
-
-    - { "title": "Top 5 schemas by sum_time",
-        "info": "List of the schemas with the highest sum_time",
-        "sql":  "SELECT sum(sum_time) as time_spent, schemaname FROM stats_mysql_query_digest group by schemaname order by time_spent desc limit 5;" }
-    - { "title": "Schemas with the most DMLs",
-        "info": "This helps identifying the schemas getting the most writes",
-        "sql": "SELECT sum(count_star) as sum_count_star, schemaname, sum(sum_time) as time_spent   FROM stats_mysql_query_digest where digest_text like 'INSERT%' or digest_text like 'DELETE%' or digest_text like 'UPDATE%' group by schemaname order by time_spent desc;" }
-
-auth:
-  admin_user: "admin"
-  admin_password: "admin42"
-
-flask:
-  SECRET_KEY: "12345678901234567890"
-  SEND_FILE_MAX_AGE_DEFAULT: 0
-  TEMPLATES_AUTO_RELOAD: "True"
+  - title: Top 10 SELECTs by sum_time
+    info: Examining queries with big sum_time(number of execution * time to run) is
+      a good place to start when optimizing queries.
+    sql: SELECT sum_time,digest,username,schemaname, SUBSTR(digest_text,0,80),count_star
+      FROM stats_mysql_query_digest WHERE digest_text like 'SELECT%' ORDER BY sum_time
+      DESC LIMIT 10;
+  - title: Top 10 SELECTs by count_star
+    info: Caching/rewriting/even removing frequently running queries can improve the
+      overall performance significantly. ProxySQL supports all of these methods.
+    sql: SELECT count_star,digest,username,schemaname, SUBSTR(digest_text,0,80),sum_time
+      FROM stats_mysql_query_digest WHERE digest_text like 'SELECT%' ORDER BY count_star
+      DESC LIMIT 10;
+  - title: Top 10 WRITE queries
+    info: This helps identifying the most frequently running writes
+    sql: SELECT count_star, digest,username,schemaname, SUBSTR(digest_text,0,80),sum_time
+      FROM stats_mysql_query_digest where digest_text like 'INSERT%' or digest_text
+      like 'DELETE%' or digest_text like 'UPDATE%' order by count_star DESC LIMIT
+      10;
+  - title: Top 5 schemas by sum_time
+    info: List of the schemas with the highest sum_time
+    sql: SELECT sum(sum_time) as time_spent, schemaname FROM stats_mysql_query_digest
+      group by schemaname order by time_spent desc limit 5;
+  - title: Schemas with the most DMLs
+    info: This helps identifying the schemas getting the most writes
+    sql: SELECT sum(count_star) as sum_count_star, schemaname, sum(sum_time) as time_spent
+      FROM stats_mysql_query_digest where digest_text like 'INSERT%' or digest_text
+      like 'DELETE%' or digest_text like 'UPDATE%' group by schemaname order by time_spent
+      desc;

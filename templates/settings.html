@@ -1,38 +1,730 @@
 {% extends 'base.html' %}
 
 {% block settings %}
+<style>
+    body {
+        padding-top: 0 !important;
+    }
 
-<nav class="navbar navbar-expand-sm navbar-dark primary-color ">
-    <a class="navbar-brand" href="/">ProxyWeb</a>
+    .settings-header {
+        background: white;
+        color: #333;
+        padding: 1.5rem 0;
+        margin-bottom: 1.5rem;
+        border-bottom: 1px solid #e0e0e0;
+    }
 
-    <a class="nav-link" href="/settings/edit/">
-        <i class="fas fa-cog fa-lg white-text"></i> </a>
-    <a class="nav-link" href="/logout" title="Logout">
-        <i class="fa fa-sign-out fa-lg white-text" aria-hidden="true"></i></a>
+    .settings-header h1 {
+        margin: 0;
+        font-size: 1.75rem;
+        font-weight: 600;
+    }
 
+    .settings-header p {
+        margin: 0.5rem 0 0 0;
+        color: #666;
+        font-size: 0.95rem;
+    }
 
-</nav>
+    .settings-card {
+        background: white;
+        border-radius: var(--border-radius);
+        box-shadow: var(--box-shadow);
+        overflow: hidden;
+        margin-bottom: 1.5rem;
+        border: 1px solid #e0e0e0;
+    }
 
+    .settings-card-header {
+        background: #f8f9fa;
+        padding: 0.75rem 1.25rem;
+        border-bottom: 1px solid #e0e0e0;
+    }
 
-{% if message %}
+    .settings-card-header h3 {
+        margin: 0;
+        font-weight: 600;
+        color: var(--dark-color);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 1rem;
+    }
 
-<span class="border border-primary">
-        <div class="note note-success"">
-            <pre><strong>Saving the config was successful!</strong></pre>
-            <strong>Click <a href="/"> here</a> to activate it:</strong>
+    .settings-card-body {
+        padding: 1rem;
+    }
+
+    .form-control {
+        border: 1px solid #ddd;
+        border-radius: var(--border-radius);
+        padding: 0.5rem;
+        font-family: 'Courier New', monospace;
+        font-size: 0.875rem;
+        line-height: 1.5;
+        height: auto;
+        min-height: 500px !important;
+        overflow-y: auto;
+        resize: vertical;
+    }
+
+    .form-control:focus {
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 3px rgba(71, 85, 105, 0.1);
+    }
+
+    .btn-group-custom {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+
+    .alert-success-custom {
+        background: #e0f2ed;
+        border: 1px solid #b8d4cc;
+        border-radius: var(--border-radius);
+        padding: 0.75rem 1rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    }
+
+    .alert-success-custom .alert-icon {
+        font-size: 1.25rem;
+        color: var(--success-color);
+        margin-bottom: 0;
+        margin-right: 0.5rem;
+    }
+
+    .alert-success-custom .btn.btn-primary.btn-icon {
+        color: white !important;
+        text-decoration: none !important;
+        background: linear-gradient(135deg, #475569 0%, #64748b 100%) !important;
+        box-shadow: 0 4px 6px -1px rgba(71, 85, 105, 0.3) !important;
+        padding: 1rem 2rem !important;
+        border-radius: 0.5rem !important;
+        font-weight: 600 !important;
+        font-size: 1rem !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        gap: 0.5rem !important;
+        min-width: 200px !important;
+        white-space: nowrap !important;
+    }
+
+    .alert-success-custom .btn.btn-primary.btn-icon:hover {
+        background: linear-gradient(135deg, #334155 0%, #475569 100%) !important;
+        box-shadow: 0 10px 15px -3px rgba(71, 85, 105, 0.4) !important;
+        transform: translateY(-1px);
+    }
+
+    .config-info {
+        background: #e8f0f4;
+        border-left: 3px solid var(--info-color);
+        padding: 0.75rem 1rem;
+        border-radius: var(--border-radius);
+        margin-bottom: 1rem;
+        box-shadow: var(--box-shadow);
+    }
+
+    .config-info h5 {
+        margin: 0 0 0.5rem 0;
+        color: var(--dark-color);
+        font-weight: 600;
+        font-size: 0.95rem;
+    }
+
+    .config-info ul {
+        margin: 0;
+        padding-left: 1.5rem;
+    }
+
+    .config-info li {
+        margin-bottom: 0.25rem;
+        color: var(--secondary-color);
+        font-size: 0.875rem;
+        line-height: 1.4;
+    }
+
+    .btn-icon {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+    }
+
+    /* Editor Mode Toggle */
+    .editor-mode-toggle {
+        background: white;
+        border-radius: var(--border-radius);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        padding: 0.25rem;
+        margin-bottom: 1rem;
+        display: flex;
+        gap: 0.25rem;
+        border: 1px solid #e0e0e0;
+    }
+
+    .editor-mode-toggle .btn {
+        flex: 1;
+        padding: 0.5rem 1rem;
+        font-weight: 500;
+        font-size: 0.875rem;
+        border-radius: calc(var(--border-radius) - 2px);
+    }
+
+    .editor-mode-toggle .btn.active {
+        background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-light) 100%);
+        color: white;
+        box-shadow: 0 4px 6px -1px rgba(71, 85, 105, 0.3);
+    }
+
+    /* UI Editor Styles */
+    .ui-editor-section {
+        background: #f8fafc;
+        border-radius: var(--border-radius);
+        padding: 2rem;
+        margin-bottom: 2rem;
+        border: 2px solid #e2e8f0;
+    }
+
+    .ui-editor-section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 1.5rem;
+        padding-bottom: 1rem;
+        border-bottom: 2px solid #e2e8f0;
+    }
+
+    .ui-editor-section-title {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: var(--dark-color);
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .form-group {
+        margin-bottom: 1.5rem;
+    }
+
+    .form-group label {
+        display: block;
+        font-weight: 600;
+        color: var(--dark-color);
+        margin-bottom: 0.5rem;
+        font-size: 0.95rem;
+    }
+
+    .form-control-ui {
+        width: 100%;
+        border: 2px solid #e2e8f0;
+        border-radius: var(--border-radius);
+        padding: 0.875rem 1.25rem;
+        font-size: 1rem;
+        transition: all 0.2s ease;
+        background: white;
+    }
+
+    .form-control-ui:focus {
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 3px rgba(71, 85, 105, 0.1);
+        outline: none;
+    }
+
+    .checkbox-group {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-top: 0.5rem;
+    }
+
+    .checkbox-group input[type="checkbox"] {
+        width: 20px;
+        height: 20px;
+        cursor: pointer;
+    }
+
+    /* Server Card */
+    .server-card {
+        background: white;
+        border-radius: var(--border-radius);
+        padding: 2rem;
+        margin-bottom: 1.5rem;
+        border: 2px solid #e2e8f0;
+        box-shadow: var(--box-shadow);
+    }
+
+    .server-card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 1.5rem;
+        padding-bottom: 1rem;
+        border-bottom: 2px solid #e2e8f0;
+    }
+
+    .server-card-title {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--dark-color);
+        margin: 0;
+    }
+
+    .server-card-actions {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    /* DSN Card */
+    .dsn-card {
+        background: #f8fafc;
+        border-radius: var(--border-radius);
+        padding: 1.5rem;
+        margin-bottom: 1rem;
+        border: 1px solid #cbd5e1;
+    }
+
+    .dsn-card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 1rem;
+    }
+
+    .dsn-card-title {
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--secondary-color);
+        margin: 0;
+    }
+
+    /* Array Management */
+    .array-items {
+        margin-top: 1rem;
+    }
+
+    .array-item {
+        background: white;
+        border-radius: var(--border-radius);
+        padding: 1.5rem;
+        margin-bottom: 1rem;
+        border: 2px solid #e2e8f0;
+        position: relative;
+    }
+
+    .array-item-remove {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+        background: var(--danger-color);
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 32px;
+        height: 32px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.2rem;
+        transition: all 0.2s ease;
+    }
+
+    .array-item-remove:hover {
+        background: #c86b59;
+        transform: scale(1.1);
+    }
+
+    /* Save Status */
+    .save-status {
+        position: fixed;
+        top: 100px;
+        right: 2rem;
+        background: white;
+        border-radius: var(--border-radius);
+        padding: 1.5rem 2rem;
+        box-shadow: var(--box-shadow-lg);
+        border-left: 4px solid var(--primary-color);
+        min-width: 300px;
+        z-index: 1000;
+        display: none;
+    }
+
+    .save-status.show {
+        display: block;
+        animation: slideIn 0.3s ease;
+    }
+
+    .save-status.success {
+        border-left-color: var(--success-color);
+    }
+
+    .save-status.error {
+        border-left-color: var(--danger-color);
+    }
+
+    @keyframes slideIn {
+        from { transform: translateX(400px); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+    }
+
+    /* Import/Export */
+    .import-export-bar {
+        background: white;
+        border: 1px solid #e0e0e0;
+        border-radius: var(--border-radius);
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        align-items: center;
+        box-shadow: var(--box-shadow);
+    }
+
+    .import-export-bar .btn {
+        white-space: nowrap;
+    }
+
+    /* Collapsible sections */
+    .collapsible {
+        cursor: pointer;
+    }
+
+    .collapsible-indicator {
+        transition: transform 0.3s ease;
+    }
+
+    .collapsible.collapsed .collapsible-indicator {
+        transform: rotate(-90deg);
+    }
+
+    .collapsible-content {
+        max-height: 5000px;
+        overflow: visible;
+        transition: max-height 0.3s ease, opacity 0.3s ease;
+        opacity: 1;
+    }
+
+    .collapsible.collapsed + .collapsible-content {
+        max-height: 0;
+        overflow: hidden;
+        opacity: 0;
+    }
+
+    @media (max-width: 768px) {
+        .settings-header h1 {
+            font-size: 2rem;
+        }
+
+        .settings-card-header,
+        .settings-card-body {
+            padding-left: 1.5rem;
+            padding-right: 1.5rem;
+        }
+
+        .btn-group-custom {
+            flex-direction: column;
+        }
+
+        .btn-group-custom .btn {
+            width: 100%;
+        }
+
+        .editor-mode-toggle {
+            flex-direction: column;
+        }
+
+        .import-export-bar {
+            flex-direction: column;
+        }
+
+        .import-export-bar .btn {
+            width: 100%;
+        }
+
+        .server-card-header,
+        .server-card-actions {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .server-card-actions {
+            width: 100%;
+            margin-top: 1rem;
+        }
+
+        .server-card-actions .btn {
+            width: 100%;
+        }
+    }
+</style>
+
+<div class="settings-header">
+    <div class="container">
+        <i class="fas fa-cog" style="font-size: 3.5rem; margin-bottom: 1rem; opacity: 0.9;"></i>
+        <h1>Settings Configuration</h1>
+        <p>Configure your ProxyWeb application settings</p>
     </div>
-</span>
-{% else %}
-
-<div class="form-group text-monospace blue-border-focus letter-spacing:fixed ">
-    <form action="/settings/save/" method="post">
-        <div class="form-group ">
-            <label for="exampleFormControlTextarea2"></label>
-            <textarea spellcheck="false" class="form-control" name="settings" id="settings" rows="30">{{ config_file_content }}</textarea>
-        </div>
-        <button type="submit" class="btn btn-primary">Submit</button>
-    </form>
 </div>
-{%  endif %}
 
+<div class="container">
+    {% if message %}
+        <div class="alert alert-success-custom text-center" role="alert">
+            <div class="alert-icon">
+                <i class="fas fa-check-circle"></i>
+            </div>
+            <h4 class="alert-heading">Configuration Saved Successfully!</h4>
+            <p class="mb-3">Your settings have been saved. Click the button below to return to the main dashboard.</p>
+            <a href="/" class="btn btn-primary btn-icon">
+                <i class="fas fa-arrow-right"></i>
+                Go to Dashboard
+            </a>
+        </div>
+    {% else %}
+        <!-- Import/Export Bar -->
+        <div class="import-export-bar">
+            <i class="fas fa-download" style="font-size: 1.5rem; color: var(--info-color);"></i>
+            <div>
+                <strong>Configuration Management</strong>
+                <p style="margin: 0; font-size: 0.9rem; color: var(--secondary-color);">Import, export, or backup your configuration</p>
+            </div>
+            <div style="margin-left: auto; display: flex; gap: 0.5rem;">
+                <button type="button" class="btn btn-outline-primary btn-sm" onclick="exportConfig()">
+                    <i class="fas fa-file-export"></i> Export YAML
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="showImportModal()">
+                    <i class="fas fa-file-import"></i> Import YAML
+                </button>
+            </div>
+        </div>
+
+        <!-- Editor Mode Toggle -->
+        <div class="editor-mode-toggle">
+            <button type="button" class="btn btn-outline-primary active" id="btn-ui-editor" onclick="switchMode('ui')">
+                <i class="fas fa-pencil-alt"></i> UI Editor
+            </button>
+            <button type="button" class="btn btn-outline-primary" id="btn-raw-yaml" onclick="switchMode('raw')">
+                <i class="fas fa-code"></i> Raw YAML
+            </button>
+        </div>
+
+        <!-- Success Message Display -->
+        <div id="saveStatus" class="save-status">
+            <div style="display: flex; align-items: center; gap: 1rem;">
+                <i id="saveStatusIcon" class="fas fa-check-circle" style="font-size: 2rem; color: var(--success-color);"></i>
+                <div>
+                    <strong id="saveStatusTitle">Success!</strong>
+                    <p id="saveStatusMessage" style="margin: 0; font-size: 0.9rem; color: var(--secondary-color);"></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- UI Editor Mode -->
+        <div id="ui-editor" class="settings-card">
+            <div class="settings-card-header">
+                <h3>
+                    <i class="fas fa-pencil-ruler"></i>
+                    Form-Based Configuration Editor
+                </h3>
+            </div>
+
+            <div class="settings-card-body">
+                <form id="settings-form">
+                    <!-- Global Section -->
+                    <div class="ui-editor-section">
+                        <div class="ui-editor-section-header collapsible collapsed" onclick="toggleSection(this)">
+                            <h4 class="ui-editor-section-title">
+                                <i class="fas fa-globe"></i>
+                                Global Settings
+                                <i class="fas fa-chevron-down collapsible-indicator" style="margin-left: 0.5rem; font-size: 0.9rem;"></i>
+                            </h4>
+                        </div>
+                        <div class="collapsible-content">
+                            <div class="form-group">
+                                <label for="global_default_server">
+                                    <i class="fas fa-server"></i> Default Server
+                                </label>
+                                <input type="text" id="global_default_server" name="global_default_server" class="form-control-ui" placeholder="proxysql" />
+                                <small style="color: var(--secondary-color); font-size: 0.85rem;">The default server to connect to</small>
+                            </div>
+
+                            <div class="form-group">
+                                <div class="checkbox-group">
+                                    <input type="checkbox" id="global_read_only" name="global_read_only" />
+                                    <label for="global_read_only">Read-Only Mode</label>
+                                </div>
+                                <small style="color: var(--secondary-color); font-size: 0.85rem;">Enable read-only mode to prevent modifications</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label>
+                                    <i class="fas fa-eye-slash"></i> Hide Tables
+                                </label>
+                                <div id="global_hide_tables_container"></div>
+                                <button type="button" class="btn btn-outline-primary btn-sm" onclick="addHideTable('global')" style="margin-top: 0.5rem;">
+                                    <i class="fas fa-plus"></i> Add Table
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Servers Section -->
+                    <div class="ui-editor-section">
+                        <div class="ui-editor-section-header">
+                            <h4 class="ui-editor-section-title">
+                                <i class="fas fa-server"></i>
+                                Servers Configuration
+                            </h4>
+                            <button type="button" class="btn btn-primary" onclick="addServer()">
+                                <i class="fas fa-plus"></i> Add Server
+                            </button>
+                        </div>
+                        <div id="servers_container"></div>
+                    </div>
+
+                    <!-- Auth Section -->
+                    <div class="ui-editor-section">
+                        <div class="ui-editor-section-header collapsible collapsed" onclick="toggleSection(this)">
+                            <h4 class="ui-editor-section-title">
+                                <i class="fas fa-key"></i>
+                                Authentication
+                                <i class="fas fa-chevron-down collapsible-indicator" style="margin-left: 0.5rem; font-size: 0.9rem;"></i>
+                            </h4>
+                        </div>
+                        <div class="collapsible-content">
+                            <div class="form-group">
+                                <label for="auth_admin_user">
+                                    <i class="fas fa-user"></i> Admin Username
+                                </label>
+                                <input type="text" id="auth_admin_user" name="auth_admin_user" class="form-control-ui" placeholder="admin" />
+                            </div>
+
+                            <div class="form-group">
+                                <label for="auth_admin_password">
+                                    <i class="fas fa-lock"></i> Admin Password
+                                </label>
+                                <input type="password" id="auth_admin_password" name="auth_admin_password" class="form-control-ui" placeholder="********" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Flask Section -->
+                    <div class="ui-editor-section">
+                        <div class="ui-editor-section-header collapsible collapsed" onclick="toggleSection(this)">
+                            <h4 class="ui-editor-section-title">
+                                <i class="fas fa-flask"></i>
+                                Flask Configuration
+                                <i class="fas fa-chevron-down collapsible-indicator" style="margin-left: 0.5rem; font-size: 0.9rem;"></i>
+                            </h4>
+                        </div>
+                        <div class="collapsible-content">
+                            <div class="form-group">
+                                <label for="flask_SECRET_KEY">
+                                    <i class="fas fa-key"></i> Secret Key
+                                </label>
+                                <input type="text" id="flask_SECRET_KEY" name="flask_SECRET_KEY" class="form-control-ui" placeholder="12345678901234567890" />
+                            </div>
+
+                            <div class="form-group">
+                                <label for="flask_SEND_FILE_MAX_AGE_DEFAULT">
+                                    <i class="fas fa-clock"></i> Send File Max Age Default
+                                </label>
+                                <input type="text" id="flask_SEND_FILE_MAX_AGE_DEFAULT" name="flask_SEND_FILE_MAX_AGE_DEFAULT" class="form-control-ui" placeholder="0" />
+                            </div>
+
+                            <div class="form-group">
+                                <div class="checkbox-group">
+                                    <input type="checkbox" id="flask_TEMPLATES_AUTO_RELOAD" name="flask_TEMPLATES_AUTO_RELOAD" />
+                                    <label for="flask_TEMPLATES_AUTO_RELOAD">Templates Auto-Reload</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Misc Section -->
+                    <div class="ui-editor-section">
+                        <div class="ui-editor-section-header collapsible collapsed" onclick="toggleSection(this)">
+                            <h4 class="ui-editor-section-title">
+                                <i class="fas fa-cogs"></i>
+                                Miscellaneous Configuration
+                                <i class="fas fa-chevron-down collapsible-indicator" style="margin-left: 0.5rem; font-size: 0.9rem;"></i>
+                            </h4>
+                        </div>
+                        <div class="collapsible-content" id="misc_sections_container">
+                            <!-- Misc sections will be dynamically generated by JavaScript -->
+                        </div>
+                    </div>
+
+                    <div class="btn-group-custom" style="margin-top: 2rem;">
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="fas fa-save"></i> Save Changes
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-lg" onclick="resetForm()">
+                            <i class="fas fa-undo"></i> Reset to Original
+                        </button>
+                        <a href="/" class="btn btn-outline-secondary btn-lg">
+                            <i class="fas fa-arrow-left"></i> Back to Dashboard
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Raw YAML Mode -->
+        <div id="raw-yaml" class="settings-card" style="display: none;">
+            <div class="settings-card-header">
+                <h3>
+                    <i class="fas fa-file-code"></i>
+                    Raw YAML Configuration Editor
+                </h3>
+            </div>
+
+            <div class="settings-card-body">
+                <form action="/settings/save/" method="post">
+                    <div class="mb-4">
+                        <label for="settings" class="form-label">
+                            <i class="fas fa-edit me-2"></i>YAML Configuration
+                        </label>
+                        <textarea spellcheck="false" class="form-control" name="settings" id="settings-raw">{{ config_file_content }}</textarea>
+                    </div>
+
+                    <div class="btn-group-custom">
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="fas fa-save"></i> Save Changes
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-lg" onclick="document.getElementById('settings-raw').value = '{{ config_file_content }}'">
+                            <i class="fas fa-undo"></i> Reset to Original
+                        </button>
+                        <a href="/" class="btn btn-outline-secondary btn-lg">
+                            <i class="fas fa-arrow-left"></i> Back to Dashboard
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    {% endif %}
+</div>
+
+<!-- Import Modal -->
+<div id="importModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 2000; align-items: center; justify-content: center;">
+    <div style="background: white; border-radius: var(--border-radius); padding: 2rem; max-width: 800px; width: 90%; max-height: 80vh; overflow: auto;">
+        <h3 style="margin-top: 0;">
+            <i class="fas fa-file-import"></i> Import Configuration
+        </h3>
+        <p>Paste your YAML configuration below:</p>
+        <textarea id="importYamlContent" class="form-control" style="min-height: 300px;" placeholder="Paste YAML here..."></textarea>
+        <div style="margin-top: 1.5rem; display: flex; gap: 1rem; justify-content: flex-end;">
+            <button type="button" class="btn btn-outline-secondary" onclick="closeImportModal()">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="importConfig()">
+                <i class="fas fa-upload"></i> Import
+            </button>
+        </div>
+    </div>
+</div>
+
+<script src="/static/js/settings.js"></script>
 {% endblock %}
