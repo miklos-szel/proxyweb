@@ -23,7 +23,7 @@ auth:
   admin_user: admin
   admin_password: admin42
 flask:
-  SECRET_KEY: 0UqamflpTo3eZ4Rz
+  SECRET_KEY: 12345678901234567890
   SEND_FILE_MAX_AGE_DEFAULT: 0
   TEMPLATES_AUTO_RELOAD: true
 misc:
