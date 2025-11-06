@@ -41,6 +41,14 @@
         padding: 1.5rem;
         margin: 1.5rem;
         border: 1px solid #e0e0e0;
+        transition: all 0.2s ease;
+    }
+
+    .report-info:hover {
+        background: #f8f9fa;
+        border-color: var(--primary-color);
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     }
 
     .report-info h6 {
@@ -71,6 +79,13 @@
         font-family: 'Courier New', monospace;
         font-size: 0.95rem;
         line-height: 1.7;
+        transition: all 0.2s ease;
+    }
+
+    .report-sql:hover {
+        background: #2d3748;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
     }
 
     .report-table {
@@ -164,7 +179,7 @@
         </div>
 
         <div class="collapse" id="info{{ loop.index }}">
-            <div class="report-info">
+            <div class="report-info" style="cursor: pointer;" onclick="this.parentElement.classList.toggle('show')">
                 <h6>
                     <i class="fas fa-info-circle"></i>
                     Report Information
@@ -174,7 +189,7 @@
         </div>
 
         <div class="collapse" id="sql{{ loop.index }}">
-            <div class="report-sql">
+            <div class="report-sql" style="cursor: pointer;" onclick="this.parentElement.classList.toggle('show')">
                 <i class="fas fa-code me-2"></i>
                 <strong>SQL Query:</strong>
                 <pre style="margin-top: 0.5rem; margin-bottom: 0;">{{ result['sql'] }}</pre>

@@ -50,6 +50,12 @@
         align-items: center;
         justify-content: space-between;
         border-bottom: 1px solid #e0e0e0;
+        cursor: pointer;
+        transition: background-color 0.2s ease;
+    }
+
+    .sql-editor-header:hover {
+        background-color: #f8f9fa;
     }
 
     .sql-editor-header h5 {
@@ -307,7 +313,7 @@
 
 {% if not session['read_only'] %}
     <div class="sql-editor-card">
-        <div class="sql-editor-header">
+        <div class="sql-editor-header" onclick="document.getElementById('sqlEditorToggle').click()">
             <h5><i class="fas fa-code"></i> SQL Query Editor
                 <button class="sql-editor-toggle" type="button" id="sqlEditorToggle" aria-expanded="false" aria-controls="sqlEditorCollapse">
                     <i class="fas fa-chevron-right"></i>
@@ -332,7 +338,7 @@
                             <i class="fas fa-info-circle"></i> Info
                         </button>
                         <div class="dropdown">
-                            <button class="btn btn-outline-primary btn-sm dropdown-toggle" type="button" id="quickQueriesBtn" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                            <button class="btn btn-outline-primary btn-sm dropdown-toggle" type="button" id="quickQueriesBtn" data-bs-toggle="dropdown" data-bs-auto-close="true" aria-expanded="false">
                                 <i class="fas fa-history"></i> Quick Queries
                             </button>
                             <ul class="dropdown-menu" aria-labelledby="quickQueriesBtn">
