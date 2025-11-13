@@ -88,6 +88,27 @@ section.
 > 
 > These can be changed by editing the config file.
 
+## Environment Variable Overrides
+You can override sensitive values from `config/config.yml` without editing the file by setting environment variables before starting ProxyWeb.
+
+- Web UI credentials:
+  - `PROXYWEB_ADMIN_USER` – overrides `auth.admin_user`
+  - `PROXYWEB_ADMIN_PASSWORD` – overrides `auth.admin_password`
+- ProxySQL server DSN values (per server, using the server key from the config):
+  - `PROXYWEB_SERVER_<SERVERNAME>_USER`
+  - `PROXYWEB_SERVER_<SERVERNAME>_PASSWORD`
+  - `PROXYWEB_SERVER_<SERVERNAME>_HOST`
+  - `PROXYWEB_SERVER_<SERVERNAME>_PORT`
+  - `PROXYWEB_SERVER_<SERVERNAME>_DATABASE`
+
+For example, to override the credentials for the default `proxysql` server:
+```
+export PROXYWEB_SERVER_PROXYSQL_USER=myuser
+export PROXYWEB_SERVER_PROXYSQL_PASSWORD=mypassword
+```
+
+Multiple `dsn` entries share the same overrides for the specified server key.
+
 
 ---
 

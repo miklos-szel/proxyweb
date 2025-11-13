@@ -23,6 +23,7 @@ import logging
 import yaml
 import subprocess
 from datetime import datetime
+import os
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -35,9 +36,61 @@ def get_config(config="config/config.yml"):
     try:
         with open(config, 'r') as yml:
             cfg = yaml.safe_load(yml)
+        cfg = _apply_env_overrides(cfg)
         return cfg
     except Exception as e:
-        raise ValueError("Error opening or parsing the file: %" % config)
+        raise ValueError("Error opening or parsing the file: %s" % config)
+
+
+def _apply_env_overrides(cfg):
+    """
+    Override values from config.yml with environment variables when provided.
+    """
+    if not cfg:
+        return cfg
+
+    # Override admin UI credentials
+    admin_user = os.getenv("PROXYWEB_ADMIN_USER")
+    admin_password = os.getenv("PROXYWEB_ADMIN_PASSWORD")
+    if admin_user or admin_password:
+        cfg.setdefault('auth', {})
+        if admin_user:
+            logging.debug("Overriding admin user from environment variable.")
+            cfg['auth']['admin_user'] = admin_user
+        if admin_password:
+            logging.debug("Overriding admin password from environment variable.")
+            cfg['auth']['admin_password'] = admin_password
+
+    # Override per-server DSN credentials and connection parameters
+    for server_name, server_content in cfg.get('servers', {}).items():
+        prefix = f"PROXYWEB_SERVER_{server_name.upper()}"
+        user = os.getenv(f"{prefix}_USER")
+        password = os.getenv(f"{prefix}_PASSWORD")
+        host = os.getenv(f"{prefix}_HOST")
+        port = os.getenv(f"{prefix}_PORT")
+        database = os.getenv(f"{prefix}_DATABASE")
+
+        if not any([user, password, host, port, database]):
+            continue
+
+        for dsn in server_content.get('dsn', []):
+            if user:
+                logging.debug("Overriding user for server %s from environment variable.", server_name)
+                dsn['user'] = user
+            if password:
+                logging.debug("Overriding password for server %s from environment variable.", server_name)
+                dsn['passwd'] = password
+            if host:
+                logging.debug("Overriding host for server %s from environment variable.", server_name)
+                dsn['host'] = host
+            if port:
+                logging.debug("Overriding port for server %s from environment variable.", server_name)
+                dsn['port'] = port
+            if database:
+                logging.debug("Overriding database for server %s from environment variable.", server_name)
+                dsn['db'] = database
+
+    return cfg
 
 
 def db_connect(db, server, autocommit=False, buffered=False, dictionary=True):
