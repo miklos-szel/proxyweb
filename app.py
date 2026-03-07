@@ -307,6 +307,9 @@ def api_update_row():
         column_names = data['columnNames']
         row_data = data['data']
 
+        if mdb.get_read_only(server) or table.startswith('runtime_'):
+            return jsonify({'success': False, 'error': 'table is read-only'}), 403
+
         logging.debug("=" * 80)
         logging.debug("API REQUEST: /api/update_row")
         logging.debug("=" * 80)
@@ -336,6 +339,9 @@ def api_delete_row():
         table = data['table']
         row_index = data['rowIndex']
 
+        if mdb.get_read_only(server) or table.startswith('runtime_'):
+            return jsonify({'success': False, 'error': 'table is read-only'}), 403
+
         logging.debug("=" * 80)
         logging.debug("API REQUEST: /api/delete_row")
         logging.debug("=" * 80)
@@ -363,6 +369,9 @@ def api_insert_row():
         table = data['table']
         column_names = data['columnNames']
         row_data = data['data']
+
+        if mdb.get_read_only(server) or table.startswith('runtime_'):
+            return jsonify({'success': False, 'error': 'table is read-only'}), 403
 
         logging.debug("=" * 80)
         logging.debug("API REQUEST: /api/insert_row")
