@@ -2,10 +2,10 @@ basedir = /usr/local/proxyweb
 secret_key=$(shell cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1)
 
 proxyweb-build:
-	docker build --platform   linux/amd64 -t proxyweb/proxyweb:latest .
+	docker build --platform linux/amd64 -t proxyweb/proxyweb:latest .
 
 proxyweb-build-nocache:
-	docker build --no-cache -t proxyweb/proxyweb:latest .
+	docker build --platform linux/amd64 --no-cache -t proxyweb/proxyweb:latest .
 
 proxyweb-run-local: proxyweb-build
 	docker run -h proxyweb --name proxyweb --network="host" -d proxyweb/proxyweb:latest
@@ -16,7 +16,7 @@ proxyweb-run: proxyweb-build
 proxyweb-run-mappedconf:
 	docker run --mount type=bind,source="`pwd`/config/config.yml",target="/app/config.yml" -h proxyweb --name proxyweb --network="host" -d proxyweb/proxyweb:latest
 
-proxyweb-run-mapped:
+proxyweb-run-mapped: proxyweb-build
 	docker run --mount type=bind,source="`pwd`/",target="/app/" -h proxyweb --name proxyweb -p 5000:5000  -d proxyweb/proxyweb:latest
 
 proxyweb-login: proxyweb-run

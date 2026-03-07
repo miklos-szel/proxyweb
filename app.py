@@ -496,4 +496,5 @@ def handle_exception(e):
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', use_debugger=True)
+    debug = os.environ.get('FLASK_DEBUG', '0') == '1'
+    app.run(host='0.0.0.0', debug=debug)

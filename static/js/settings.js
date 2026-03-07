@@ -474,7 +474,7 @@ function addHideTable(section, value = '') {
     const item = document.createElement('div');
     item.className = 'array-item';
     item.innerHTML = `
-        <input type="text" name="global_hide_tables_${index}" class="form-control-ui"
+        <input type="text" name="${section}_hide_tables_${index}" class="form-control-ui"
                placeholder="table_name" value="${value}" style="padding-right: 40px;" />
         <button type="button" class="array-item-remove" onclick="this.parentElement.remove()">
             <i class="fas fa-times"></i>

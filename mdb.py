@@ -29,6 +29,12 @@ from datetime import datetime
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
+
+def _quote_ident(name):
+    """Backtick-quote a SQL identifier, doubling any embedded backticks."""
+    return '`' + name.replace('`', '``') + '`'
+
+
 sql_get_databases = "show databases"
 sql_show_table_content = "select * from %s.%s order by 1;"
 sql_show_tables = "show tables from %s;"
@@ -1267,12 +1273,21 @@ def update_row(db, server, database, table, row_index, column_names, data):
             return result
 
         row = content['rows'][row_index]
+        allowed_columns = set(content['column_names'])
+
+        # Validate all columns supplied by the caller against the live schema
+        for col in data:
+            if col not in allowed_columns:
+                result['success'] = False
+                result['error'] = f'Unknown column: {col!r}'
+                return result
 
         # Build WHERE clause - using variable_name as identifier if available (legacy behavior)
         where_clause = ""
         if 'variable_name' in data and 'variable_name' in content['column_names']:
             # Special handling for tables with variable_name column
-            where_clause = " WHERE variable_name = '{}'".format(data['variable_name'])
+            escaped_value = str(data['variable_name']).replace("'", "''")
+            where_clause = " WHERE `variable_name` = '{}'".format(escaped_value)
         else:
             # Get ALL primary key columns for this table
             pk_columns = get_primary_key_columns(db, server, database, table)
@@ -1285,6 +1300,10 @@ def update_row(db, server, database, table, row_index, column_names, data):
             # Build WHERE clause using ALL primary key columns
             where_conditions = []
             for pk_col in pk_columns:
+                if pk_col not in allowed_columns:
+                    result['success'] = False
+                    result['error'] = f'Primary key column {pk_col!r} not in schema'
+                    return result
                 try:
                     # Find the index of this pk column in the column_names list
                     col_index = content['column_names'].index(pk_col)
@@ -1292,11 +1311,10 @@ def update_row(db, server, database, table, row_index, column_names, data):
 
                     # Handle NULL values
                     if pk_value is None:
-                        where_conditions.append(f"{pk_col} IS NULL")
+                        where_conditions.append(f"{_quote_ident(pk_col)} IS NULL")
                     else:
-                        # Escape single quotes in values
                         escaped_value = str(pk_value).replace("'", "''")
-                        where_conditions.append(f"{pk_col} = '{escaped_value}'")
+                        where_conditions.append(f"{_quote_ident(pk_col)} = '{escaped_value}'")
                 except (ValueError, IndexError) as e:
                     logging.error(f"Error processing primary key column {pk_col}: {e}")
                     result['success'] = False
@@ -1311,11 +1329,10 @@ def update_row(db, server, database, table, row_index, column_names, data):
             if column != 'variable_name' or 'variable_name' not in where_clause:
                 # Handle NULL values
                 if value is None:
-                    set_clauses.append("{} = NULL".format(column))
+                    set_clauses.append(f"{_quote_ident(column)} = NULL")
                 else:
-                    # Escape single quotes in values
                     escaped_value = str(value).replace("'", "''")
-                    set_clauses.append("{} = '{}'".format(column, escaped_value))
+                    set_clauses.append(f"{_quote_ident(column)} = '{escaped_value}'")
 
         if not set_clauses:
             result['success'] = False
@@ -1323,7 +1340,7 @@ def update_row(db, server, database, table, row_index, column_names, data):
             return result
 
         sql = "UPDATE {}.{} SET {}{}".format(
-            database, table, ', '.join(set_clauses), where_clause
+            _quote_ident(database), _quote_ident(table), ', '.join(set_clauses), where_clause
         )
 
         logging.debug("Update SQL: {}".format(sql))
@@ -1356,6 +1373,7 @@ def delete_row(db, server, database, table, row_index):
             return result
 
         row = content['rows'][row_index]
+        allowed_columns = set(content['column_names'])
 
         # Get ALL primary key columns for this table
         pk_columns = get_primary_key_columns(db, server, database, table)
@@ -1368,6 +1386,10 @@ def delete_row(db, server, database, table, row_index):
         # Build WHERE clause using ALL primary key columns
         where_conditions = []
         for pk_col in pk_columns:
+            if pk_col not in allowed_columns:
+                result['success'] = False
+                result['error'] = f'Primary key column {pk_col!r} not in schema'
+                return result
             try:
                 # Find the index of this pk column in the column_names list
                 col_index = content['column_names'].index(pk_col)
@@ -1375,11 +1397,10 @@ def delete_row(db, server, database, table, row_index):
 
                 # Handle NULL values
                 if pk_value is None:
-                    where_conditions.append(f"{pk_col} IS NULL")
+                    where_conditions.append(f"{_quote_ident(pk_col)} IS NULL")
                 else:
-                    # Escape single quotes in values
                     escaped_value = str(pk_value).replace("'", "''")
-                    where_conditions.append(f"{pk_col} = '{escaped_value}'")
+                    where_conditions.append(f"{_quote_ident(pk_col)} = '{escaped_value}'")
             except (ValueError, IndexError) as e:
                 logging.error(f"Error processing primary key column {pk_col}: {e}")
                 result['success'] = False
@@ -1387,7 +1408,7 @@ def delete_row(db, server, database, table, row_index):
                 return result
 
         where_clause = " AND ".join(where_conditions)
-        sql = f"DELETE FROM {database}.{table} WHERE {where_clause}"
+        sql = f"DELETE FROM {_quote_ident(database)}.{_quote_ident(table)} WHERE {where_clause}"
 
         logging.debug(f"Delete SQL: {sql}")
         error = execute_change(db, server, sql)
@@ -1411,6 +1432,17 @@ def insert_row(db, server, database, table, column_names, data):
     """
     result = {'success': True, 'error': None}
     try:
+        # Fetch live schema to build identifier whitelist
+        content = get_table_content(db, server, database, table)
+        allowed_columns = set(content['column_names'])
+
+        # Validate caller-supplied column names against the live schema
+        for col in column_names:
+            if col != 'variable_name' and col not in allowed_columns:
+                result['success'] = False
+                result['error'] = f'Unknown column: {col!r}'
+                return result
+
         # Exclude variable_name from insert if it exists
         columns = [col for col in column_names if col != 'variable_name']
         values = []
@@ -1424,7 +1456,6 @@ def insert_row(db, server, database, table, column_names, data):
                 if value is None:
                     values.append("NULL")
                 else:
-                    # Escape single quotes in values
                     escaped_value = str(value).replace("'", "''")
                     values.append("'{}'".format(escaped_value))
             # else: column not in data OR value is None, skip it (will use DEFAULT)
@@ -1435,7 +1466,9 @@ def insert_row(db, server, database, table, column_names, data):
             return result
 
         sql = "INSERT INTO {}.{} ({}) VALUES ({})".format(
-            database, table, ', '.join(insert_columns), ', '.join(values)
+            _quote_ident(database), _quote_ident(table),
+            ', '.join(_quote_ident(c) for c in insert_columns),
+            ', '.join(values)
         )
 
         logging.debug("Insert SQL: {}".format(sql))
