@@ -691,8 +691,9 @@
                     valueIndex++;
                     cellIndex++;
                 } else {
+                    // variable_name is passed through as-is; it was not stored in
+                    // originalValues during edit, so valueIndex must not advance here
                     updatedData[columnName] = cell.textContent.trim();
-                    valueIndex++;
                     cellIndex++;
                 }
             });
