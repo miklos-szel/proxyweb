@@ -606,7 +606,8 @@ function loadQueryWithInfo(sqlVarName, infoVarName) {
     // Update the info panel content (but don't show it automatically)
     const infoTarget = document.getElementById('infotarget');
     if (infoTarget && info) {
-        infoTarget.innerHTML = '<i class="fas fa-info-circle panel-icon"></i>' + info;
+        infoTarget.innerHTML = '<i class="fas fa-info-circle panel-icon"></i><span></span>';
+        infoTarget.querySelector('span').textContent = info;
     }
 }
 

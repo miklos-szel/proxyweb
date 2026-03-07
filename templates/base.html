@@ -376,7 +376,7 @@
                                 data-bs-toggle="tooltip" data-bs-placement="top" title="Edit row" aria-label="Edit row">
                             <i class="fas fa-edit"></i>
                         </button>
-                        <button type="button" class="btn btn-icon delete-btn" onclick="deleteRow(this, ${rowIndex})"
+                        <button type="button" class="btn btn-icon delete-btn" onclick="deleteRow(this)"
                                 data-bs-toggle="tooltip" data-bs-placement="top" title="Delete row" aria-label="Delete row">
                             <i class="fas fa-trash"></i>
                         </button>
@@ -387,7 +387,6 @@
                 // Store row data as data attributes
                 row.dataset.rowData = JSON.stringify(rowData);
                 row.dataset.columnNames = JSON.stringify(columnNames);
-                row.dataset.rowIndex = rowIndex;
             });
 
             // Add hidden row for new row insertion
@@ -712,6 +711,12 @@
                 return;
             }
 
+            // Build PK snapshot from stored data attributes
+            const storedColNames = JSON.parse(row.dataset.columnNames || '[]');
+            const storedRowData  = JSON.parse(row.dataset.rowData   || '[]');
+            const pkValues = {};
+            storedColNames.forEach((col, i) => { pkValues[col] = storedRowData[i]; });
+
             // Send update to server
             fetch('/api/update_row', {
                 method: 'POST',
@@ -723,7 +728,7 @@
                     server: server,
                     database: database,
                     table: tableName,
-                    rowIndex: parseInt(row.dataset.rowIndex),
+                    pkValues: pkValues,
                     columnNames: columnNames,
                     data: updatedData
                 })
@@ -761,14 +766,13 @@
 
         function restoreEditControls(row) {
             const controlsCell = row.querySelector('.edit-controls');
-            const rowIndex = parseInt(row.dataset.rowIndex);
             controlsCell.innerHTML = `
                 <div class="action-buttons">
                     <button type="button" class="btn btn-icon edit-btn" onclick="editRow(this)"
                             data-bs-toggle="tooltip" data-bs-placement="top" title="Edit row" aria-label="Edit row">
                         <i class="fas fa-edit"></i>
                     </button>
-                    <button type="button" class="btn btn-icon delete-btn" onclick="deleteRow(this, ${rowIndex})"
+                    <button type="button" class="btn btn-icon delete-btn" onclick="deleteRow(this)"
                             data-bs-toggle="tooltip" data-bs-placement="top" title="Delete row" aria-label="Delete row">
                         <i class="fas fa-trash"></i>
                     </button>
@@ -780,12 +784,16 @@
             initializeTooltips();
         }
 
-        function deleteRow(button, rowIndex) {
+        function deleteRow(button) {
             const row = button.closest('tr');
             const table = row.closest('table');
             const tableName = '{{ session['table'] }}';
             const database = '{{ session['database'] }}';
             const server = '{{ session['server'] }}';
+            const storedColNames = JSON.parse(row.dataset.columnNames || '[]');
+            const storedRowData  = JSON.parse(row.dataset.rowData   || '[]');
+            const pkValues = {};
+            storedColNames.forEach((col, i) => { pkValues[col] = storedRowData[i]; });
 
             // Show the Bootstrap confirmation modal
             const modal = new bootstrap.Modal(document.getElementById('deleteRowModal'));
@@ -813,7 +821,7 @@
                         server: server,
                         database: database,
                         table: tableName,
-                        rowIndex: rowIndex
+                        pkValues: pkValues
                     })
                 })
                 .then(response => response.json())

@@ -22,7 +22,6 @@ import mysql.connector
 import logging
 import yaml
 import subprocess
-import sqlite3
 import re
 import json
 from datetime import datetime
@@ -36,8 +35,6 @@ def _quote_ident(name):
 
 
 sql_get_databases = "show databases"
-sql_show_table_content = "select * from %s.%s order by 1;"
-sql_show_tables = "show tables from %s;"
 
 def get_config(config="config/config.yml"):
     logging.debug("Using file: %s" % (config))
@@ -46,7 +43,7 @@ def get_config(config="config/config.yml"):
             cfg = yaml.safe_load(yml)
         return cfg
     except Exception as e:
-        raise ValueError("Error opening or parsing the file: %" % config)
+        raise ValueError("Error opening or parsing the file: %s" % config)
 
 
 def dict_to_yaml(data, indent=0, prev_key=None):
@@ -389,7 +386,7 @@ def get_all_dbs_and_tables(db, server):
 
             all_dbs[server][i['name']] = []
 
-            db['cnf']['servers'][server]['cur'].execute(sql_show_tables % i['name'])
+            db['cnf']['servers'][server]['cur'].execute(f"SHOW TABLES FROM {_quote_ident(i['name'])}")
             for table in db['cnf']['servers'][server]['cur'].fetchall():
                 # hide tables as per global or per server config
                 # Supports both exact string matches and regex patterns
@@ -505,6 +502,10 @@ def get_config_diff():
 
                 except Exception as e:
                     # Table might not exist in all layers
+                    try:
+                        query_db['cnf']['servers']['proxysql']['conn'].close()
+                    except Exception:
+                        pass
                     table_diff['databases'][layer_name] = {
                         'row_count': 0,
                         'data': [],
@@ -590,9 +591,7 @@ def get_table_content(db, server, database, table):
     try:
         logging.debug("server: {} - db: {} - table:{}".format(server, database, table))
         db_connect(db, server=server, dictionary=False)
-        data = (database, table)
-
-        string = (sql_show_table_content % data)
+        string = f"SELECT * FROM {_quote_ident(database)}.{_quote_ident(table)} ORDER BY 1"
         logging.debug("query: {}".format(string))
 
         db['cnf']['servers'][server]['cur'].execute(string)
@@ -683,7 +682,7 @@ def execute_adhoc_report(db, server):
 
         return adhoc_results
     except (mysql.connector.Error, mysql.connector.Warning) as e:
-        db['cnf']['servers'][server]['conn'].close
+        db['cnf']['servers'][server]['conn'].close()
         raise ValueError(e)
 
 
@@ -705,7 +704,7 @@ def get_read_only(server):
         else:
             read_only = config['servers'][server]['read_only']
         return read_only
-    except:
+    except Exception:
         raise ValueError("Cannot get read_only status from the config file")
 
 
@@ -740,7 +739,7 @@ def execute_change(db, server, sql):
         return error_msg
     except (mysql.connector.Error, mysql.connector.Warning) as e:
         logging.error(f"MySQL Connector error: {str(e)}")
-        return e
+        return str(e)
 
 
 def extract_default_value(column_def):
@@ -1257,82 +1256,56 @@ def get_proxysql_table_constraints(table_name):
     return constraints
 
 
-def update_row(db, server, database, table, row_index, column_names, data):
+def update_row(db, server, database, table, pk_values, column_names, data):
     """
-    Update a specific row in a table using ALL primary key columns.
-    Handles both single and composite primary keys.
+    Update a specific row in a table using primary key values.
     Returns dict with 'success' and 'error' keys.
     """
     result = {'success': True, 'error': None}
     try:
-        # Get the current row data first
-        content = get_table_content(db, server, database, table)
-        if row_index >= len(content['rows']):
+        if not pk_values:
             result['success'] = False
-            result['error'] = 'Row not found'
+            result['error'] = 'No primary key values provided'
             return result
 
-        row = content['rows'][row_index]
-        allowed_columns = set(content['column_names'])
-
-        # Validate all columns supplied by the caller against the live schema
+        # Validate column names from caller against the full column list
+        allowed_columns = set(column_names)
         for col in data:
             if col not in allowed_columns:
                 result['success'] = False
                 result['error'] = f'Unknown column: {col!r}'
                 return result
 
-        # Build WHERE clause - using variable_name as identifier if available (legacy behavior)
-        where_clause = ""
-        if 'variable_name' in data and 'variable_name' in content['column_names']:
-            # Special handling for tables with variable_name column
-            escaped_value = str(data['variable_name']).replace("'", "''")
-            where_clause = " WHERE `variable_name` = '{}'".format(escaped_value)
-        else:
-            # Get ALL primary key columns for this table
-            pk_columns = get_primary_key_columns(db, server, database, table)
+        # Determine which columns form the primary key
+        pk_cols = get_primary_key_columns(db, server, database, table)
+        if not pk_cols:
+            pk_cols = list(pk_values.keys())  # fallback: use whatever was sent
 
-            if not pk_columns:
-                # Fallback to first column if no primary key found
-                logging.warning(f"No primary key found for {table}, using first column")
-                pk_columns = [column_names[0]] if column_names else ['id']
+        # Build WHERE clause from pk_values
+        where_conditions = []
+        for col in pk_cols:
+            val = pk_values.get(col)
+            if val is None:
+                where_conditions.append(f"{_quote_ident(col)} IS NULL")
+            else:
+                escaped = str(val).replace("'", "''")
+                where_conditions.append(f"{_quote_ident(col)} = '{escaped}'")
 
-            # Build WHERE clause using ALL primary key columns
-            where_conditions = []
-            for pk_col in pk_columns:
-                if pk_col not in allowed_columns:
-                    result['success'] = False
-                    result['error'] = f'Primary key column {pk_col!r} not in schema'
-                    return result
-                try:
-                    # Find the index of this pk column in the column_names list
-                    col_index = content['column_names'].index(pk_col)
-                    pk_value = row[col_index]
+        if not where_conditions:
+            result['success'] = False
+            result['error'] = 'Could not build WHERE clause'
+            return result
 
-                    # Handle NULL values
-                    if pk_value is None:
-                        where_conditions.append(f"{_quote_ident(pk_col)} IS NULL")
-                    else:
-                        escaped_value = str(pk_value).replace("'", "''")
-                        where_conditions.append(f"{_quote_ident(pk_col)} = '{escaped_value}'")
-                except (ValueError, IndexError) as e:
-                    logging.error(f"Error processing primary key column {pk_col}: {e}")
-                    result['success'] = False
-                    result['error'] = f'Primary key column {pk_col} not found in table data'
-                    return result
+        where_clause = " WHERE " + " AND ".join(where_conditions)
 
-            where_clause = " WHERE " + " AND ".join(where_conditions)
-
-        # Build SET clause - exclude variable_name from updates if it's a primary key
+        # Build SET clause
         set_clauses = []
         for column, value in data.items():
-            if column != 'variable_name' or 'variable_name' not in where_clause:
-                # Handle NULL values
-                if value is None:
-                    set_clauses.append(f"{_quote_ident(column)} = NULL")
-                else:
-                    escaped_value = str(value).replace("'", "''")
-                    set_clauses.append(f"{_quote_ident(column)} = '{escaped_value}'")
+            if value is None:
+                set_clauses.append(f"{_quote_ident(column)} = NULL")
+            else:
+                escaped_value = str(value).replace("'", "''")
+                set_clauses.append(f"{_quote_ident(column)} = '{escaped_value}'")
 
         if not set_clauses:
             result['success'] = False
@@ -1357,55 +1330,37 @@ def update_row(db, server, database, table, row_index, column_names, data):
     return result
 
 
-def delete_row(db, server, database, table, row_index):
+def delete_row(db, server, database, table, pk_values):
     """
-    Delete a specific row from a table using ALL primary key columns.
-    Handles both single and composite primary keys.
+    Delete a specific row from a table using primary key values.
     Returns dict with 'success' and 'error' keys.
     """
     result = {'success': True, 'error': None}
     try:
-        # Get table content
-        content = get_table_content(db, server, database, table)
-        if row_index >= len(content['rows']):
+        if not pk_values:
             result['success'] = False
-            result['error'] = 'Row not found'
+            result['error'] = 'No primary key values provided'
             return result
 
-        row = content['rows'][row_index]
-        allowed_columns = set(content['column_names'])
+        # Determine which columns form the primary key
+        pk_cols = get_primary_key_columns(db, server, database, table)
+        if not pk_cols:
+            pk_cols = list(pk_values.keys())  # fallback: use whatever was sent
 
-        # Get ALL primary key columns for this table
-        pk_columns = get_primary_key_columns(db, server, database, table)
-
-        if not pk_columns:
-            # Fallback to first column if no primary key found
-            logging.warning(f"No primary key found for {table}, using first column")
-            pk_columns = [content['column_names'][0]]
-
-        # Build WHERE clause using ALL primary key columns
+        # Build WHERE clause from pk_values
         where_conditions = []
-        for pk_col in pk_columns:
-            if pk_col not in allowed_columns:
-                result['success'] = False
-                result['error'] = f'Primary key column {pk_col!r} not in schema'
-                return result
-            try:
-                # Find the index of this pk column in the column_names list
-                col_index = content['column_names'].index(pk_col)
-                pk_value = row[col_index]
+        for col in pk_cols:
+            val = pk_values.get(col)
+            if val is None:
+                where_conditions.append(f"{_quote_ident(col)} IS NULL")
+            else:
+                escaped = str(val).replace("'", "''")
+                where_conditions.append(f"{_quote_ident(col)} = '{escaped}'")
 
-                # Handle NULL values
-                if pk_value is None:
-                    where_conditions.append(f"{_quote_ident(pk_col)} IS NULL")
-                else:
-                    escaped_value = str(pk_value).replace("'", "''")
-                    where_conditions.append(f"{_quote_ident(pk_col)} = '{escaped_value}'")
-            except (ValueError, IndexError) as e:
-                logging.error(f"Error processing primary key column {pk_col}: {e}")
-                result['success'] = False
-                result['error'] = f'Primary key column {pk_col} not found in table data'
-                return result
+        if not where_conditions:
+            result['success'] = False
+            result['error'] = 'Could not build WHERE clause'
+            return result
 
         where_clause = " AND ".join(where_conditions)
         sql = f"DELETE FROM {_quote_ident(database)}.{_quote_ident(table)} WHERE {where_clause}"

@@ -156,7 +156,7 @@ def render_change(server, database, table):
 
 
         mdb.logging.debug(session['history'])
-        select = re.match(r'^SELECT.*FROM.*$', session['sql'], re.M | re.I)
+        select = re.search(r'^\s*SELECT\b.*\bFROM\b', session['sql'], re.I | re.S)
         if select:
             content = mdb.execute_adhoc_query(db, server, session['sql'])
             content['order'] = 'true'
@@ -342,10 +342,12 @@ def update_config_skip_variables():
 def api_update_row():
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'Invalid request'}), 400
         server = data['server']
         database = data['database']
         table = data['table']
-        row_index = data['rowIndex']
+        pk_values = data['pkValues']
         column_names = data['columnNames']
         row_data = data['data']
 
@@ -358,12 +360,12 @@ def api_update_row():
         logging.debug(f"Server: {server}")
         logging.debug(f"Database: {database}")
         logging.debug(f"Table: {table}")
-        logging.debug(f"Row Index: {row_index}")
+        logging.debug(f"PK Values: {pk_values}")
         logging.debug(f"Column Names: {column_names}")
         logging.debug(f"Row Data: {row_data}")
         logging.debug("=" * 80)
 
-        result = mdb.update_row(db, server, database, table, row_index, column_names, row_data)
+        result = mdb.update_row(db, server, database, table, pk_values, column_names, row_data)
         logging.debug(f"Update result: {result}")
         return jsonify(result)
     except Exception as e:
@@ -376,10 +378,12 @@ def api_update_row():
 def api_delete_row():
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'Invalid request'}), 400
         server = data['server']
         database = data['database']
         table = data['table']
-        row_index = data['rowIndex']
+        pk_values = data['pkValues']
 
         if mdb.get_read_only(server) or table.startswith('runtime_'):
             return jsonify({'success': False, 'error': 'table is read-only'}), 403
@@ -390,10 +394,10 @@ def api_delete_row():
         logging.debug(f"Server: {server}")
         logging.debug(f"Database: {database}")
         logging.debug(f"Table: {table}")
-        logging.debug(f"Row Index: {row_index}")
+        logging.debug(f"PK Values: {pk_values}")
         logging.debug("=" * 80)
 
-        result = mdb.delete_row(db, server, database, table, row_index)
+        result = mdb.delete_row(db, server, database, table, pk_values)
         logging.debug(f"Delete result: {result}")
         return jsonify(result)
     except Exception as e:
@@ -406,6 +410,8 @@ def api_delete_row():
 def api_insert_row():
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'Invalid request'}), 400
         server = data['server']
         database = data['database']
         table = data['table']
