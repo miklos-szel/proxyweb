@@ -45,6 +45,15 @@ mysql_servers=
         weight=1
         compression=0
         max_connections=200
+    },
+    {
+        address="mysql2"
+        port=3306
+        hostgroup=2
+        status="ONLINE"
+        weight=1
+        compression=0
+        max_connections=200
     }
 )
 
