@@ -124,6 +124,27 @@ def validate_yaml(yaml_content):
         raise ValueError(f"Invalid YAML syntax: {str(e)}")
 
 
+def validate_config_shape(cfg):
+    """Raise ValueError if cfg is missing required top-level keys or sub-keys."""
+    if not isinstance(cfg, dict):
+        raise ValueError("Config must be a YAML mapping")
+    required = {
+        'auth': ['admin_user', 'admin_password'],
+        'global': ['default_server'],
+        'flask': ['SECRET_KEY'],
+        'servers': [],
+        'misc': [],
+    }
+    for section, keys in required.items():
+        if section not in cfg:
+            raise ValueError(f"Missing required config section: '{section}'")
+        if not isinstance(cfg[section], dict):
+            raise ValueError(f"Config section '{section}' must be a mapping")
+        for key in keys:
+            if key not in cfg[section]:
+                raise ValueError(f"Missing required key: '{section}.{key}'")
+
+
 def form_data_to_yaml(form_data):
     """
     Convert form data to YAML configuration format.

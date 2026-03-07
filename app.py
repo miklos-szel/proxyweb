@@ -23,12 +23,31 @@ from flask import Flask, render_template, request, session, url_for, flash, redi
 from functools import wraps
 import re
 import os
+import tempfile
 import yaml
 import mdb
 
 app = Flask(__name__)
 
 config = "config/config.yml"
+
+
+def _atomic_write(path, content):
+    """Write content to path atomically via a temp file in the same directory."""
+    dir_ = os.path.dirname(os.path.abspath(path))
+    fd, tmp_path = tempfile.mkstemp(dir=dir_)
+    try:
+        with os.fdopen(fd, 'w') as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 db = defaultdict(lambda: defaultdict(dict))
@@ -161,12 +180,15 @@ def render_settings(action):
             with open(config, "r") as f:
                 config_file_content = f.read()
         if action == 'save':
+            raw = request.form["settings"]
+            mdb.validate_yaml(raw)
+            mdb.validate_config_shape(yaml.safe_load(raw))
+
             # back it up first
             with open(config, "r") as src, open(config + ".bak", "w") as dest:
                 dest.write(src.read())
 
-            with open(config, "w") as f:
-                f.write(request.form["settings"])
+            _atomic_write(config, raw)
             message = "success"
         return render_template("settings.html", config_file_content=config_file_content, message=message)
     except Exception as e:
@@ -189,8 +211,7 @@ def settings_ui_save():
         yaml_config = mdb.form_data_to_yaml(form_data)
 
         # Write to config file
-        with open(config, "w") as f:
-            f.write(yaml_config)
+        _atomic_write(config, yaml_config)
 
         return jsonify({'success': True, 'message': 'Settings saved successfully'})
     except Exception as e:
@@ -231,16 +252,16 @@ def settings_import():
         # Get uploaded YAML content
         yaml_content = request.form.get('yaml_content', '')
 
-        # Validate YAML syntax
+        # Validate YAML syntax and required shape before touching the existing config
         mdb.validate_yaml(yaml_content)
+        mdb.validate_config_shape(yaml.safe_load(yaml_content))
 
         # Back up current config
         with open(config, "r") as src, open(config + ".bak", "w") as dest:
             dest.write(src.read())
 
         # Write new config
-        with open(config, "w") as f:
-            f.write(yaml_content)
+        _atomic_write(config, yaml_content)
 
         return jsonify({'success': True, 'message': 'Configuration imported successfully'})
     except Exception as e:
@@ -284,8 +305,7 @@ def update_config_skip_variables():
         config_data['global']['config_diff_skip_variable'] = skip_variables
 
         # Save config back to file
-        with open(config, 'w') as f:
-            yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
+        _atomic_write(config, yaml.dump(config_data, default_flow_style=False, sort_keys=False))
 
         logging.info(f"Updated config_diff_skip_variable: {skip_variables}")
         return jsonify({'success': True})
