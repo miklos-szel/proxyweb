@@ -1,21 +1,21 @@
 -- Register mysql2 in both hostgroups for proxysql2.
--- hostgroup 0 = writer, hostgroup 2 = reader
+-- hostgroup 1 = writer, hostgroup 2 = reader
 DELETE FROM mysql_servers WHERE hostname='mysql2' AND port=3306;
 INSERT INTO mysql_servers (hostgroup_id, hostname, port, status, weight, max_connections)
-VALUES (0, 'mysql2', 3306, 'ONLINE', 1, 200);
+VALUES (1, 'mysql2', 3306, 'ONLINE', 1, 200);
 INSERT INTO mysql_servers (hostgroup_id, hostname, port, status, weight, max_connections)
 VALUES (2, 'mysql2', 3306, 'ONLINE', 1, 200);
 
 -- Register the application user for the second instance.
 DELETE FROM mysql_users WHERE username='proxyuser2';
 INSERT INTO mysql_users (username, password, default_hostgroup, max_connections, default_schema, active)
-VALUES ('proxyuser2', 'proxypass2', 0, 200, 'testdb2', 1);
+VALUES ('proxyuser2', 'proxypass2', 1, 200, 'testdb2', 1);
 
 -- Query rules: read/write split.
--- Rule 1: SELECT ... FOR UPDATE stays on writer (hg 0)
+-- Rule 1: SELECT ... FOR UPDATE stays on writer (hg 1)
 DELETE FROM mysql_query_rules WHERE rule_id=1;
 INSERT INTO mysql_query_rules (rule_id, active, match_digest, destination_hostgroup, apply)
-VALUES (1, 1, '^SELECT.*FOR UPDATE', 0, 1);
+VALUES (1, 1, '^SELECT.*FOR UPDATE', 1, 1);
 
 -- Rule 2: all other SELECTs go to reader (hg 2)
 DELETE FROM mysql_query_rules WHERE rule_id=2;
