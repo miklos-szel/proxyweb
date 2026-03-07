@@ -292,19 +292,19 @@ def settings_import():
         return jsonify({'success': False, 'error': str(e)})
 
 
-@app.route('/proxysql/config_diff/', methods=['GET', 'POST'])
+@app.route('/<server>/config_diff/', methods=['GET', 'POST'])
 @login_required
-def render_config_diff():
+def render_config_diff(server):
     """Render Configuration Diff page"""
-    return render_template('config_diff.html')
+    return render_template('config_diff.html', server=server)
 
 
-@app.route('/proxysql/config_diff/get', methods=['POST'])
+@app.route('/<server>/config_diff/get', methods=['POST'])
 @login_required
-def get_config_diff():
+def get_config_diff(server):
     """Get configuration differences across Disk/Memory/Runtime"""
     try:
-        diff_data = mdb.get_config_diff()
+        diff_data = mdb.get_config_diff(server)
         return jsonify({'success': True, 'diff': diff_data})
     except Exception as e:
         logging.exception(f"Error getting config diff: {e}")

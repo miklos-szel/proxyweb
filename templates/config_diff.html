@@ -649,6 +649,8 @@
 </div>
 
 <script>
+window.configDiffServer = {{ server | tojson }};
+
 document.addEventListener('DOMContentLoaded', function() {
     loadConfigDiff();
 });
@@ -689,7 +691,7 @@ function loadConfigDiff() {
         </div>
     `;
 
-    fetch('/proxysql/config_diff/get', {
+    fetch('/' + (window.configDiffServer || 'proxysql') + '/config_diff/get', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',

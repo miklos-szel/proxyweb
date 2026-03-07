@@ -401,7 +401,7 @@ def get_all_dbs_and_tables(db, server):
         raise ValueError(e)
 
 
-def get_config_diff():
+def get_config_diff(server='proxysql'):
     """
     Get configuration differences across Disk, Memory, and Runtime layers.
     Returns a dictionary with summary and detailed diff information.
@@ -428,12 +428,12 @@ def get_config_diff():
 
         # Connect to main database to get all tables
         query_db = {}
-        db_connect(query_db, server='proxysql', dictionary=False)
-        query_db['cnf']['servers']['proxysql']['conn'].database = 'main'
+        db_connect(query_db, server=server, dictionary=False)
+        query_db['cnf']['servers'][server]['conn'].database = 'main'
 
         # Get all tables from main database
-        query_db['cnf']['servers']['proxysql']['cur'].execute("SHOW TABLES")
-        all_tables = [table[0] for table in query_db['cnf']['servers']['proxysql']['cur'].fetchall()]
+        query_db['cnf']['servers'][server]['cur'].execute("SHOW TABLES")
+        all_tables = [table[0] for table in query_db['cnf']['servers'][server]['cur'].fetchall()]
 
         # Get base table names (without runtime_ prefix)
         tables_to_diff = []
@@ -454,7 +454,7 @@ def get_config_diff():
             if any(table.startswith(prefix) for prefix in ['mysql_', 'admin_', 'global_', 'scheduler', 'restapi']):
                 tables_to_diff.append(table)
 
-        query_db['cnf']['servers']['proxysql']['conn'].close()
+        query_db['cnf']['servers'][server]['conn'].close()
 
         for table_name in tables_to_diff:
             table_diff = {
@@ -480,15 +480,15 @@ def get_config_diff():
             for layer_name, query in queries.items():
                 try:
                     query_db = {}
-                    db_connect(query_db, server='proxysql', dictionary=False)
+                    db_connect(query_db, server=server, dictionary=False)
 
                     # Query and get results
-                    query_db['cnf']['servers']['proxysql']['cur'].execute(query)
-                    rows = query_db['cnf']['servers']['proxysql']['cur'].fetchall()
+                    query_db['cnf']['servers'][server]['cur'].execute(query)
+                    rows = query_db['cnf']['servers'][server]['cur'].fetchall()
 
                     # Convert rows to dictionaries for comparison
                     if rows:
-                        column_names = [desc[0] for desc in query_db['cnf']['servers']['proxysql']['cur'].description]
+                        column_names = [desc[0] for desc in query_db['cnf']['servers'][server]['cur'].description]
                         dict_rows = [dict(zip(column_names, row)) for row in rows]
                     else:
                         column_names = []
@@ -501,12 +501,12 @@ def get_config_diff():
                     }
                     table_diff['stats'][f'{layer_name}_rows'] = len(dict_rows)
 
-                    query_db['cnf']['servers']['proxysql']['conn'].close()
+                    query_db['cnf']['servers'][server]['conn'].close()
 
                 except Exception as e:
                     # Table might not exist in all layers
                     try:
-                        query_db['cnf']['servers']['proxysql']['conn'].close()
+                        query_db['cnf']['servers'][server]['conn'].close()
                     except Exception:
                         pass
                     table_diff['databases'][layer_name] = {
