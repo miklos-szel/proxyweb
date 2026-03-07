@@ -5,6 +5,9 @@
 
 let configData = {};
 let serverCount = 0;
+let nextServerIndex = 0;  // monotonically increasing; never decremented
+let nextDsnIndex = {};    // per serverIndex; never decremented
+let nextMiscIndex = {};   // per misc type; never decremented
 let miscCount = {}; // Dynamic misc section counters
 
 /**
@@ -65,6 +68,8 @@ function populateForm(config) {
     const serversContainer = document.getElementById('servers_container');
     if (serversContainer) serversContainer.innerHTML = '';
     serverCount = 0;
+    nextServerIndex = 0;
+    nextDsnIndex = {};
     const serverCountInput = document.getElementById('server_count');
     if (serverCountInput) serverCountInput.value = 0;
     if (config.servers) {
@@ -131,8 +136,9 @@ function populateForm(config) {
         // Then populate with data
         Object.keys(misc).forEach(miscType => {
             if (Array.isArray(misc[miscType])) {
-                // Reset counter for this misc type
+                // Reset counters for this misc type
                 miscCount[miscType] = 0;
+                nextMiscIndex[miscType] = 0;
 
                 // Add each item
                 misc[miscType].forEach(item => {
@@ -217,7 +223,8 @@ function toggleSection(element) {
  */
 function addServer(serverName = '', serverData = null) {
     const container = document.getElementById('servers_container');
-    const serverIndex = serverCount++;
+    const serverIndex = nextServerIndex++;
+    serverCount++;
 
     const serverCard = document.createElement('div');
     serverCard.className = 'server-card';
@@ -285,7 +292,7 @@ function addServer(serverName = '', serverData = null) {
         serverCountInput.value = '0';
         document.getElementById('settings-form').appendChild(serverCountInput);
     }
-    serverCountInput.value = serverCount;
+    serverCountInput.value = nextServerIndex;
 
     // Add first DSN by default
     addDSN(serverIndex);
@@ -326,10 +333,9 @@ function removeServer(serverId) {
     if (serverCard) {
         serverCard.remove();
         serverCount--;
-        const serverCountInput = document.getElementById('server_count');
-        if (serverCountInput) {
-            serverCountInput.value = serverCount;
-        }
+        // nextServerIndex is not decremented; server_count input keeps the
+        // highest-ever-assigned index + 1 so the backend's range() covers all
+        // remaining entries even when they are non-sequential
     }
 }
 
@@ -351,7 +357,9 @@ function expandServer(serverId) {
  */
 function addDSN(serverIndex, dsnData = null, dsnIndex = null) {
     const container = document.getElementById(`server_${serverIndex}_dsn_container`);
-    const index = dsnIndex !== null ? dsnIndex : container.children.length;
+    if (!(serverIndex in nextDsnIndex)) nextDsnIndex[serverIndex] = 0;
+    const index = dsnIndex !== null ? dsnIndex : nextDsnIndex[serverIndex];
+    nextDsnIndex[serverIndex] = Math.max(nextDsnIndex[serverIndex], index + 1);
 
     const dsnCard = document.createElement('div');
     dsnCard.className = 'dsn-card';
@@ -440,9 +448,6 @@ function removeDSN(dsnId, serverIndex) {
  * Update DSN count for a server
  */
 function updateDSNCount(serverIndex) {
-    const container = document.getElementById(`server_${serverIndex}_dsn_container`);
-    const count = container.children.length;
-
     let countInput = document.getElementById(`server_${serverIndex}_dsn_count`);
     if (!countInput) {
         countInput = document.createElement('input');
@@ -451,7 +456,8 @@ function updateDSNCount(serverIndex) {
         countInput.name = `server_${serverIndex}_dsn_count`;
         document.getElementById('settings-form').appendChild(countInput);
     }
-    countInput.value = count;
+    // Use the monotonic counter so the backend's range() covers non-sequential indices
+    countInput.value = nextDsnIndex[serverIndex] || 0;
 }
 
 /**
@@ -489,12 +495,12 @@ function addMiscCommand(type, data = null) {
         return;
     }
 
-    // Initialize counter for this type if it doesn't exist
-    if (!miscCount[type]) {
-        miscCount[type] = 0;
-    }
+    // Initialize counters for this type if they don't exist
+    if (!miscCount[type]) miscCount[type] = 0;
+    if (!nextMiscIndex[type]) nextMiscIndex[type] = 0;
 
-    const index = miscCount[type]++;
+    const index = nextMiscIndex[type]++;
+    miscCount[type]++;
 
     // Create hidden counter if it doesn't exist
     let counter = document.getElementById(`misc_${type}_count`);
@@ -506,7 +512,7 @@ function addMiscCommand(type, data = null) {
         counter.value = '0';
         document.getElementById('settings-form').appendChild(counter);
     }
-    counter.value = miscCount[type];
+    counter.value = nextMiscIndex[type];
 
     const item = document.createElement('div');
     item.className = 'array-item';
@@ -550,10 +556,9 @@ function addMiscCommand(type, data = null) {
 function removeMiscCommand(button, type) {
     button.parentElement.remove();
     miscCount[type]--;
-    const counter = document.getElementById(`misc_${type}_count`);
-    if (counter) {
-        counter.value = miscCount[type];
-    }
+    // nextMiscIndex[type] is not decremented; the hidden counter keeps the
+    // highest-ever-assigned index + 1 so the backend's range() covers all
+    // remaining entries even when they are non-sequential
 }
 
 /**
