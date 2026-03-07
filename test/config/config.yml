@@ -16,12 +16,20 @@ servers:
       passwd: radmin
       port: 6032
       db: main
+  proxysql2:
+    dsn:
+    - host: proxysql2
+      user: radmin
+      passwd: radmin
+      port: 6032
+      db: main
 auth:
   admin_user: admin
   admin_password: admin42
 flask:
-  # entry.sh replaces this placeholder with a random value at container start
-  SECRET_KEY: 12345678901234567890
+  # entry.sh replaces this placeholder with a random value at container start.
+  # Quoted so YAML always treats it as a string (bare digits parse as int).
+  SECRET_KEY: "12345678901234567890"
   SEND_FILE_MAX_AGE_DEFAULT: 0
   TEMPLATES_AUTO_RELOAD: true
 misc:

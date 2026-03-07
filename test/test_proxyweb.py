@@ -339,11 +339,13 @@ class TestAPIRowOperations(unittest.TestCase):
 
     def test_missing_json_body_returns_400(self):
         """F8: missing JSON body must not crash the API (returns 400)."""
+        # Send application/json with an empty body — get_json(silent=True)
+        # returns None, the guard fires and returns 400.
         resp = self.s.session.post(
             f"{BASE_URL}/api/update_row",
-            data="not-json",
+            data=b"",
             headers={
-                "Content-Type": "text/plain",
+                "Content-Type": "application/json",
                 "X-CSRF-Token": self.s.csrf_token,
             },
             timeout=10,
@@ -374,6 +376,369 @@ class TestAPIConfigDiff(unittest.TestCase):
         body = resp.json()
         self.assertTrue(body.get("success"), f"get_schema failed: {body.get('error')}")
         self.assertIn("columns", body.get("schema", {}))
+
+
+class TestMySQLServers(unittest.TestCase):
+    """CRUD operations on mysql_servers via ProxyWeb API."""
+
+    SERVER   = "proxysql"
+    DATABASE = "main"
+    TABLE    = "mysql_servers"
+
+    TEST_HOST = "test-mysql-server-host"
+    TEST_HG   = 98
+    TEST_PORT = 3310
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+
+    def _pk(self):
+        return {
+            "hostgroup_id": str(self.TEST_HG),
+            "hostname":     self.TEST_HOST,
+            "port":         str(self.TEST_PORT),
+        }
+
+    def _insert(self):
+        return self.s.post_json("/api/insert_row", {
+            "server":      self.SERVER,
+            "database":    self.DATABASE,
+            "table":       self.TABLE,
+            "columnNames": ["hostgroup_id", "hostname", "port"],
+            "data": {
+                "hostgroup_id": str(self.TEST_HG),
+                "hostname":     self.TEST_HOST,
+                "port":         str(self.TEST_PORT),
+            },
+        }).json()
+
+    def _delete(self):
+        return self.s.post_json("/api/delete_row", {
+            "server":   self.SERVER,
+            "database": self.DATABASE,
+            "table":    self.TABLE,
+            "pkValues": self._pk(),
+        }).json()
+
+    def test_insert_mysql_server(self):
+        result = self._insert()
+        self.assertTrue(result.get("success"), result.get("error"))
+        self._delete()
+
+    def test_update_mysql_server_weight(self):
+        self._insert()
+        try:
+            result = self.s.post_json("/api/update_row", {
+                "server":      self.SERVER,
+                "database":    self.DATABASE,
+                "table":       self.TABLE,
+                "pkValues":    self._pk(),
+                "columnNames": ["hostgroup_id", "hostname", "port", "weight",
+                                "status", "compression", "max_connections",
+                                "max_replication_lag", "use_ssl",
+                                "max_latency_ms", "comment"],
+                "data": {"weight": "10"},
+            }).json()
+            self.assertTrue(result.get("success"), result.get("error"))
+        finally:
+            self._delete()
+
+    def test_delete_mysql_server(self):
+        self._insert()
+        result = self._delete()
+        self.assertTrue(result.get("success"), result.get("error"))
+
+    def test_table_view_shows_mysql_server(self):
+        """The backend mysql server registered by proxysql-init must appear."""
+        resp = self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+        self.assertIn("mysql", resp.text)   # hostname of the backend container
+
+
+class TestQueryRules(unittest.TestCase):
+    """CRUD operations on mysql_query_rules via ProxyWeb API."""
+
+    SERVER   = "proxysql"
+    DATABASE = "main"
+    TABLE    = "mysql_query_rules"
+
+    TEST_RULE_ID = 900
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+
+    def _pk(self):
+        return {"rule_id": str(self.TEST_RULE_ID)}
+
+    def _col_names(self):
+        return [
+            "rule_id", "active", "username", "schemaname", "flagIN",
+            "client_addr", "proxy_addr", "proxy_port", "digest",
+            "match_digest", "match_pattern", "negate_match_pattern",
+            "re_flags", "flagOUT", "replace_pattern",
+            "destination_hostgroup", "cache_ttl", "cache_empty_result",
+            "cache_timeout", "reconnect", "timeout", "retries", "delay",
+            "next_query_flagIN", "mirror_flagOUT", "mirror_hostgroup",
+            "error_msg", "OK_msg", "sticky_conn", "multiplex",
+            "gtid_from_hostgroup", "log", "apply", "attributes", "comment",
+        ]
+
+    def _insert(self):
+        return self.s.post_json("/api/insert_row", {
+            "server":      self.SERVER,
+            "database":    self.DATABASE,
+            "table":       self.TABLE,
+            "columnNames": ["rule_id", "active", "match_digest",
+                            "destination_hostgroup", "apply"],
+            "data": {
+                "rule_id":               str(self.TEST_RULE_ID),
+                "active":                "1",
+                "match_digest":          "^SELECT.*FOR UPDATE",
+                "destination_hostgroup": "0",
+                "apply":                 "1",
+            },
+        }).json()
+
+    def _delete(self):
+        return self.s.post_json("/api/delete_row", {
+            "server":   self.SERVER,
+            "database": self.DATABASE,
+            "table":    self.TABLE,
+            "pkValues": self._pk(),
+        }).json()
+
+    def test_insert_query_rule(self):
+        result = self._insert()
+        self.assertTrue(result.get("success"), result.get("error"))
+        self._delete()
+
+    def test_update_query_rule(self):
+        self._insert()
+        try:
+            result = self.s.post_json("/api/update_row", {
+                "server":      self.SERVER,
+                "database":    self.DATABASE,
+                "table":       self.TABLE,
+                "pkValues":    self._pk(),
+                "columnNames": self._col_names(),
+                "data":        {"match_digest": "^SELECT", "active": "0"},
+            }).json()
+            self.assertTrue(result.get("success"), result.get("error"))
+        finally:
+            self._delete()
+
+    def test_delete_query_rule(self):
+        self._insert()
+        result = self._delete()
+        self.assertTrue(result.get("success"), result.get("error"))
+
+    def test_query_rules_table_view(self):
+        resp = self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("rule_id", resp.text)
+
+    def test_insert_update_delete_full_cycle(self):
+        """End-to-end: insert a rule, update its digest, then delete it."""
+        insert_result = self._insert()
+        self.assertTrue(insert_result.get("success"), insert_result.get("error"))
+        try:
+            upd = self.s.post_json("/api/update_row", {
+                "server":      self.SERVER,
+                "database":    self.DATABASE,
+                "table":       self.TABLE,
+                "pkValues":    self._pk(),
+                "columnNames": self._col_names(),
+                "data":        {"match_digest": "^SELECT.*", "comment": "test-rule"},
+            }).json()
+            self.assertTrue(upd.get("success"), upd.get("error"))
+        finally:
+            del_result = self._delete()
+            self.assertTrue(del_result.get("success"), del_result.get("error"))
+
+
+# ---------------------------------------------------------------------------
+# Multi-server tests
+# ---------------------------------------------------------------------------
+
+class TestMultiServer(unittest.TestCase):
+    """Tests that verify proxyweb can manage two independent ProxySQL instances.
+
+    proxysql  → mysql  (testdb,  user proxyuser/proxypass)
+    proxysql2 → mysql2 (testdb2, user proxyuser2/proxypass2)
+    proxysql2 ships with pre-seeded query rules (rule_id 1 and 2).
+    """
+
+    S1 = "proxysql"
+    S2 = "proxysql2"
+    DB = "main"
+
+    # PK for a test query rule we CRUD on proxysql2
+    TEST_RULE_ID = 800
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+
+    # ------------------------------------------------------------------
+    # Server list / navigation
+    # ------------------------------------------------------------------
+
+    def test_home_page_lists_both_servers(self):
+        """Both server names must appear in the navigation sidebar."""
+        resp = self.s.get("/")
+        self.assertIn(self.S1, resp.text)
+        self.assertIn(self.S2, resp.text)
+
+    def test_server1_table_view_accessible(self):
+        resp = self.s.get(f"/{self.S1}/{self.DB}/mysql_servers/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("hostname", resp.text)
+
+    def test_server2_table_view_accessible(self):
+        resp = self.s.get(f"/{self.S2}/{self.DB}/mysql_servers/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("hostname", resp.text)
+
+    # ------------------------------------------------------------------
+    # Backend server isolation — each ProxySQL points to a different MySQL
+    # ------------------------------------------------------------------
+
+    def test_server1_has_mysql_backend(self):
+        """proxysql should list 'mysql' (not mysql2) as its backend."""
+        resp = self.s.get(f"/{self.S1}/{self.DB}/mysql_servers/")
+        self.assertIn("mysql", resp.text)
+
+    def test_server2_has_mysql2_backend(self):
+        """proxysql2 should list 'mysql2' as its backend."""
+        resp = self.s.get(f"/{self.S2}/{self.DB}/mysql_servers/")
+        self.assertIn("mysql2", resp.text)
+
+    def test_server2_backend_is_not_server1_backend(self):
+        """The mysql_servers table on proxysql2 must not contain the server1 host."""
+        resp = self.s.get(f"/{self.S2}/{self.DB}/mysql_servers/")
+        # proxysql2 knows about mysql2 but should have no row for plain 'mysql'
+        # We look for the cell value being exactly "mysql" (surrounded by <td> tags)
+        cells = re.findall(r'<td[^>]*>\s*(mysql)\s*</td>', resp.text)
+        self.assertEqual(cells, [], "proxysql2 mysql_servers unexpectedly contains 'mysql' host")
+
+    # ------------------------------------------------------------------
+    # Query rules: proxysql2 pre-seeded with 2 rules; proxysql has none
+    # ------------------------------------------------------------------
+
+    def test_server1_has_no_preseeded_query_rules(self):
+        """proxysql was initialised without query rules."""
+        resp = self.s.get(f"/{self.S1}/{self.DB}/mysql_query_rules/")
+        self.assertEqual(resp.status_code, 200)
+        # Table should exist but have no data rows with rule_id 1 or 2
+        self.assertNotIn(">1<", resp.text)
+
+    def test_server2_has_preseeded_query_rules(self):
+        """proxysql2 was initialised with rule_id 1 and 2."""
+        resp = self.s.get(f"/{self.S2}/{self.DB}/mysql_query_rules/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("rule_id", resp.text)
+        self.assertIn(">1<", resp.text)
+        self.assertIn(">2<", resp.text)
+
+    # ------------------------------------------------------------------
+    # CRUD on proxysql2 query rules
+    # ------------------------------------------------------------------
+
+    def _s2_pk(self):
+        return {"rule_id": str(self.TEST_RULE_ID)}
+
+    def _col_names(self):
+        return [
+            "rule_id", "active", "username", "schemaname", "flagIN",
+            "client_addr", "proxy_addr", "proxy_port", "digest",
+            "match_digest", "match_pattern", "negate_match_pattern",
+            "re_flags", "flagOUT", "replace_pattern",
+            "destination_hostgroup", "cache_ttl", "cache_empty_result",
+            "cache_timeout", "reconnect", "timeout", "retries", "delay",
+            "next_query_flagIN", "mirror_flagOUT", "mirror_hostgroup",
+            "error_msg", "OK_msg", "sticky_conn", "multiplex",
+            "gtid_from_hostgroup", "log", "apply", "attributes", "comment",
+        ]
+
+    def _insert_s2_rule(self):
+        self.s.get(f"/{self.S2}/{self.DB}/mysql_query_rules/")
+        return self.s.post_json("/api/insert_row", {
+            "server":      self.S2,
+            "database":    self.DB,
+            "table":       "mysql_query_rules",
+            "columnNames": ["rule_id", "active", "match_digest",
+                            "destination_hostgroup", "apply"],
+            "data": {
+                "rule_id":               str(self.TEST_RULE_ID),
+                "active":                "1",
+                "match_digest":          "^DELETE",
+                "destination_hostgroup": "0",
+                "apply":                 "1",
+            },
+        }).json()
+
+    def _delete_s2_rule(self):
+        self.s.get(f"/{self.S2}/{self.DB}/mysql_query_rules/")
+        return self.s.post_json("/api/delete_row", {
+            "server":   self.S2,
+            "database": self.DB,
+            "table":    "mysql_query_rules",
+            "pkValues": self._s2_pk(),
+        }).json()
+
+    def test_insert_query_rule_on_server2(self):
+        result = self._insert_s2_rule()
+        self.assertTrue(result.get("success"), result.get("error"))
+        self._delete_s2_rule()
+
+    def test_update_query_rule_on_server2(self):
+        self._insert_s2_rule()
+        try:
+            self.s.get(f"/{self.S2}/{self.DB}/mysql_query_rules/")
+            result = self.s.post_json("/api/update_row", {
+                "server":      self.S2,
+                "database":    self.DB,
+                "table":       "mysql_query_rules",
+                "pkValues":    self._s2_pk(),
+                "columnNames": self._col_names(),
+                "data":        {"match_digest": "^DELETE.*", "comment": "s2-test"},
+            }).json()
+            self.assertTrue(result.get("success"), result.get("error"))
+        finally:
+            self._delete_s2_rule()
+
+    def test_delete_query_rule_on_server2(self):
+        self._insert_s2_rule()
+        result = self._delete_s2_rule()
+        self.assertTrue(result.get("success"), result.get("error"))
+
+    def test_server2_rule_does_not_appear_on_server1(self):
+        """A rule inserted on proxysql2 must not be visible on proxysql."""
+        self._insert_s2_rule()
+        try:
+            resp = self.s.get(f"/{self.S1}/{self.DB}/mysql_query_rules/")
+            self.assertNotIn(str(self.TEST_RULE_ID), resp.text)
+        finally:
+            self._delete_s2_rule()
+
+    # ------------------------------------------------------------------
+    # Config diff works independently per server
+    # ------------------------------------------------------------------
+
+    def test_config_diff_server1(self):
+        self.s.get(f"/{self.S1}/config_diff/")
+        resp = self.s.post_json(f"/{self.S1}/config_diff/get", {})
+        body = resp.json()
+        self.assertTrue(body.get("success"), body.get("error"))
+
+    def test_config_diff_server2(self):
+        self.s.get(f"/{self.S2}/config_diff/")
+        resp = self.s.post_json(f"/{self.S2}/config_diff/get", {})
+        body = resp.json()
+        self.assertTrue(body.get("success"), body.get("error"))
 
 
 # ---------------------------------------------------------------------------
