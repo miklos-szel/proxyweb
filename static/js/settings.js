@@ -36,7 +36,11 @@ function loadConfig() {
  * Populate the form with config data
  */
 function populateForm(config) {
-    // Global section
+    // Global section — clear first so stale values don't persist on reset
+    document.getElementById('global_default_server').value = '';
+    document.getElementById('global_read_only').checked = false;
+    document.getElementById('global_hide_tables_container').innerHTML = '';
+
     if (config.global) {
         const global = config.global;
 
@@ -49,8 +53,6 @@ function populateForm(config) {
         }
 
         if (global.hide_tables && Array.isArray(global.hide_tables)) {
-            const container = document.getElementById('global_hide_tables_container');
-            container.innerHTML = '';
             global.hide_tables.forEach((table, index) => {
                 addHideTable('global', table);
             });
@@ -71,7 +73,10 @@ function populateForm(config) {
         });
     }
 
-    // Auth section
+    // Auth section — clear first
+    document.getElementById('auth_admin_user').value = '';
+    document.getElementById('auth_admin_password').value = '';
+
     if (config.auth) {
         const auth = config.auth;
 
@@ -84,7 +89,11 @@ function populateForm(config) {
         }
     }
 
-    // Flask section
+    // Flask section — clear first
+    document.getElementById('flask_SECRET_KEY').value = '';
+    document.getElementById('flask_SEND_FILE_MAX_AGE_DEFAULT').value = '';
+    document.getElementById('flask_TEMPLATES_AUTO_RELOAD').checked = false;
+
     if (config.flask) {
         const flask = config.flask;
 
