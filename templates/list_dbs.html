@@ -229,7 +229,7 @@
                                 </li>
                             {% else %}
                                 <li>
-                                    <a class="dropdown-item" href="/{{ item }}/{{ session['database'] }}/{{ session['table'] }}">
+                                    <a class="dropdown-item" href="/{{ item }}/{% if session.get('database') and session.get('table') %}{{ session['database'] }}/{{ session['table'] }}/{% endif %}">
                                         <i class="fas fa-server me-2"></i>{{ item }}
                                     </a>
                                 </li>
@@ -251,12 +251,14 @@
                     </a>
                 </li>
 
+                {% if session.get('database') and session.get('table') %}
                 <li class="nav-item ms-3">
                     <span class="current-location">
                         <i class="fas fa-map-marker-alt me-1"></i>
                         {{ session['database'] }} / {{ session['table'] }}
                     </span>
                 </li>
+                {% endif %}
             </ul>
         </div>
     </div>
