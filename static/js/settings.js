@@ -60,6 +60,11 @@ function populateForm(config) {
     }
 
     // Servers section
+    const serversContainer = document.getElementById('servers_container');
+    if (serversContainer) serversContainer.innerHTML = '';
+    serverCount = 0;
+    const serverCountInput = document.getElementById('server_count');
+    if (serverCountInput) serverCountInput.value = 0;
     if (config.servers) {
         Object.keys(config.servers).forEach((serverName, index) => {
             addServer(serverName, config.servers[serverName]);
@@ -117,10 +122,8 @@ function populateForm(config) {
         // Then populate with data
         Object.keys(misc).forEach(miscType => {
             if (Array.isArray(misc[miscType])) {
-                // Initialize counter for this misc type
-                if (!miscCount[miscType]) {
-                    miscCount[miscType] = 0;
-                }
+                // Reset counter for this misc type
+                miscCount[miscType] = 0;
 
                 // Add each item
                 misc[miscType].forEach(item => {
