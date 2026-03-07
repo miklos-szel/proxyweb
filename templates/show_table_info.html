@@ -313,7 +313,7 @@
 
 {% if not session['read_only'] %}
     <div class="sql-editor-card">
-        <div class="sql-editor-header" onclick="document.getElementById('sqlEditorToggle').click()">
+        <div class="sql-editor-header" onclick="toggleSqlEditor()">
             <h5><i class="fas fa-code"></i> SQL Query Editor
                 <button class="sql-editor-toggle" type="button" id="sqlEditorToggle" aria-expanded="false" aria-controls="sqlEditorCollapse">
                     <i class="fas fa-chevron-right"></i>
@@ -466,6 +466,25 @@
 </div>
 
 <script>
+const SQL_EDITOR_STORAGE_KEY = 'proxyweb_sql_editor_collapsed';
+
+function toggleSqlEditor() {
+    const collapseElement = document.getElementById('sqlEditorCollapse');
+    const toggleButton = document.getElementById('sqlEditorToggle');
+    if (!collapseElement || !toggleButton) return;
+    if (collapseElement.classList.contains('show')) {
+        collapseElement.classList.remove('show');
+        toggleButton.setAttribute('aria-expanded', 'false');
+        toggleButton.classList.remove('expanded');
+        localStorage.setItem(SQL_EDITOR_STORAGE_KEY, 'true');
+    } else {
+        collapseElement.classList.add('show');
+        toggleButton.setAttribute('aria-expanded', 'true');
+        toggleButton.classList.add('expanded');
+        localStorage.setItem(SQL_EDITOR_STORAGE_KEY, 'false');
+    }
+}
+
 // Check localStorage immediately when the script loads, before DOMContentLoaded
 (function() {
     const STORAGE_KEY = 'proxyweb_sql_editor_collapsed';
@@ -677,18 +696,8 @@ document.addEventListener('DOMContentLoaded', function() {
         // Handle toggle button click
         toggleButton.addEventListener('click', function(e) {
             e.preventDefault();
-
-            if (collapseElement.classList.contains('show')) {
-                collapseElement.classList.remove('show');
-                toggleButton.setAttribute('aria-expanded', 'false');
-                toggleButton.classList.remove('expanded');
-                localStorage.setItem(STORAGE_KEY, 'true');
-            } else {
-                collapseElement.classList.add('show');
-                toggleButton.setAttribute('aria-expanded', 'true');
-                toggleButton.classList.add('expanded');
-                localStorage.setItem(STORAGE_KEY, 'false');
-            }
+            e.stopPropagation();
+            toggleSqlEditor();
         });
     }
 
