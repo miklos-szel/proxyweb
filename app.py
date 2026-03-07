@@ -57,6 +57,9 @@ db = defaultdict(lambda: defaultdict(dict))
 flask_custom_config = mdb.get_config(config)
 for key in flask_custom_config['flask']:
     app.config[key] = flask_custom_config['flask'][key]
+# YAML parses an all-digit SECRET_KEY as int; Flask requires str/bytes.
+if not isinstance(app.config.get('SECRET_KEY'), (str, bytes)):
+    app.config['SECRET_KEY'] = str(app.config['SECRET_KEY'])
 
 
 mdb.logging.debug(flask_custom_config)
@@ -341,7 +344,7 @@ def update_config_skip_variables():
 @login_required
 def api_update_row():
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True)
         if not data:
             return jsonify({'success': False, 'error': 'Invalid request'}), 400
         server = data['server']
@@ -377,7 +380,7 @@ def api_update_row():
 @login_required
 def api_delete_row():
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True)
         if not data:
             return jsonify({'success': False, 'error': 'Invalid request'}), 400
         server = data['server']
@@ -409,7 +412,7 @@ def api_delete_row():
 @login_required
 def api_insert_row():
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True)
         if not data:
             return jsonify({'success': False, 'error': 'Invalid request'}), 400
         server = data['server']
