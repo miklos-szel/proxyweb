@@ -1263,17 +1263,13 @@
                     if (data.success) {
                         showNotification(title + ' executed successfully!', 'success');
                     } else {
-                        // Don't show error notification for ProxySQL administrative commands
-                        // Just log it to console for debugging
-                        console.warn('ProxySQL command warning:', data.error);
-                        // Still show success since command was sent
-                        showNotification(title + ' command sent', 'success');
+                        console.error('ProxySQL command failed:', data.error);
+                        showNotification(title + ' failed: ' + (data.error || 'unknown error'), 'error');
                     }
                 })
                 .catch(error => {
-                    // Log network/server errors to console but don't show red popup
                     console.error('Error executing ProxySQL command:', error.message);
-                    showNotification(title + ' command sent (check console for details)', 'success');
+                    showNotification(title + ' failed: ' + error.message, 'error');
                 });
             };
 
