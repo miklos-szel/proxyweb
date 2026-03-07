@@ -304,8 +304,10 @@ def update_config_skip_variables():
             config_data['global'] = {}
         config_data['global']['config_diff_skip_variable'] = skip_variables
 
-        # Save config back to file
-        _atomic_write(config, yaml.dump(config_data, default_flow_style=False, sort_keys=False))
+        # Back up current config, then write
+        with open(config, "r") as src, open(config + ".bak", "w") as dest:
+            dest.write(src.read())
+        _atomic_write(config, mdb.dict_to_yaml(config_data))
 
         logging.info(f"Updated config_diff_skip_variable: {skip_variables}")
         return jsonify({'success': True})
