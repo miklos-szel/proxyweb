@@ -50,7 +50,7 @@ sudo docker compose up -d --build --wait
 
 echo ""
 echo "==> Installing test dependencies..."
-sudo apt-get install -y -qq python3-requests
+sudo apt-get install -y -qq python3-requests python3-pymysql
 
 echo ""
 echo "==> Running tests against http://localhost:5000 (admin / admin42)..."

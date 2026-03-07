@@ -7,9 +7,13 @@ Use run_tests.sh to bring the stack up and execute the tests automatically,
 or set PROXYWEB_URL to point at an already-running instance.
 
 Environment variables:
-  PROXYWEB_URL   Base URL of proxyweb (default: http://localhost:5000)
-  PROXYWEB_USER  Admin username       (default: admin)
-  PROXYWEB_PASS  Admin password       (default: admin42)
+  PROXYWEB_URL     Base URL of proxyweb (default: http://localhost:5000)
+  PROXYWEB_USER    Admin username       (default: admin)
+  PROXYWEB_PASS    Admin password       (default: admin42)
+  PROXYSQL1_HOST   ProxySQL 1 MySQL frontend host (default: 127.0.0.1)
+  PROXYSQL1_PORT   ProxySQL 1 MySQL frontend port (default: 6033)
+  PROXYSQL2_HOST   ProxySQL 2 MySQL frontend host (default: 127.0.0.1)
+  PROXYSQL2_PORT   ProxySQL 2 MySQL frontend port (default: 6035)
 """
 
 import os
@@ -20,6 +24,12 @@ import json
 import unittest
 
 import requests
+
+try:
+    import pymysql
+    HAS_PYMYSQL = True
+except ImportError:
+    HAS_PYMYSQL = False
 
 BASE_URL = os.environ.get("PROXYWEB_URL", "http://localhost:5000").rstrip("/")
 USERNAME = os.environ.get("PROXYWEB_USER", "admin")
@@ -557,6 +567,324 @@ class TestQueryRules(unittest.TestCase):
         finally:
             del_result = self._delete()
             self.assertTrue(del_result.get("success"), del_result.get("error"))
+
+
+# ---------------------------------------------------------------------------
+# Direct MySQL DML through both ProxySQL frontend ports
+# ---------------------------------------------------------------------------
+
+@unittest.skipUnless(HAS_PYMYSQL, "pymysql not installed — skipping backend SQL tests")
+class TestProxySQL1BackendSQL(unittest.TestCase):
+    """SELECT / INSERT / UPDATE / DELETE through ProxySQL 1 (port 6033).
+
+    Connects as proxyuser/proxypass which is registered in ProxySQL 1's
+    runtime_mysql_users and granted on the mysql backend's testdb.
+    Table under test: testdb.items (id INT PK, name VARCHAR, val INT).
+    """
+
+    HOST = os.environ.get("PROXYSQL1_HOST", "127.0.0.1")
+    PORT = int(os.environ.get("PROXYSQL1_PORT", "6033"))
+    USER = "proxyuser"
+    PASS = "proxypass"
+    DB   = "testdb"
+
+    def _conn(self):
+        return pymysql.connect(
+            host=self.HOST, port=self.PORT,
+            user=self.USER, password=self.PASS,
+            database=self.DB, autocommit=True,
+        )
+
+    def test_select_returns_rows(self):
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, name, val FROM items ORDER BY id")
+                rows = cur.fetchall()
+        self.assertGreater(len(rows), 0, "Expected seed rows in testdb.items")
+        names = [r[1] for r in rows]
+        self.assertIn("alpha", names)
+
+    def test_insert_row(self):
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO items (name, val) VALUES (%s, %s)",
+                    ("ps1-test-insert", 42),
+                )
+                inserted_id = conn.insert_id()
+        self.assertGreater(inserted_id, 0)
+        # Verify it persisted
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT name, val FROM items WHERE id = %s", (inserted_id,))
+                row = cur.fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row[0], "ps1-test-insert")
+        self.assertEqual(row[1], 42)
+        # Cleanup
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM items WHERE id = %s", (inserted_id,))
+
+    def test_update_row(self):
+        # Insert a row to update
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO items (name, val) VALUES (%s, %s)",
+                    ("ps1-test-update", 1),
+                )
+                row_id = conn.insert_id()
+        try:
+            with self._conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE items SET val = %s WHERE id = %s",
+                        (99, row_id),
+                    )
+                    self.assertEqual(conn.affected_rows(), 1)
+            # Verify
+            with self._conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT val FROM items WHERE id = %s", (row_id,))
+                    self.assertEqual(cur.fetchone()[0], 99)
+        finally:
+            with self._conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM items WHERE id = %s", (row_id,))
+
+    def test_delete_row(self):
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO items (name, val) VALUES (%s, %s)",
+                    ("ps1-test-delete", 7),
+                )
+                row_id = conn.insert_id()
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM items WHERE id = %s", (row_id,))
+                self.assertEqual(conn.affected_rows(), 1)
+        # Confirm gone
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM items WHERE id = %s", (row_id,))
+                self.assertIsNone(cur.fetchone())
+
+
+@unittest.skipUnless(HAS_PYMYSQL, "pymysql not installed — skipping backend SQL tests")
+class TestProxySQL2BackendSQL(unittest.TestCase):
+    """SELECT / INSERT / UPDATE / DELETE through ProxySQL 2 (port 6035).
+
+    Connects as proxyuser2/proxypass2 which is registered in ProxySQL 2's
+    runtime_mysql_users and granted on the mysql2 backend's testdb2.
+    Table under test: testdb2.products (id INT PK, name VARCHAR, price DECIMAL).
+    """
+
+    HOST = os.environ.get("PROXYSQL2_HOST", "127.0.0.1")
+    PORT = int(os.environ.get("PROXYSQL2_PORT", "6035"))
+    USER = "proxyuser2"
+    PASS = "proxypass2"
+    DB   = "testdb2"
+
+    def _conn(self):
+        return pymysql.connect(
+            host=self.HOST, port=self.PORT,
+            user=self.USER, password=self.PASS,
+            database=self.DB, autocommit=True,
+        )
+
+    def test_select_returns_rows(self):
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, name, price FROM products ORDER BY id")
+                rows = cur.fetchall()
+        self.assertGreater(len(rows), 0, "Expected seed rows in testdb2.products")
+        names = [r[1] for r in rows]
+        self.assertIn("widget", names)
+
+    def test_insert_row(self):
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO products (name, price) VALUES (%s, %s)",
+                    ("ps2-test-insert", "7.77"),
+                )
+                inserted_id = conn.insert_id()
+        self.assertGreater(inserted_id, 0)
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT name, price FROM products WHERE id = %s", (inserted_id,)
+                )
+                row = cur.fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row[0], "ps2-test-insert")
+        self.assertAlmostEqual(float(row[1]), 7.77, places=2)
+        # Cleanup
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM products WHERE id = %s", (inserted_id,))
+
+    def test_update_row(self):
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO products (name, price) VALUES (%s, %s)",
+                    ("ps2-test-update", "1.00"),
+                )
+                row_id = conn.insert_id()
+        try:
+            with self._conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE products SET price = %s WHERE id = %s",
+                        ("49.99", row_id),
+                    )
+                    self.assertEqual(conn.affected_rows(), 1)
+            with self._conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT price FROM products WHERE id = %s", (row_id,)
+                    )
+                    self.assertAlmostEqual(float(cur.fetchone()[0]), 49.99, places=2)
+        finally:
+            with self._conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM products WHERE id = %s", (row_id,))
+
+    def test_delete_row(self):
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO products (name, price) VALUES (%s, %s)",
+                    ("ps2-test-delete", "0.01"),
+                )
+                row_id = conn.insert_id()
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM products WHERE id = %s", (row_id,))
+                self.assertEqual(conn.affected_rows(), 1)
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM products WHERE id = %s", (row_id,))
+                self.assertIsNone(cur.fetchone())
+
+    def test_proxysql2_data_isolated_from_proxysql1(self):
+        """Data written through ProxySQL 2 must not appear through ProxySQL 1."""
+        # Insert through ProxySQL 2
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO products (name, price) VALUES (%s, %s)",
+                    ("isolation-check", "0.99"),
+                )
+                row_id = conn.insert_id()
+        try:
+            # ProxySQL 1 routes to testdb on mysql — the products table does not
+            # exist there, so any attempt to query it must raise an error.
+            ps1 = pymysql.connect(
+                host=os.environ.get("PROXYSQL1_HOST", "127.0.0.1"),
+                port=int(os.environ.get("PROXYSQL1_PORT", "6033")),
+                user="proxyuser", password="proxypass",
+                database="testdb", autocommit=True,
+            )
+            try:
+                with ps1.cursor() as cur:
+                    with self.assertRaises(pymysql.err.ProgrammingError):
+                        cur.execute("SELECT id FROM products WHERE id = %s", (row_id,))
+                        cur.fetchall()
+            finally:
+                ps1.close()
+        finally:
+            with self._conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM products WHERE id = %s", (row_id,))
+
+
+# ---------------------------------------------------------------------------
+# Config diff memory-vs-runtime regression
+# ---------------------------------------------------------------------------
+
+class TestConfigDiffMemoryRuntime(unittest.TestCase):
+    """Config diff must detect gaps between mysql_users memory and runtime layers.
+
+    Regression: changes made to mysql_users without LOAD TO RUNTIME were not
+    appearing in the diff output.
+    """
+
+    SERVER = "proxysql"
+    DB     = "main"
+    TABLE  = "mysql_users"
+    TEST_USER = "difftest-user"
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        self.s.get(f"/{self.SERVER}/{self.DB}/{self.TABLE}/")
+
+    def tearDown(self):
+        # Remove test user regardless of test outcome so it does not pollute state.
+        try:
+            self.s.get(f"/{self.SERVER}/{self.DB}/{self.TABLE}/")
+            self.s.post_json("/api/delete_row", {
+                "server":   self.SERVER,
+                "database": self.DB,
+                "table":    self.TABLE,
+                "pkValues": {"username": self.TEST_USER},
+            })
+        except Exception:
+            pass
+
+    def test_diff_detects_user_added_to_memory_only(self):
+        """Insert a user into mysql_users without LOAD TO RUNTIME.
+        The config diff API must report mysql_users as having differences
+        between the memory and runtime layers."""
+        insert = self.s.post_json("/api/insert_row", {
+            "server":      self.SERVER,
+            "database":    self.DB,
+            "table":       self.TABLE,
+            "columnNames": ["username", "password", "default_hostgroup", "active"],
+            "data": {
+                "username":          self.TEST_USER,
+                "password":          "difftest-pass",
+                "default_hostgroup": "0",
+                "active":            "1",
+            },
+        }).json()
+        self.assertTrue(insert.get("success"), f"Insert failed: {insert.get('error')}")
+
+        # Fetch config diff — deliberately NOT loading to runtime first.
+        self.s.get(f"/{self.SERVER}/config_diff/")
+        body = self.s.post_json(f"/{self.SERVER}/config_diff/get", {}).json()
+        self.assertTrue(body.get("success"), body.get("error"))
+
+        tables = body.get("diff", {}).get("tables", [])
+        users_entry = next(
+            (t for t in tables if t.get("table_name") == "mysql_users"), None
+        )
+        self.assertIsNotNone(users_entry, "mysql_users missing from config diff tables list")
+
+        has_diff = users_entry.get("stats", {}).get("has_differences", False)
+        self.assertTrue(
+            has_diff,
+            "Config diff did not detect that mysql_users (memory) differs from "
+            "runtime_mysql_users after inserting a user without LOAD TO RUNTIME",
+        )
+
+        # Confirm the new user appears in the memory-only list within the diff.
+        only_in_memory = (
+            users_entry.get("differences", {})
+                       .get("memory_vs_runtime", {})
+                       .get("only_in_memory", [])
+        )
+        usernames_in_memory = [row.get("username") for row in only_in_memory]
+        self.assertIn(
+            self.TEST_USER,
+            usernames_in_memory,
+            f"Expected {self.TEST_USER!r} to appear in memory-only diff rows, "
+            f"got: {usernames_in_memory}",
+        )
 
 
 # ---------------------------------------------------------------------------
