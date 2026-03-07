@@ -411,6 +411,8 @@ def api_get_schema():
         return jsonify({'success': False, 'error': str(e)})
 
 
+_ALLOWED_PROXYSQL_CMD = re.compile(r'^\s*(LOAD|SAVE|SELECT\s+CONFIG)\b', re.IGNORECASE)
+
 @app.route('/api/execute_proxysql_command', methods=['POST'])
 @login_required
 def api_execute_proxysql_command():
@@ -419,6 +421,11 @@ def api_execute_proxysql_command():
         sql = request.form.get('sql', '')
         if not sql:
             return jsonify({'success': False, 'error': 'SQL command required'})
+
+        statements = [s.strip() for s in sql.split(';') if s.strip()]
+        if not statements or not all(_ALLOWED_PROXYSQL_CMD.match(s) for s in statements):
+            logging.warning(f"Rejected disallowed command in execute_proxysql_command: {sql[:200]}")
+            return jsonify({'success': False, 'error': 'Only ProxySQL LOAD/SAVE administrative commands are allowed'})
 
         # Get server from session
         server = session.get('server', 'proxysql')
