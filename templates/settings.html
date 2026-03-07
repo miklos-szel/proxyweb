@@ -696,7 +696,7 @@
                         <button type="submit" class="btn btn-primary btn-lg">
                             <i class="fas fa-save"></i> Save Changes
                         </button>
-                        <button type="button" class="btn btn-outline-secondary btn-lg" onclick="document.getElementById('settings-raw').value = '{{ config_file_content }}'">
+                        <button type="button" id="reset-raw-yaml-btn" class="btn btn-outline-secondary btn-lg">
                             <i class="fas fa-undo"></i> Reset to Original
                         </button>
                         <a href="/" class="btn btn-outline-secondary btn-lg">
@@ -726,5 +726,16 @@
     </div>
 </div>
 
+<script>
+(function() {
+    var btn = document.getElementById('reset-raw-yaml-btn');
+    if (btn) {
+        var original = {{ config_file_content | tojson }};
+        btn.addEventListener('click', function() {
+            document.getElementById('settings-raw').value = original;
+        });
+    }
+})();
+</script>
 <script src="/static/js/settings.js"></script>
 {% endblock %}
