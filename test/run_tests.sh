@@ -28,57 +28,26 @@ for arg in "$@"; do
 done
 
 # ---------------------------------------------------------------------------
-# Failure log setup
+# Log setup
 # ---------------------------------------------------------------------------
 
 LOG_DIR="log"
 mkdir -p "$LOG_DIR"
-
-# Remove log files older than 30 days to keep the directory tidy
-find "$LOG_DIR" -name "*.log" -mtime +30 -delete 2>/dev/null || true
+find "$LOG_DIR" -name "failure_*.log" -mtime +30 -delete 2>/dev/null || true
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-LOG_FILE="$LOG_DIR/run_${TIMESTAMP}.log"
-
-# Write a structured header that Claude can parse
-{
-    echo "=== PROXYWEB TEST RUN ==="
-    echo "timestamp:   $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-    echo "git_commit:  $(git -C .. rev-parse --short HEAD 2>/dev/null || echo unknown)"
-    echo "git_branch:  $(git -C .. rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
-    echo "host:        $(hostname)"
-    echo "========================="
-} >> "$LOG_FILE"
+LOG_FILE="$LOG_DIR/failure_${TIMESTAMP}.log"
+TMPOUT=$(mktemp)
+trap 'rm -f "$TMPOUT"' EXIT
 
 # ---------------------------------------------------------------------------
-# Cleanup trap
+# Cleanup / teardown trap
 # ---------------------------------------------------------------------------
 
 TEST_EXIT=0
 
-cleanup() {
-    local exit_code=$TEST_EXIT
-
-    if [[ $exit_code -ne 0 ]]; then
-        echo ""
-        echo "==> Tests FAILED (exit $exit_code) — collecting service logs into $LOG_FILE ..."
-        {
-            echo ""
-            echo "=== DOCKER SERVICE LOGS ==="
-            for svc in proxyweb proxysql proxysql2 mysql mysql2 proxysql-init proxysql2-init; do
-                echo ""
-                echo "--- service: $svc ---"
-                sudo docker compose logs --no-color --tail=200 "$svc" 2>&1 || echo "(service not found or no logs)"
-            done
-            echo ""
-            echo "=== DOCKER SERVICE STATUS ==="
-            sudo docker compose ps --all 2>&1 || true
-        } >> "$LOG_FILE"
-        echo "    Full log: $LOG_FILE"
-    else
-        echo ""
-        echo "==> All tests passed. Log: $LOG_FILE"
-    fi
+on_exit() {
+    rm -f "$TMPOUT"
 
     if [[ $KEEP -eq 0 ]]; then
         echo ""
@@ -95,7 +64,7 @@ cleanup() {
         echo "    ProxySQL 2 MySQL localhost:6035          proxyuser2 / proxypass2"
     fi
 }
-trap cleanup EXIT
+trap on_exit EXIT
 
 # ---------------------------------------------------------------------------
 # Stack + dependencies
@@ -109,28 +78,58 @@ echo "==> Installing test dependencies..."
 sudo apt-get install -y -qq python3-requests python3-pymysql
 
 # ---------------------------------------------------------------------------
-# Run tests — capture output to log AND terminal simultaneously
+# Run tests — output goes to terminal; captured separately for error logging
 # ---------------------------------------------------------------------------
 
 echo ""
 echo "==> Running tests against http://localhost:5000 (admin / admin42)..."
-echo "    (output also logged to $LOG_FILE)"
 echo ""
 
-{
-    echo ""
-    echo "=== TEST OUTPUT ==="
-} >> "$LOG_FILE"
-
-# tee duplicates output: terminal + log file.
-# We run python3 in a subshell so we can capture its exit code separately
-# from the outer set -e (which would abort before we log service diagnostics).
 set +e
-python3 test_proxyweb.py 2>&1 | tee -a "$LOG_FILE"
+python3 test_proxyweb.py 2>&1 | tee "$TMPOUT"
 TEST_EXIT=${PIPESTATUS[0]}
 set -e
 
-{
+# ---------------------------------------------------------------------------
+# On failure: write a focused error log with tracebacks + service diagnostics
+# ---------------------------------------------------------------------------
+
+if [[ $TEST_EXIT -ne 0 ]]; then
+    {
+        echo "=== PROXYWEB TEST FAILURE REPORT ==="
+        echo "timestamp:  $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+        echo "git_commit: $(git -C .. rev-parse --short HEAD 2>/dev/null || echo unknown)"
+        echo "git_branch: $(git -C .. rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+        echo "host:       $(hostname)"
+        echo "====================================="
+
+        echo ""
+        echo "=== FAILED / ERROR TESTS ==="
+        # Extract the detailed failure blocks (everything from the first ====
+        # separator through to the final summary line).
+        awk '/^={10}/{found=1} found{print}' "$TMPOUT"
+
+        echo ""
+        echo "=== DOCKER SERVICE STATUS ==="
+        sudo docker compose ps --all 2>&1 || true
+
+        echo ""
+        echo "=== SERVICE LOGS ==="
+        for svc in proxyweb proxysql proxysql2 mysql mysql2 proxysql-init proxysql2-init; do
+            local_logs=$(sudo docker compose logs --no-color --tail=200 "$svc" 2>&1 || true)
+            # Only include a service's logs if they contain an error indicator.
+            if echo "$local_logs" | grep -qiE 'error|exception|traceback|fatal|critical'; then
+                echo ""
+                echo "--- $svc (errors only — last 200 lines filtered) ---"
+                echo "$local_logs" | grep -iE 'error|exception|traceback|fatal|critical|^\s+File |^\s+raise |^\w.*Error:'
+            fi
+        done
+
+    } > "$LOG_FILE"
+
     echo ""
-    echo "=== TEST EXIT CODE: $TEST_EXIT ==="
-} >> "$LOG_FILE"
+    echo "==> FAILED. Error log written to: $LOG_FILE"
+else
+    echo ""
+    echo "==> All tests passed."
+fi
