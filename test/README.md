@@ -6,21 +6,33 @@ suite that exercise ProxyWeb against a real ProxySQL + MySQL backend.
 ## Stack layout
 
 ```
-┌─────────────┐     admin (6032)     ┌──────────────┐     3306    ┌───────────┐
-│   proxyweb  │ ──────────────────►  │   proxysql   │ ──────────► │   mysql   │
-│  :5000      │                      │  mysql (6033)│             │  testdb   │
-└─────────────┘                      └──────────────┘             └───────────┘
+                          ┌──────────────┐     3306    ┌───────────┐
+               admin ──►  │   proxysql   │ ──────────► │   mysql   │
+               (6032)     │  sql (6033)  │             │  testdb   │
+┌─────────────┐           └──────────────┘             └───────────┘
+│   proxyweb  │
+│  :5000      │           ┌──────────────┐     3306    ┌───────────┐
+               admin ──►  │   proxysql2  │ ──────────► │   mysql2  │
+               (6034)     │  sql (6035)  │             │  testdb2  │
+└─────────────┘           └──────────────┘             └───────────┘
 ```
 
-| Service   | Image                   | Exposed ports        |
-|-----------|-------------------------|----------------------|
-| mysql     | mysql:8.0               | (internal only)      |
-| proxysql  | proxysql/proxysql:2.7.1 | 6032 admin, 6033 SQL |
-| proxyweb  | built from `../`        | 5000                 |
+| Service         | Image                   | Exposed ports              |
+|-----------------|-------------------------|----------------------------|
+| mysql           | mysql:8.0               | (internal only)            |
+| mysql2          | mysql:8.0               | (internal only)            |
+| proxysql        | proxysql/proxysql:2.7.1 | 6032 admin, 6033 SQL       |
+| proxysql2       | proxysql/proxysql:2.7.1 | 6034 admin, 6035 SQL       |
+| proxysql-init   | mysql:8.0 (one-shot)    | —                          |
+| proxysql2-init  | mysql:8.0 (one-shot)    | —                          |
+| proxyweb        | built from `../`        | 5000                       |
 
-ProxyWeb is configured (via `config/config.yml`) to connect to ProxySQL's
-admin interface on port 6032 using the `radmin/radmin` credentials defined
-in `proxysql/proxysql.cnf`.
+ProxyWeb is configured (via `config/config.yml`) to manage both ProxySQL
+instances. Each connects on port 6032 using the `radmin/radmin` credentials
+defined in the respective `proxysql/proxysql.cnf` and `proxysql/proxysql2.cnf`.
+
+`proxysql2` is pre-seeded with two query rules (rule_id 1 and 2) to enable
+cross-server isolation tests.
 
 ## Prerequisites
 
@@ -83,6 +95,9 @@ PROXYWEB_USER=admin PROXYWEB_PASS=admin42 python3 test_proxyweb.py
 | `TestSQLExecution`     | SELECT via SQL form (including leading-whitespace regression) |
 | `TestAPIRowOperations` | Insert / update / delete a row; runtime_ table rejection; missing JSON body (400) |
 | `TestAPIConfigDiff`    | Config diff API and get_schema API                         |
+| `TestMySQLServers`     | Full CRUD on `mysql_servers` via proxyweb API              |
+| `TestQueryRules`       | Full CRUD on `mysql_query_rules` including end-to-end cycle |
+| `TestMultiServer`      | Server switching; backend isolation (mysql vs mysql2); cross-server query rule differences; independent CRUD and config diff on proxysql2 |
 
 ## Directory structure
 
@@ -90,26 +105,39 @@ PROXYWEB_USER=admin PROXYWEB_PASS=admin42 python3 test_proxyweb.py
 test/
 ├── Makefile
 ├── README.md
+├── Dockerfile                # proxyweb image for tests (apt mysql client)
 ├── docker-compose.yml
 ├── run_tests.sh
 ├── requirements.txt          # test-only Python deps (requests)
 ├── test_proxyweb.py          # integration test suite
 ├── config/
-│   └── config.yml            # proxyweb config pointing at the proxysql container
+│   └── config.yml            # proxyweb config: both proxysql + proxysql2
 ├── mysql/
-│   └── init.sql              # creates monitor/proxy users and a seed table
+│   ├── init.sql              # mysql: monitor/proxyuser users + testdb.items seed
+│   └── init2.sql             # mysql2: monitor/proxyuser2 users + testdb2.products seed
 └── proxysql/
-    └── proxysql.cnf          # ProxySQL config (admin, mysql_variables, servers, users)
+    ├── proxysql.cnf          # ProxySQL 1 config (targets mysql)
+    ├── proxysql2.cnf         # ProxySQL 2 config (targets mysql2)
+    ├── init.sql              # ProxySQL 1 init: backend + user registration
+    └── init2.sql             # ProxySQL 2 init: backend + user + 2 query rules
 ```
 
 ## Credentials used inside the stack
 
-| What                         | Username   | Password  |
-|------------------------------|------------|-----------|
-| ProxyWeb UI                  | admin      | admin42   |
-| ProxySQL admin interface     | radmin     | radmin    |
-| ProxySQL monitor (MySQL)     | monitor    | monitor   |
-| MySQL application user       | proxyuser  | proxypass |
-| MySQL root                   | root       | rootpass  |
+| What                              | Username   | Password   |
+|-----------------------------------|------------|------------|
+| ProxyWeb UI                       | admin      | admin42    |
+| ProxySQL 1 admin interface        | radmin     | radmin     |
+| ProxySQL 1 monitor (MySQL)        | monitor    | monitor    |
+| MySQL 1 application user          | proxyuser  | proxypass  |
+| MySQL 1 root                      | root       | rootpass   |
+| ProxySQL 2 admin interface        | radmin     | radmin     |
+| ProxySQL 2 monitor (MySQL)        | monitor    | monitor    |
+| MySQL 2 application user          | proxyuser2 | proxypass2 |
+| MySQL 2 root                      | root       | rootpass   |
 
 These are test-only credentials. **Do not use this configuration in production.**
+
+---
+
+Maintainer: contact@miklos-szel.com
