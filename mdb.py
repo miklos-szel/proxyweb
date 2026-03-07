@@ -77,7 +77,7 @@ def dict_to_yaml(data, indent=0, prev_key=None):
         for item in data:
             if isinstance(item, dict):
                 yaml_str += f"{indent_str}- "
-                yaml_str += dict_to_yaml_inline(item, indent)
+                yaml_str += dict_to_yaml_inline(item)
             else:
                 yaml_str += f"{indent_str}- {format_yaml_value(item)}\n"
     else:
@@ -86,7 +86,7 @@ def dict_to_yaml(data, indent=0, prev_key=None):
     return yaml_str
 
 
-def dict_to_yaml_inline(data, indent=0):
+def dict_to_yaml_inline(data):
     """
     Convert a dictionary to inline YAML format for arrays.
     """
@@ -800,8 +800,12 @@ def get_table_schema(db, server, database, table_name):
         create_table_sql = None
         if 'Create Table' in create_table_result:
             create_table_sql = create_table_result['Create Table']
-        elif 'Create Table' in create_table_result:
-            create_table_sql = create_table_result['Create Table']
+        elif isinstance(create_table_result, dict):
+            # Handle alternative key casing
+            for key, value in create_table_result.items():
+                if 'create table' in key.lower():
+                    create_table_sql = value
+                    break
         else:
             # Handle tuple result
             create_table_sql = create_table_result[1]
@@ -888,7 +892,6 @@ def get_primary_key_columns(db, server, database, table_name):
 
         # Find PRIMARY KEY definition
         # Pattern: PRIMARY KEY (column1, column2, ...)
-        import re
         pk_pattern = r'PRIMARY\s+KEY\s*\(([^)]+)\)'
         match = re.search(pk_pattern, create_table_sql, re.IGNORECASE)
 

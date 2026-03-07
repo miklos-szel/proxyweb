@@ -980,21 +980,24 @@
             let cellIndex = 0;
 
             // Iterate through header cells and process only data columns
-            headerCells.forEach((th, index) => {
+            let hasValidationError = false;
+            let focusInput = null;
+            for (let i = 0; i < headerCells.length; i++) {
+                const th = headerCells[i];
                 const cell = cells[cellIndex];
-                if (!cell) return;
+                if (!cell) break;
 
                 const columnName = th.textContent.trim();
 
                 if (cell.classList.contains('edit-controls')) {
-                    return;
+                    continue;
                 }
 
                 columnNames.push(columnName);
 
                 if (columnName === 'variable_name') {
                     cellIndex++;
-                    return;
+                    continue;
                 }
 
                 const input = cell.querySelector('select, input, textarea');
@@ -1013,10 +1016,9 @@
                     // If no schema available, allow empty (safer - let database enforce)
                     if (!tableSchema || !columnSchema) {
                         console.log(`[DEBUG] No schema info available, allowing empty value for ${columnName}`);
-                        const processedValue = null;
-                        rowData[columnName] = processedValue;
+                        rowData[columnName] = null;
                         cellIndex++;
-                        return;
+                        continue;
                     }
 
                     const hasDefault = 'default' in columnSchema && columnSchema.default !== undefined;
@@ -1027,20 +1029,26 @@
                     // If no default, field is required
                     if (!hasDefault) {
                         showNotification(`Field '${columnName}' is required`, 'error');
-                        if (input) input.focus();
-                        return;
+                        focusInput = input;
+                        hasValidationError = true;
+                        break;
                     }
                     // If empty and has default, skip this field (don't add to rowData)
                     console.log(`[DEBUG] Skipping column ${columnName} - using DEFAULT`);
                     cellIndex++;
-                    return;
+                    continue;
                 }
 
                 // Add value to rowData (even if empty, for columns without defaults)
                 const processedValue = value === '' ? null : value;
                 rowData[columnName] = processedValue;
                 cellIndex++;
-            });
+            }
+
+            if (hasValidationError) {
+                if (focusInput) focusInput.focus();
+                return;
+            }
 
             console.log('[DEBUG] Final data to send to backend:', rowData);
             console.log('[DEBUG] Column names to send:', columnNames);
