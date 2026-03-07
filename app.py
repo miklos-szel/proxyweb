@@ -216,17 +216,21 @@ def render_settings(action):
 def settings_ui_save():
     """Save settings from UI form"""
     try:
-        # Back up the config file first
-        with open(config, "r") as src, open(config + ".bak", "w") as dest:
-            dest.write(src.read())
-
-        # Get form data
+        # Get form data and build YAML
         form_data = request.form.to_dict()
-
-        # Build YAML config from form data
         yaml_config = mdb.form_data_to_yaml(form_data)
 
-        # Write to config file
+        # Validate before touching the existing config
+        try:
+            mdb.validate_yaml(yaml_config)
+            mdb.validate_config_shape(yaml.safe_load(yaml_config))
+        except Exception as ve:
+            logging.error(f"settings_ui_save validation failed: {ve}")
+            return jsonify({'success': False, 'error': str(ve)}), 400
+
+        # Back up current config, then write
+        with open(config, "r") as src, open(config + ".bak", "w") as dest:
+            dest.write(src.read())
         _atomic_write(config, yaml_config)
 
         return jsonify({'success': True, 'message': 'Settings saved successfully'})
