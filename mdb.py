@@ -296,8 +296,11 @@ def form_data_to_yaml(form_data):
     if misc:
         config['misc'] = misc
 
-    # Remove empty sections
+    # Remove empty sections, but always keep 'servers' and 'misc' even when
+    # empty so that validate_config_shape() and callers never see a missing key.
     config = {k: v for k, v in config.items() if v}
+    config.setdefault('servers', {})
+    config.setdefault('misc', {})
 
     # Convert to YAML with proper formatting and add header
     yaml_content = dict_to_yaml(config)
@@ -848,12 +851,20 @@ def get_table_schema(db, server, database, table_name):
         logging.debug(f"Successfully extracted schema for table '{table_name}'")
 
     except (mysql.connector.Error, mysql.connector.Warning) as e:
-        db['cnf']['servers'][server]['conn'].close()
         logging.error(f"MySQL error: {e}")
         raise ValueError(f"MySQL error while extracting schema: {e}")
     except Exception as e:
         logging.error(f"Unexpected error: {e}")
         raise ValueError(f"Unexpected error while extracting schema: {e}")
+    finally:
+        try:
+            db['cnf']['servers'][server]['cur'].close()
+        except Exception:
+            pass
+        try:
+            db['cnf']['servers'][server]['conn'].close()
+        except Exception:
+            pass
 
     return result
 
@@ -913,6 +924,15 @@ def get_primary_key_columns(db, server, database, table_name):
     except Exception as e:
         logging.error(f"Error extracting primary key for {table_name}: {e}")
         return []
+    finally:
+        try:
+            db['cnf']['servers'][server]['cur'].close()
+        except Exception:
+            pass
+        try:
+            db['cnf']['servers'][server]['conn'].close()
+        except Exception:
+            pass
 
 
 def parse_column_definitions(create_table_sql):
