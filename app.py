@@ -18,8 +18,9 @@ __contact__ = "email@miklos-szel.com"
 __license__ = "GPLv3"
 
 import logging
+import secrets
 from collections import defaultdict
-from flask import Flask, render_template, request, session, url_for, flash, redirect, jsonify
+from flask import Flask, render_template, request, session, url_for, flash, redirect, jsonify, abort
 from functools import wraps
 import re
 import os
@@ -68,6 +69,21 @@ def login_required(f):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
+
+
+@app.before_request
+def ensure_csrf_token():
+    if 'csrf_token' not in session:
+        session['csrf_token'] = secrets.token_hex(32)
+
+
+@app.before_request
+def csrf_protect():
+    if request.method == 'POST' and request.endpoint != 'login':
+        token = (request.form.get('_csrf_token')
+                 or request.headers.get('X-CSRF-Token'))
+        if not token or token != session.get('csrf_token'):
+            abort(403)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():

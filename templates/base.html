@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Modern web interface for ProxySQL management">
     <meta name="author" content="Miklos 'Mukka' Szel">
+    <meta name="csrf-token" content="{{ session.get('csrf_token', '') }}">
     <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.ico') }}">
 
     <!-- Font Awesome -->
@@ -81,6 +82,11 @@
             // Add fade-in animation to cards
             $('.card, .table').addClass('fade-in');
         });
+
+        function getCsrfToken() {
+            const meta = document.querySelector('meta[name="csrf-token"]');
+            return meta ? meta.content : '';
+        }
 
         function unEscape(htmlStr) {
             // Important: Replace &amp; FIRST to avoid double-unescaping
@@ -446,7 +452,7 @@
             const table = document.getElementById('proxywebtable');
             if (table && $.fn.DataTable) {
                 // Use DataTables API to detect when table is redrawn
-                table.addEventListener('draw.dt', function() {
+                $(table).on('draw.dt', function() {
                     // Re-apply floating buttons and re-create edit buttons after DataTables redraw
                     setTimeout(() => {
                         enableFloatingButtons();
@@ -711,6 +717,7 @@
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'X-CSRF-Token': getCsrfToken(),
                 },
                 body: JSON.stringify({
                     server: server,
@@ -800,6 +807,7 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
+                        'X-CSRF-Token': getCsrfToken(),
                     },
                     body: JSON.stringify({
                         server: server,
@@ -1058,6 +1066,7 @@
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'X-CSRF-Token': getCsrfToken(),
                 },
                 body: JSON.stringify({
                     server: server,
@@ -1253,6 +1262,7 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-CSRF-Token': getCsrfToken(),
                     },
                     body: 'sql=' + encodeURIComponent(sql)
                 })

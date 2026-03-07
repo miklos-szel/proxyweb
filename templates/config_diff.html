@@ -693,6 +693,7 @@ function loadConfigDiff() {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
+            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || {}).content || '',
         }
     })
     .then(response => response.json())
@@ -1373,6 +1374,7 @@ function saveSkipVariables() {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
+            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || {}).content || '',
         },
         body: JSON.stringify({
             skip_variables: window.configDiffSkipVariables

@@ -685,6 +685,7 @@
 
             <div class="settings-card-body">
                 <form action="/settings/save/" method="post">
+                    <input type="hidden" name="_csrf_token" value="{{ session.csrf_token }}">
                     <div class="mb-4">
                         <label for="settings" class="form-label">
                             <i class="fas fa-edit me-2"></i>YAML Configuration

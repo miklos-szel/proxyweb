@@ -586,6 +586,9 @@ function saveSettings() {
 
     fetch('/settings/ui_save/', {
         method: 'POST',
+        headers: {
+            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || {}).content || '',
+        },
         body: formData
     })
     .then(response => response.json())
@@ -696,6 +699,9 @@ function importConfig() {
 
     fetch('/settings/import/', {
         method: 'POST',
+        headers: {
+            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || {}).content || '',
+        },
         body: formData
     })
     .then(response => response.json())

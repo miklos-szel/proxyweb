@@ -375,6 +375,7 @@
                 </div>
 
                 <form action="/{{ session['server'] }}/{{ session['database'] }}/{{ session['table'] }}/sql/" method="post">
+                    <input type="hidden" name="_csrf_token" value="{{ session.csrf_token }}">
                     <div class="mb-4">
                         <textarea class="form-control font-monospace" name="sql" id="sql" rows="8" placeholder="Enter your SQL query here..." style="font-family: 'Courier New', monospace; font-size: 0.95rem; line-height: 1.6;"></textarea>
                     </div>
