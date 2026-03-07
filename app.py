@@ -215,7 +215,7 @@ def settings_ui_save():
 
         return jsonify({'success': True, 'message': 'Settings saved successfully'})
     except Exception as e:
-        logging.error(f"Error saving settings from UI: {e}")
+        logging.exception(f"Error saving settings from UI: {e}")
         return jsonify({'success': False, 'error': str(e)})
 
 
@@ -227,7 +227,7 @@ def settings_load_ui():
         config_data = mdb.get_config(config)
         return jsonify({'success': True, 'config': config_data})
     except Exception as e:
-        logging.error(f"Error loading config for UI: {e}")
+        logging.exception(f"Error loading config for UI: {e}")
         return jsonify({'success': False, 'error': str(e)})
 
 
@@ -240,7 +240,7 @@ def settings_export():
         yaml_content = mdb.dict_to_yaml(config_data)
         return jsonify({'success': True, 'yaml': yaml_content})
     except Exception as e:
-        logging.error(f"Error exporting config: {e}")
+        logging.exception(f"Error exporting config: {e}")
         return jsonify({'success': False, 'error': str(e)})
 
 
@@ -265,7 +265,7 @@ def settings_import():
 
         return jsonify({'success': True, 'message': 'Configuration imported successfully'})
     except Exception as e:
-        logging.error(f"Error importing config: {e}")
+        logging.exception(f"Error importing config: {e}")
         return jsonify({'success': False, 'error': str(e)})
 
 
@@ -284,7 +284,7 @@ def get_config_diff():
         diff_data = mdb.get_config_diff()
         return jsonify({'success': True, 'diff': diff_data})
     except Exception as e:
-        logging.error(f"Error getting config diff: {e}")
+        logging.exception(f"Error getting config diff: {e}")
         return jsonify({'success': False, 'error': str(e)})
 
 
@@ -310,7 +310,7 @@ def update_config_skip_variables():
         logging.info(f"Updated config_diff_skip_variable: {skip_variables}")
         return jsonify({'success': True})
     except Exception as e:
-        logging.error(f"Error updating config skip variables: {e}")
+        logging.exception(f"Error updating config skip variables: {e}")
         return jsonify({'success': False, 'error': str(e)})
 
 
@@ -345,7 +345,7 @@ def api_update_row():
         logging.debug(f"Update result: {result}")
         return jsonify(result)
     except Exception as e:
-        logging.error(f"API error in update_row: {str(e)}")
+        logging.exception(f"API error in update_row: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})
 
 
@@ -375,7 +375,7 @@ def api_delete_row():
         logging.debug(f"Delete result: {result}")
         return jsonify(result)
     except Exception as e:
-        logging.error(f"API error in delete_row: {str(e)}")
+        logging.exception(f"API error in delete_row: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})
 
 
@@ -407,7 +407,7 @@ def api_insert_row():
         logging.debug(f"Insert result: {result}")
         return jsonify(result)
     except Exception as e:
-        logging.error(f"API error in insert_row: {str(e)}")
+        logging.exception(f"API error in insert_row: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})
 
 
@@ -427,7 +427,7 @@ def api_get_schema():
         schema_info = mdb.get_table_schema(db, server, database, table_name)
         return jsonify({'success': True, 'schema': schema_info})
     except Exception as e:
-        logging.error(f"Schema extraction error: {e}")
+        logging.exception(f"Schema extraction error: {e}")
         return jsonify({'success': False, 'error': str(e)})
 
 
@@ -463,9 +463,7 @@ def api_execute_proxysql_command():
             return jsonify({'success': True})
 
     except Exception as e:
-        logging.error(f"API error in execute_proxysql_command: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logging.exception(f"API error in execute_proxysql_command: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})
 
 
