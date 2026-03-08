@@ -34,7 +34,18 @@ config = "config/config.yml"
 
 
 def _atomic_write(path, content):
-    """Write content to path atomically via a temp file in the same directory."""
+    """
+    Write the given content to a file at `path` atomically.
+    
+    This creates a temporary file in the same directory as `path`, writes `content` to it, flushes and fsyncs the data, then atomically replaces the target file with the temp file. If an error occurs during write or replace, the temporary file is removed (best-effort) and the original exception is re-raised.
+    
+    Parameters:
+        path (str): Filesystem path to write to. The final file at this path will be created or replaced.
+        content (str): Data to write to the file.
+    
+    Raises:
+        Exception: Propagates any exception raised while writing, syncing, or replacing the file after attempting to remove the temporary file.
+    """
     dir_ = os.path.dirname(os.path.abspath(path))
     fd, tmp_path = tempfile.mkstemp(dir=dir_)
     try:
@@ -65,6 +76,17 @@ if not isinstance(app.config.get('SECRET_KEY'), (str, bytes)):
 mdb.logging.debug(flask_custom_config)
 
 def login_required(f):
+    """
+    Decorator that requires a user to be logged in before calling the wrapped view.
+    
+    If the session key 'logged_in' is not present or falsy, flashes a warning message and redirects the client to the login page; otherwise invokes the original view function.
+    
+    Parameters:
+        f (callable): The view function to wrap.
+    
+    Returns:
+        callable: A wrapped view function that enforces the login requirement.
+    """
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not session.get('logged_in'):
@@ -76,12 +98,23 @@ def login_required(f):
 
 @app.before_request
 def ensure_csrf_token():
+    """
+    Ensure a CSRF token exists in the user's session.
+    
+    If no token is present, generates a 32-byte random token (returned as a 64-character hexadecimal string)
+    and stores it in session['csrf_token'].
+    """
     if 'csrf_token' not in session:
         session['csrf_token'] = secrets.token_hex(32)
 
 
 @app.before_request
 def csrf_protect():
+    """
+    Validate CSRF token for incoming POST requests (excluding the login endpoint) and abort with HTTP 403 on missing or invalid tokens.
+    
+    When the request method is POST and the endpoint is not 'login', this checks the `_csrf_token` form field or the `X-CSRF-Token` header against the `csrf_token` stored in the session; if the token is missing or does not match, the request is aborted with a 403 response.
+    """
     if request.method == 'POST' and request.endpoint != 'login':
         token = (request.form.get('_csrf_token')
                  or request.headers.get('X-CSRF-Token'))
@@ -90,6 +123,13 @@ def csrf_protect():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    """
+    Render the login page and authenticate the admin user.
+    
+    On POST, validates submitted credentials against the configured admin username and password; if they match, sets session['logged_in'] and redirects to the database list view. On GET or failed authentication, renders the login page and includes an error message when credentials are invalid.
+    Returns:
+    	A Flask response: a redirect to the database list on successful authentication, or the rendered login page (login.html) with an optional error message.
+    """
     session.clear()
     message=""
     admin_user = mdb.get_config(config)['auth']['admin_user']
@@ -151,6 +191,17 @@ def render_show_table_content(server, database="main", table="global_variables")
 @app.route('/<server>/<database>/<table>/sql/', methods=['GET', 'POST'])
 @login_required
 def render_change(server, database, table):
+    """
+    Handle ad-hoc SQL submitted from the table view: execute SELECT queries or data-changing statements, update request history, and render the table view with results.
+    
+    Executes the SQL from the submitted form. If the statement is a SELECT, runs it as an adhoc query and returns its result; otherwise executes the change and refreshes the table content. Updates session history with non-duplicate successful statements and sets an error or success message for rendering.
+    
+    Returns:
+        Rendered HTML for "show_table_info.html" containing `content`, `error`, and `message`.
+    
+    Raises:
+        ValueError: If any unexpected exception occurs during processing.
+    """
     try:
         error = ""
         message = ""
@@ -192,6 +243,18 @@ def adhoc_report(server):
 @app.route('/settings/<action>/', methods=['GET', 'POST'])
 @login_required
 def render_settings(action):
+    """
+    Render the settings page and optionally persist updated configuration.
+    
+    Parameters:
+        action (str): 'edit' to load the current configuration file for editing, or 'save' to validate and atomically persist the submitted YAML configuration.
+    
+    Returns:
+        A Flask response rendering the 'settings.html' template with `config_file_content` and `message`.
+    
+    Raises:
+        ValueError: If YAML validation, file I/O, or write operations fail.
+    """
     try:
         config_file_content = ""
         message = ""
@@ -217,7 +280,16 @@ def render_settings(action):
 @app.route('/settings/ui_save/', methods=['POST'])
 @login_required
 def settings_ui_save():
-    """Save settings from UI form"""
+    """
+    Save UI-submitted settings to the application's configuration after validation and backup.
+    
+    Validates the provided YAML and configuration shape, writes a backup of the current config file, and atomically replaces the config with the validated content.
+    
+    Returns:
+        dict: On success, JSON {'success': True, 'message': 'Settings saved successfully'}.
+        dict: On validation failure, JSON {'success': False, 'error': <message>} with HTTP 400.
+        dict: On other errors, JSON {'success': False, 'error': <message>}.
+    """
     try:
         # Get form data and build YAML
         form_data = request.form.to_dict()
@@ -245,7 +317,14 @@ def settings_ui_save():
 @app.route('/settings/load_ui/', methods=['GET'])
 @login_required
 def settings_load_ui():
-    """Load settings in UI format"""
+    """
+    Return the current application configuration formatted for the UI.
+    
+    Returns:
+        Response: JSON object with either:
+            - {'success': True, 'config': <dict>} on success, or
+            - {'success': False, 'error': '<error message>'} on failure.
+    """
     try:
         config_data = mdb.get_config(config)
         return jsonify({'success': True, 'config': config_data})
@@ -257,7 +336,14 @@ def settings_load_ui():
 @app.route('/settings/export/', methods=['GET'])
 @login_required
 def settings_export():
-    """Export configuration as YAML"""
+    """
+    Provide the YAML representation of the current configuration.
+    
+    Returns:
+        dict: JSON-serializable payload with either:
+            - {'success': True, 'yaml': <str>} on success, where <str> is the config YAML, or
+            - {'success': False, 'error': <str>} on failure, where <str> is the error message.
+    """
     try:
         config_data = mdb.get_config(config)
         yaml_content = mdb.dict_to_yaml(config_data)
@@ -270,7 +356,15 @@ def settings_export():
 @app.route('/settings/import/', methods=['POST'])
 @login_required
 def settings_import():
-    """Import configuration from uploaded YAML"""
+    """
+    Import a new application configuration from uploaded YAML content.
+    
+    Validates the uploaded YAML for syntax and required configuration shape before modifying persistent state, creates a backup of the existing config file as "<config>.bak", then atomically replaces the configuration file with the provided YAML. On success returns a JSON object indicating success; on failure returns a JSON object with an error message and logs the exception.
+    
+    Returns:
+        dict: JSON-serializable mapping. On success: `{'success': True, 'message': 'Configuration imported successfully'}`.
+              On error: `{'success': False, 'error': '<error message>'}`.
+    """
     try:
         # Get uploaded YAML content
         yaml_content = request.form.get('yaml_content', '')
@@ -295,14 +389,32 @@ def settings_import():
 @app.route('/<server>/config_diff/', methods=['GET', 'POST'])
 @login_required
 def render_config_diff(server):
-    """Render Configuration Diff page"""
+    """
+    Render the configuration-diff page for the specified server.
+    
+    Parameters:
+        server (str): Identifier of the server whose configuration diff will be displayed.
+    
+    Returns:
+        flask.Response: Rendered HTML response for the configuration diff page.
+    """
     return render_template('config_diff.html', server=server)
 
 
 @app.route('/<server>/config_diff/get', methods=['POST'])
 @login_required
 def get_config_diff(server):
-    """Get configuration differences across Disk/Memory/Runtime"""
+    """
+    Return configuration differences for the given ProxySQL server.
+    
+    Parameters:
+        server (str): Identifier of the server whose Disk/Memory/Runtime configuration differences should be retrieved.
+    
+    Returns:
+        Response: JSON object with `success` (bool) and:
+            - `diff` (object) when `success` is True: the configuration differences grouped by source.
+            - `error` (str) when `success` is False: error message explaining the failure.
+    """
     try:
         diff_data = mdb.get_config_diff(server)
         return jsonify({'success': True, 'diff': diff_data})
@@ -314,7 +426,17 @@ def get_config_diff(server):
 @app.route('/api/update_config_skip_variables', methods=['POST'])
 @login_required
 def update_config_skip_variables():
-    """Update config_diff_skip_variable in config.yml"""
+    """
+    Update the list of variables to skip when computing configuration differences.
+    
+    Expects a JSON request body containing a `skip_variables` array of variable names to store
+    under the config's `global.config_diff_skip_variable` key. Persists the updated configuration
+    to disk (creates a `.bak` backup of the existing config before writing).
+    
+    Returns:
+        dict: JSON response with `{'success': True}` on success, or
+              `{'success': False, 'error': <message>}` on failure describing the error.
+    """
     try:
         data = request.get_json()
         skip_variables = data.get('skip_variables', [])
@@ -343,6 +465,29 @@ def update_config_skip_variables():
 @app.route('/api/update_row', methods=['POST'])
 @login_required
 def api_update_row():
+    """
+    Handle an API request to update a single row in a table.
+    
+    Expects a JSON payload with the following keys in the request body:
+    - server (str): target server identifier.
+    - database (str): target database name.
+    - table (str): target table name.
+    - pkValues (list): primary key values identifying the row to update.
+    - columnNames (list): column names corresponding to the data values.
+    - data (list): values to write for the specified columns.
+    
+    Behavior:
+    - Rejects requests with missing/invalid JSON with a 400 response.
+    - Rejects updates if the server/table is read-only or the table name starts with "runtime_" with a 403 response.
+    - Delegates the update to mdb.update_row and returns its result as JSON.
+    - On unexpected errors returns a JSON object with `{'success': False, 'error': <message>}`.
+    
+    Returns:
+    A JSON response produced by the update operation or an error object; HTTP status codes:
+    - 200 for successful update responses from mdb.update_row,
+    - 400 for invalid requests,
+    - 403 for attempts to modify read-only/runtime tables.
+    """
     try:
         data = request.get_json(silent=True)
         if not data:
@@ -379,6 +524,24 @@ def api_update_row():
 @app.route('/api/delete_row', methods=['POST'])
 @login_required
 def api_delete_row():
+    """
+    Delete a single row from the specified table on the given server.
+    
+    Expects a JSON payload with the following keys in the request body:
+        server (str): Server identifier to operate on.
+        database (str): Database/schema name containing the table.
+        table (str): Table name from which to delete the row.
+        pkValues (dict): Mapping of primary key column names to their values identifying the row.
+    
+    Behavior:
+        - Rejects the request with HTTP 400 if the JSON payload is missing or invalid.
+        - Rejects the request with HTTP 403 if the target server/table is read-only or if the table name starts with "runtime_".
+        - Calls the underlying data layer to perform the delete; on success returns that result as JSON.
+        - On unexpected errors returns JSON with `{'success': False, 'error': <message>}`.
+    
+    Returns:
+        JSON object with the operation result (e.g., `{'success': True, ...}` on success or `{'success': False, 'error': <message>}` on failure).
+    """
     try:
         data = request.get_json(silent=True)
         if not data:
@@ -411,6 +574,18 @@ def api_delete_row():
 @app.route('/api/insert_row', methods=['POST'])
 @login_required
 def api_insert_row():
+    """
+    Insert a new row into the specified table on the given server.
+    
+    Expects a JSON request body with these keys:
+    - server (str): target server identifier.
+    - database (str): database/schema name.
+    - table (str): target table name.
+    - columnNames (list[str]): list of column names for the new row.
+    - data (list|dict): values for the new row (format expected by the underlying DB helper).
+    
+    If the target server or table is read-only or the table name starts with "runtime_", the request is rejected with a 403 response. If the request body is missing or invalid, a 400 response is returned. On success, returns the JSON result produced by the underlying insert operation; on error returns JSON with {'success': False, 'error': <message>}.
+    """
     try:
         data = request.get_json(silent=True)
         if not data:
@@ -445,7 +620,15 @@ def api_insert_row():
 @app.route('/api/get_schema', methods=['GET'])
 @login_required
 def api_get_schema():
-    """Get table schema including CHECK constraints and default values."""
+    """
+    Retrieve schema information for a table, including CHECK constraints and default values.
+    
+    Parameters:
+        table (str, query param): Name of the table to inspect; required.
+    
+    Returns:
+        dict: JSON object with `success` (bool). On success includes `schema` containing the table schema details; on failure includes `error` with an error message.
+    """
     try:
         table_name = request.args.get('table', '')
         if not table_name:
@@ -467,7 +650,14 @@ _ALLOWED_PROXYSQL_CMD = re.compile(r'^\s*(LOAD|SAVE|SELECT\s+CONFIG)\b', re.IGNO
 @app.route('/api/execute_proxysql_command', methods=['POST'])
 @login_required
 def api_execute_proxysql_command():
-    """Execute ProxySQL administrative commands (LOAD/SAVE)."""
+    """
+    Execute allowed ProxySQL administrative commands submitted via the request form.
+    
+    Reads the 'sql' form field, validates that each statement is an allowed ProxySQL administrative command (e.g., LOAD, SAVE, or SELECT CONFIG), executes the commands against the server from the session (default 'proxysql'), and returns execution status.
+    
+    Returns:
+        dict: JSON-serializable object: `{'success': True}` on success; `{'success': False, 'error': <message>}` on failure or validation error.
+    """
     try:
         sql = request.form.get('sql', '')
         if not sql:
@@ -500,6 +690,15 @@ def api_execute_proxysql_command():
 
 @app.errorhandler(Exception)
 def handle_exception(e):
+    """
+    Render an error page for an exception.
+    
+    Parameters:
+        e (Exception): The exception to display on the error page; passed to the template as `error`.
+    
+    Returns:
+        tuple: A rendered error page response and the HTTP status code 500.
+    """
     print(e)
     return render_template("error.html", error=e), 500
 

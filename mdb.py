@@ -37,6 +37,18 @@ def _quote_ident(name):
 sql_get_databases = "show databases"
 
 def get_config(config="config/config.yml"):
+    """
+    Load and parse a YAML configuration file into a Python dictionary.
+    
+    Parameters:
+        config (str): Path to the YAML configuration file.
+    
+    Returns:
+        dict: Parsed configuration dictionary.
+    
+    Raises:
+        ValueError: If the file cannot be opened or the YAML cannot be parsed.
+    """
     logging.debug("Using file: %s" % (config))
     try:
         with open(config, 'r') as yml:
@@ -48,7 +60,17 @@ def get_config(config="config/config.yml"):
 
 def dict_to_yaml(data, indent=0, prev_key=None):
     """
-    Convert a dictionary to YAML format with proper indentation and improved readability.
+    Render a Python dict/list/value into a human-friendly YAML string with controlled indentation and section spacing.
+    
+    Converts nested dictionaries and lists into an indented YAML-like string. At top level, inserts blank lines before configured major sections ('global', 'servers', 'auth', 'flask', 'misc') and before certain subsection keys (e.g., 'admin_user', 'admin_password', 'dsn' under 'servers' and 'apply_config', 'update_config', 'adhoc_report' under 'misc') to improve readability. Leaves scalar values formatted using format_yaml_value and represents dictionary list items inline when appropriate.
+    
+    Parameters:
+        data (dict | list | any): The input structure to render as YAML; may be a dictionary, list, or scalar.
+        indent (int): Current indentation level (number of two-space indents) used for recursive calls.
+        prev_key (str | None): Parent key name used to determine where to insert subsection blank lines.
+    
+    Returns:
+        str: A YAML-formatted string representing the provided data.
     """
     yaml_str = ""
     indent_str = "  " * indent
@@ -91,7 +113,13 @@ def dict_to_yaml(data, indent=0, prev_key=None):
 
 def dict_to_yaml_inline(data):
     """
-    Convert a dictionary to inline YAML format for arrays.
+    Convert a dictionary to a single-line YAML-style mapping suitable for embedding in YAML arrays.
+    
+    Parameters:
+        data (dict): Mapping of string keys to values to be represented inline.
+    
+    Returns:
+        str: A single-line YAML-like mapping with quoted keys and YAML-formatted values, followed by a newline (e.g. {"key": value, ...}).
     """
     items = []
     for key, value in data.items():
@@ -101,7 +129,19 @@ def dict_to_yaml_inline(data):
 
 
 def format_yaml_value(value):
-    """Format a value for YAML output."""
+    """
+    Format a Python value into a YAML-friendly scalar string.
+    
+    Converts common Python scalar types to a YAML-safe string representation:
+    - None becomes an empty quoted string `""`.
+    - booleans become `true` or `false`.
+    - integers and floats are converted via `str`.
+    - strings are returned unquoted unless they contain characters that require quoting, in which case they are wrapped in double quotes.
+    - lists and other types are stringified and wrapped in double quotes.
+    
+    Returns:
+        A string containing the YAML-friendly representation of `value`.
+    """
     if value is None:
         return '""'
     if isinstance(value, bool):
@@ -119,7 +159,18 @@ def format_yaml_value(value):
 
 
 def validate_yaml(yaml_content):
-    """Validate YAML syntax."""
+    """
+    Validate YAML syntax for the provided content.
+    
+    Parameters:
+        yaml_content (str or file-like): YAML text or stream to validate.
+    
+    Returns:
+        bool: `True` if `yaml_content` parses as valid YAML.
+    
+    Raises:
+        ValueError: If `yaml_content` contains invalid YAML syntax, with an explanatory message.
+    """
     try:
         yaml.safe_load(yaml_content)
         return True
@@ -128,7 +179,26 @@ def validate_yaml(yaml_content):
 
 
 def validate_config_shape(cfg):
-    """Raise ValueError if cfg is missing required top-level keys or sub-keys."""
+    """
+    Validate that a configuration mapping contains required top-level sections and keys.
+    
+    Parameters:
+        cfg (dict): Configuration mapping parsed from YAML to validate.
+    
+    Raises:
+        ValueError: If `cfg` is not a mapping.
+        ValueError: If a required top-level section is missing.
+        ValueError: If a required top-level section exists but is not a mapping.
+        ValueError: If a required key is missing from a section (format: 'section.key').
+    
+    Notes:
+        Required sections and keys enforced:
+          - auth: 'admin_user', 'admin_password'
+          - global: 'default_server'
+          - flask: 'SECRET_KEY'
+          - servers: (must be a mapping)
+          - misc: (must be a mapping)
+    """
     if not isinstance(cfg, dict):
         raise ValueError("Config must be a YAML mapping")
     required = {
@@ -150,8 +220,15 @@ def validate_config_shape(cfg):
 
 def form_data_to_yaml(form_data):
     """
-    Convert form data to YAML configuration format.
-    This function reconstructs the config.yml structure from the form data.
+    Builds a full configuration YAML string from submitted form data.
+    
+    Reads expected form fields and reconstructs the configuration structure (global, servers, auth, flask, misc), normalizing boolean flags, collecting repeated/numbered entries (DSNs, hide_tables, apply/update/adhoc config items), and converting escaped newlines ("\\n") into real newlines for SQL/info blocks. Ensures the resulting config always includes 'servers' and 'misc' keys (possibly empty) and prepends a generated header with a timestamp.
+    
+    Parameters:
+        form_data (dict): Mapping of form field names to string values as submitted by the UI.
+    
+    Returns:
+        str: Complete YAML document (including header comment) representing the reconstructed configuration.
     """
     config = {
         'global': {},
@@ -323,6 +400,19 @@ def form_data_to_yaml(form_data):
 
 
 def db_connect(db, server, autocommit=False, buffered=False, dictionary=True):
+    """
+    Establishes a MySQL connection for the given server and stores the loaded configuration, connection, and cursor in the provided `db` dictionary.
+    
+    Parameters:
+        db (dict): Mutable mapping where configuration (`'cnf'`), connection (`'conn'`) and cursor (`'cur'`) will be stored.
+        server (str): Key identifying the server entry inside the loaded configuration's `servers` section.
+        autocommit (bool): If True, enable autocommit on the created connection.
+        buffered (bool): If True, create a buffered cursor.
+        dictionary (bool): If True, create a cursor that returns rows as dictionaries.
+    
+    Raises:
+        ValueError: If a MySQL connector error or warning occurs while connecting or creating the cursor.
+    """
     try:
         db['cnf'] = get_config()
 
@@ -371,6 +461,19 @@ def should_hide_table(table_name, hide_patterns):
 
 
 def get_all_dbs_and_tables(db, server):
+    """
+    Collects visible databases and their tables for a given server, applying global or server-specific hide patterns.
+    
+    Parameters:
+        db (dict): Runtime context containing configuration and connection placeholders; will be populated by db_connect().
+        server (str): Name of the server as defined in the configuration.
+    
+    Returns:
+        dict: Nested mapping of {server: {database_name: [visible_table_names...]}}.
+    
+    Raises:
+        ValueError: If a MySQL connector error or warning occurs while listing databases or tables.
+    """
     all_dbs = {server: {}}
     try:
 
@@ -403,8 +506,29 @@ def get_all_dbs_and_tables(db, server):
 
 def get_config_diff(server='proxysql'):
     """
-    Get configuration differences across Disk, Memory, and Runtime layers.
-    Returns a dictionary with summary and detailed diff information.
+    Compute configuration differences for ProxySQL tables across disk, memory, and runtime layers.
+    
+    Parameters:
+        server (str): Name of the server configuration to use when connecting (e.g., 'proxysql').
+    
+    Returns:
+        dict: A result dictionary with keys:
+            - summary: Mapping with counts:
+                - total_tables (int)
+                - tables_with_differences (int)
+                - total_changes (dict) with keys 'added', 'modified', 'deleted'
+            - tables: List of per-table diff objects. Each table object contains:
+                - table_name (str)
+                - databases (dict): Per-layer entries ('disk', 'memory', 'runtime') each with:
+                    - row_count (int)
+                    - data (list of row dicts)
+                    - column_order (list of column names)
+                    - optional 'error' (str) when a layer query failed
+                - differences (dict) with:
+                    - disk_vs_memory: {'only_in_disk': [...], 'only_in_memory': [...]}
+                    - memory_vs_runtime: {'only_in_memory': [...], 'only_in_runtime': [...]}
+                - stats: Counters and flags ('disk_rows', 'memory_rows', 'runtime_rows', 'has_differences')
+            - config_diff_skip_variable: List of variable names from config to ignore during diffing.
     """
     try:
         # Get config to access hide_tables and skip_variables
@@ -525,6 +649,15 @@ def get_config_diff(server='proxysql'):
 
             # Build hash to row mapping for each layer
             def build_hash_map(data):
+                """
+                Build a mapping from a deterministic serialized representation of each row to the original row.
+                
+                Parameters:
+                    data (iterable): An iterable of JSON-serializable rows (e.g., dicts or lists).
+                
+                Returns:
+                    dict: A dictionary whose keys are deterministic serialized representations of each row (stable key order) and whose values are the original row objects.
+                """
                 hash_map = {}
                 for row in data:
                     row_hash = json.dumps(row, sort_keys=True)
@@ -589,7 +722,26 @@ def get_config_diff(server='proxysql'):
 
 
 def get_table_content(db, server, database, table):
-    '''returns with a dict with two keys "column_names" = list and  rows = tuples '''
+    """
+    Return the rows, column names, and miscellaneous config for a specific table.
+    
+    Retrieves all rows from the given database.table ordered by the first column, records the result rows and column names, and includes the global 'misc' section from the loaded configuration.
+    
+    Parameters:
+        db (dict): Application DB context dict used by db_connect to store connection/cursor.
+        server (str): Server name as defined in the configuration.
+        database (str): Database name containing the table.
+        table (str): Table name to fetch.
+    
+    Returns:
+        content (dict): Dictionary with keys:
+            - 'rows' (list of tuples): All table rows returned by the query.
+            - 'column_names' (list of str): Column names in result order.
+            - 'misc' (dict): The 'misc' section from the loaded configuration.
+    
+    Raises:
+        ValueError: If a MySQL connector error or warning occurs while querying.
+    """
     content = {}
     try:
         logging.debug("server: {} - db: {} - table:{}".format(server, database, table))
@@ -662,7 +814,24 @@ def execute_adhoc_query(db, server, sql):
         raise ValueError(e)
 
 def execute_adhoc_report(db, server):
-    '''returns with a dict with two keys "column_names" = list and  rows = tuples '''
+    """
+    Run configured ad-hoc SQL reports for a server and collect their results.
+    
+    Parameters:
+        db: Runtime context dictionary used to store connection/cursor state.
+        server (str): Name of the server to run reports against.
+    
+    Returns:
+        list[dict]: A list of result dictionaries, each containing:
+            - title (str): Report title.
+            - sql (str): Executed SQL statement.
+            - info: Additional report info (value from config).
+            - column_names (list[str]): Column names in the result set.
+            - rows (list[tuple]): Query result rows.
+    
+    Raises:
+        ValueError: If a MySQL error or warning occurs while executing reports.
+    """
     adhoc_results = []
     result = {}
     try:
@@ -700,6 +869,18 @@ def get_servers():
         raise ValueError("Cannot get the serverlist from the config file")
 
 def get_read_only(server):
+    """
+    Return the configured read-only flag for a named server, falling back to the global default if the server has no explicit setting.
+    
+    Parameters:
+        server (str): Name of the server as listed in the configuration's `servers` section.
+    
+    Returns:
+        bool: The read-only value for the server (`True` or `False`).
+    
+    Raises:
+        ValueError: If the configuration cannot be read or does not contain the expected structure.
+    """
     try:
         config = get_config()
         if 'read_only' not in config['servers'][server]:
@@ -713,6 +894,17 @@ def get_read_only(server):
 
 
 def execute_change(db, server, sql):
+    """
+    Execute a write operation (INSERT/UPDATE/DELETE) against the specified server and return any error output.
+    
+    Parameters:
+        db: Mutable container used to establish or hold a database connection (passed-through to connection helper).
+        server (str): Name of the server from configuration to target.
+        sql (str): SQL statement to execute.
+    
+    Returns:
+        error_msg (str): Error output from the client if the command failed, or an empty string if execution succeeded.
+    """
     try:
         # this is a temporary solution as using the  mysql.connector for certain writes ended up with weird results, ProxySQL
         # is not a MySQL server after all. We're investigating the issue.
@@ -747,8 +939,13 @@ def execute_change(db, server, sql):
 
 def extract_default_value(column_def):
     """
-    Extract DEFAULT value from a column definition.
-    Returns the default value or None if not found.
+    Extract the DEFAULT clause value from a SQL column definition string.
+    
+    Parameters:
+        column_def (str): A single-column definition fragment from a CREATE TABLE statement.
+    
+    Returns:
+        The extracted default token as a string (includes surrounding quotes for quoted defaults) or `None` if no DEFAULT clause is present.
     """
     # Pattern to match DEFAULT clause
     default_pattern = r'DEFAULT\s+(?:NULL|(\'[^\']*\'|\"[^\"]*\"|\w+|\d+))'
@@ -871,21 +1068,12 @@ def get_table_schema(db, server, database, table_name):
 
 def get_primary_key_columns(db, server, database, table_name):
     """
-    Extract primary key column names from a table's CREATE TABLE statement.
-
-    Args:
-        db: Database connection dict
-        server: Server name from config
-        database: Database name
-        table_name: Name of the table
-
+    Return the primary key column names defined for the specified table.
+    
+    Parses the table's CREATE TABLE SQL and extracts the PRIMARY KEY column list.
+    
     Returns:
-        list: List of column names that form the primary key
-              Returns empty list if no primary key found
-
-    Example:
-        For PRIMARY KEY (hostgroup_id, hostname, port)
-        Returns: ['hostgroup_id', 'hostname', 'port']
+        list: Primary key column names in definition order. Returns an empty list if the table has no primary key or if the primary key cannot be determined.
     """
     try:
         db_connect(db, server=server, dictionary=True)
@@ -937,8 +1125,18 @@ def get_primary_key_columns(db, server, database, table_name):
 
 def parse_column_definitions(create_table_sql):
     """
-    Parse CREATE TABLE SQL to extract column definitions.
-    Returns dict of column info with type, nullable, default, and CHECK constraints.
+    Extracts column definitions from a CREATE TABLE statement.
+    
+    Parameters:
+        create_table_sql (str): The full CREATE TABLE SQL text.
+    
+    Returns:
+        dict: Mapping of column name to a metadata dict for each column. Each metadata dict contains keys:
+            - 'name' (str): Column name.
+            - 'type' (str): Column data type (as parsed).
+            - 'nullable' (bool): True if the column allows NULL, False otherwise.
+            - 'default' (str|None): The parsed DEFAULT value, or None if not present.
+            - 'check_constraint' (str, optional): CHECK constraint expression if present.
     """
     columns = {}
 
@@ -1001,8 +1199,19 @@ def split_sql_columns(text):
 
 def parse_column_definition(col_def):
     """
-    Parse a single column definition from CREATE TABLE.
-    Returns dict with column information.
+    Parse a single column definition from a CREATE TABLE statement.
+    
+    Parameters:
+        col_def (str): The raw column definition fragment (e.g. "`id` INT NOT NULL AUTO_INCREMENT").
+    
+    Returns:
+        dict or None: A mapping with the following keys when parsing succeeds:
+            - name (str): Column identifier without quoting characters.
+            - type (str): Declared column type including any parenthesized size/precision (e.g. "varchar(255)").
+            - nullable (bool): `False` if the column is declared `NOT NULL`, `True` otherwise.
+            - default (str or None): The default value as a string with surrounding quotes removed, or `None` if no DEFAULT is present.
+            - check_constraint (str or None): The CHECK expression contents (without the outer parentheses) if a CHECK constraint is present, otherwise `None`.
+        Returns `None` if the input cannot be parsed.
     """
     try:
         col_def = col_def.strip()
@@ -1070,10 +1279,13 @@ def parse_column_definition(col_def):
 
 def get_proxysql_table_constraints(table_name):
     """
-    Get known constraints for ProxySQL tables.
-    Based on ProxySQL documentation: https://proxysql.com/documentation/main-runtime/
-
-    Returns a dict of table constraints including CHECK constraints and defaults.
+    Retrieve known column constraints for a ProxySQL runtime table.
+    
+    Parameters:
+        table_name (str): Name of the ProxySQL table to look up.
+    
+    Returns:
+        constraints (dict): A mapping where the key is the requested `table_name` and the value is a dict of column names to their constraint metadata (keys may include `type`, `nullable`, `default`, `check_constraint`, and `is_primary_key`). If the table is unknown, an empty dict is returned.
     """
     constraints = {}
 
@@ -1278,8 +1490,21 @@ def get_proxysql_table_constraints(table_name):
 
 def update_row(db, server, database, table, pk_values, column_names, data):
     """
-    Update a specific row in a table using primary key values.
-    Returns dict with 'success' and 'error' keys.
+    Update a single row in the specified table identified by primary key values.
+    
+    Parameters:
+        db (dict): Execution context object where connection/cursor are stored (passed through to helpers).
+        server (str): Server name from configuration to target for the update.
+        database (str): Database/schema name containing the table.
+        table (str): Table name to update.
+        pk_values (dict): Mapping of primary key column names to their identifying values; values of None match IS NULL.
+        column_names (Iterable[str]): Iterable of valid column names for the target table used to validate incoming columns.
+        data (dict): Mapping of column names to new values; omit keys or set value to None to use NULL/DEFAULT behavior.
+    
+    Returns:
+        dict: Result object with keys:
+            - `success` (bool): `True` if the update command was issued without detected errors, `False` otherwise.
+            - `error` (str|None): Error message when `success` is `False`, otherwise `None`.
     """
     result = {'success': True, 'error': None}
     try:
@@ -1352,8 +1577,17 @@ def update_row(db, server, database, table, pk_values, column_names, data):
 
 def delete_row(db, server, database, table, pk_values):
     """
-    Delete a specific row from a table using primary key values.
-    Returns dict with 'success' and 'error' keys.
+    Delete a row identified by primary key values from the specified table.
+    
+    If the table's primary key columns can be discovered, those columns are used; otherwise the keys of `pk_values` are used as a fallback. NULL values in `pk_values` are translated to `IS NULL` in the WHERE clause. On failure the function returns an error message and does not raise.
+    
+    Parameters:
+        pk_values (dict): Mapping of primary key column names to their values; use `None` to match SQL NULL.
+    
+    Returns:
+        dict: A result object with keys:
+            - `success` (bool): `True` if the delete was issued without detected error, `False` otherwise.
+            - `error` (str or None): Error message when `success` is `False`, otherwise `None`.
     """
     result = {'success': True, 'error': None}
     try:
@@ -1402,8 +1636,20 @@ def delete_row(db, server, database, table, pk_values):
 
 def insert_row(db, server, database, table, column_names, data):
     """
-    Insert a new row into a table.
-    Returns dict with 'success' and 'error' keys.
+    Insert a new row into a table, using provided column names and values while validating against the live table schema.
+    
+    Parameters:
+        db: Execution context / connection holder used by helper functions (not a raw connection).
+        server (str): Server name from configuration to run the insert against.
+        database (str): Database/schema name containing the target table.
+        table (str): Target table name.
+        column_names (list[str]): List of column names the caller intends to set; entries named `'variable_name'` are ignored.
+        data (dict): Mapping of column name to value for the insert; missing keys or keys with value `None` are omitted so the column's DEFAULT is used.
+    
+    Returns:
+        dict: A result mapping with keys:
+            - 'success' (bool): `True` if the INSERT was issued without detected errors, `False` otherwise.
+            - 'error' (str|None): Error message on failure, or `None` on success.
     """
     result = {'success': True, 'error': None}
     try:
