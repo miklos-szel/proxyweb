@@ -47,10 +47,28 @@ class ProxyWebSession:
     """Authenticated requests session with automatic CSRF token handling."""
 
     def __init__(self):
+        """
+        Initialize the session helper.
+        
+        Creates a new requests.Session for HTTP calls and initializes the CSRF token storage.
+        
+        Attributes:
+            session (requests.Session): Persistent HTTP session used for requests to ProxyWeb.
+            csrf_token (str): Current CSRF token extracted from responses; empty until refreshed.
+        """
         self.session = requests.Session()
         self.csrf_token = ""
 
     def login(self, username=USERNAME, password=PASSWORD):
+        """
+        Authenticate to ProxyWeb using the given credentials and refresh the session's CSRF token.
+        
+        Returns:
+            resp: The HTTP response object from the login POST request.
+        
+        Raises:
+            requests.HTTPError: If the login request returns an HTTP error status.
+        """
         resp = self.session.post(
             f"{BASE_URL}/login",
             data={"username": username, "password": password},
@@ -62,6 +80,19 @@ class ProxyWebSession:
         return resp
 
     def get(self, path, **kwargs):
+        """
+        Perform an authenticated GET request against the test server and update the session CSRF token.
+        
+        Parameters:
+            path (str): Path component to append to BASE_URL (e.g., "/login" or "/proxysql/main/").
+            **kwargs: Passed through to requests.Session.get (common keys: params, headers, timeout).
+        
+        Returns:
+            resp (requests.Response): The HTTP response object.
+        
+        Raises:
+            requests.HTTPError: If the response status indicates an HTTP error (raised by resp.raise_for_status()).
+        """
         kwargs.setdefault("timeout", 10)
         resp = self.session.get(f"{BASE_URL}{path}", **kwargs)
         resp.raise_for_status()
@@ -69,6 +100,20 @@ class ProxyWebSession:
         return resp
 
     def post_form(self, path, data=None, **kwargs):
+        """
+        Submit a form-encoded POST to the given path while automatically injecting the current CSRF token and refreshing it from the response.
+        
+        Parameters:
+            path (str): URL path appended to the configured base URL.
+            data (dict, optional): Form fields to send; a copy is made and `_csrf_token` is added.
+            **kwargs: Passed through to requests.Session.post (e.g., headers, timeout).
+        
+        Returns:
+            resp (requests.Response): The HTTP response object.
+        
+        Raises:
+            requests.HTTPError: If the response status code indicates an error.
+        """
         payload = dict(data or {})
         payload["_csrf_token"] = self.csrf_token
         kwargs.setdefault("timeout", 10)
@@ -78,6 +123,20 @@ class ProxyWebSession:
         return resp
 
     def post_json(self, path, body, **kwargs):
+        """
+        Send a JSON request to the given application path including the current CSRF token.
+        
+        Parameters:
+            path (str): URL path to append to the configured BASE_URL (e.g., '/api/endpoint').
+            body: JSON-serializable object to send as the request body.
+            **kwargs: Passed to requests.post (common use: timeout). Default timeout is 10 seconds.
+        
+        Returns:
+            requests.Response: The HTTP response object.
+        
+        Raises:
+            requests.HTTPError: If the response status indicates an HTTP error (response.raise_for_status()).
+        """
         kwargs.setdefault("timeout", 10)
         headers = {
             "Content-Type": "application/json",
@@ -90,6 +149,12 @@ class ProxyWebSession:
         return resp
 
     def _refresh_csrf(self, html):
+        """
+        Extracts a CSRF token from the provided HTML and stores it on the instance as `csrf_token`.
+        
+        Parameters:
+            html (str): HTML content to search for a `<meta name="csrf-token" content="...">` tag. If a matching meta tag is found, its `content` value is assigned to `self.csrf_token`; otherwise `self.csrf_token` is left unchanged.
+        """
         m = re.search(r'<meta name="csrf-token" content="([^"]+)"', html)
         if m:
             self.csrf_token = m.group(1)
@@ -100,7 +165,17 @@ class ProxyWebSession:
 # ---------------------------------------------------------------------------
 
 def wait_for_proxyweb(timeout=120):
-    """Poll /login until proxyweb responds or timeout is reached."""
+    """
+    Wait until ProxyWeb becomes responsive by polling the /login endpoint.
+    
+    Parameters:
+        timeout (int): Maximum number of seconds to wait before giving up.
+    
+    Raises:
+        RuntimeError: If /login does not return HTTP 200 within `timeout` seconds.
+            The exception message includes the last encountered `requests.RequestException`,
+            if any occurred during polling.
+    """
     deadline = time.monotonic() + timeout
     last_err = None
     while time.monotonic() < deadline:
@@ -124,6 +199,11 @@ class TestAuth(unittest.TestCase):
     """Authentication: login, logout, access control."""
 
     def test_login_page_returns_200(self):
+        """
+        Verify the login page is reachable and contains a login indicator.
+        
+        Asserts that a GET request to /login returns HTTP 200 and that the response body (case-insensitive) includes the substring "login".
+        """
         resp = requests.get(f"{BASE_URL}/login", timeout=10)
         self.assertEqual(resp.status_code, 200)
         self.assertIn("login", resp.text.lower())
@@ -152,6 +232,11 @@ class TestAuth(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
 
     def test_logout_clears_session(self):
+        """
+        Verify logout clears the authenticated session and protects the root route.
+        
+        Logs in, requests /logout and asserts the response URL points to the login page, then requests / without re-login and asserts the response is a redirect (301, 302, or 303).
+        """
         s = ProxyWebSession()
         s.login()
         # After logout, accessing / should redirect to login
@@ -166,10 +251,18 @@ class TestNavigation(unittest.TestCase):
     """Page navigation: table list, table view, adhoc report."""
 
     def setUp(self):
+        """
+        Prepare an authenticated ProxyWebSession and store it as self.s for use by the test methods.
+        """
         self.s = ProxyWebSession()
         self.s.login()
 
     def test_home_page_lists_databases(self):
+        """
+        Verify the application home page shows configured ProxySQL databases.
+        
+        Asserts that a GET request to the root path returns HTTP 200 and that the response body includes the database name "main", which should appear in the site navigation/sidebar.
+        """
         resp = self.s.get("/")
         self.assertEqual(resp.status_code, 200)
         # The sidebar should reference known ProxySQL databases
@@ -213,6 +306,11 @@ class TestSQLExecution(unittest.TestCase):
     """SQL form: SELECT routes to adhoc report, other statements execute as changes."""
 
     def setUp(self):
+        """
+        Prepare an authenticated ProxyWebSession and refresh its CSRF token for use by tests.
+        
+        Creates self.s as a logged-in ProxyWebSession and loads the global_variables table page to ensure the session has a current CSRF token.
+        """
         self.s = ProxyWebSession()
         self.s.login()
         # Fetch the table page to get a fresh CSRF token
@@ -250,6 +348,11 @@ class TestAPIRowOperations(unittest.TestCase):
     TEST_PORT      = 3399
 
     def setUp(self):
+        """
+        Set up an authenticated ProxyWebSession and preload the table page to initialize CSRF token and session state.
+        
+        Creates a ProxyWebSession, logs in using the configured credentials, and fetches the table view for self.SERVER/self.DATABASE/self.TABLE so the session cookies and CSRF token are populated for subsequent requests.
+        """
         self.s = ProxyWebSession()
         self.s.login()
         # Fetch table page to populate CSRF token and session state
@@ -260,6 +363,15 @@ class TestAPIRowOperations(unittest.TestCase):
     # ------------------------------------------------------------------
 
     def _pk_values(self):
+        """
+        Return the primary key mapping for the test mysql_servers row.
+        
+        Returns:
+            dict: Mapping with keys "hostgroup_id", "hostname", and "port". Numeric values are converted to strings:
+                - "hostgroup_id": string representation of the test hostgroup id
+                - "hostname": test host name
+                - "port": string representation of the test port
+        """
         return {
             "hostgroup_id": str(self.TEST_HG),
             "hostname":     self.TEST_HOST,
@@ -267,12 +379,25 @@ class TestAPIRowOperations(unittest.TestCase):
         }
 
     def _column_names(self):
-        """Return the column list from the table page (order matters for pkValues)."""
+        """
+        Get the ordered list of column names as shown on the table page.
+        
+        Returns:
+            list[str]: Column names in header order (order matters when constructing primary-key value lists).
+        """
         resp = self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
         # Extract column names from <th> in thead
         return re.findall(r'<th[^>]*>(.*?)</th>', resp.text)
 
     def _insert_test_row(self):
+        """
+        Insert a predefined test row into the configured server/database/table via the API and return the API response.
+        
+        The inserted row uses the test host, hostgroup, and port values defined on the test class.
+        
+        Returns:
+            dict: Parsed JSON response from the API describing the result of the insert operation.
+        """
         resp = self.s.post_json("/api/insert_row", {
             "server":      self.SERVER,
             "database":    self.DATABASE,
@@ -287,6 +412,12 @@ class TestAPIRowOperations(unittest.TestCase):
         return resp.json()
 
     def _delete_test_row(self):
+        """
+        Delete the test row from the configured server/database/table via the API.
+        
+        Returns:
+            dict: The parsed JSON response from the `/api/delete_row` endpoint.
+        """
         resp = self.s.post_json("/api/delete_row", {
             "server":   self.SERVER,
             "database": self.DATABASE,
@@ -367,6 +498,13 @@ class TestAPIConfigDiff(unittest.TestCase):
     """Config diff API returns structured data."""
 
     def setUp(self):
+        """
+        Prepare an authenticated session and load the config diff page for tests.
+        
+        This sets up a ProxyWebSession, logs in with default credentials, and requests the
+        / proxysql/config_diff/ page so subsequent tests have an authenticated session and
+        a fresh CSRF token.
+        """
         self.s = ProxyWebSession()
         self.s.login()
         self.s.get("/proxysql/config_diff/")
@@ -400,11 +538,25 @@ class TestMySQLServers(unittest.TestCase):
     TEST_PORT = 3310
 
     def setUp(self):
+        """
+        Prepare an authenticated ProxyWebSession and load the target table page to prime CSRF state for tests.
+        
+        This creates a ProxyWebSession, logs in with default credentials, and fetches the configured server/database/table page so subsequent requests have a valid CSRF token and session.
+        """
         self.s = ProxyWebSession()
         self.s.login()
         self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
 
     def _pk(self):
+        """
+        Return the primary-key mapping for the test mysql_servers row.
+        
+        Returns:
+            dict: Mapping of primary key column names to their values:
+                - "hostgroup_id": string form of the test hostgroup id
+                - "hostname": the test host name
+                - "port": string form of the test port
+        """
         return {
             "hostgroup_id": str(self.TEST_HG),
             "hostname":     self.TEST_HOST,
@@ -412,6 +564,12 @@ class TestMySQLServers(unittest.TestCase):
         }
 
     def _insert(self):
+        """
+        Insert a test row into the configured table using the /api/insert_row endpoint.
+        
+        Returns:
+            dict: The parsed JSON response from the API.
+        """
         return self.s.post_json("/api/insert_row", {
             "server":      self.SERVER,
             "database":    self.DATABASE,
@@ -425,6 +583,12 @@ class TestMySQLServers(unittest.TestCase):
         }).json()
 
     def _delete(self):
+        """
+        Request deletion of the test row via the ProxyWeb API.
+        
+        Returns:
+            dict: Parsed JSON response from the /api/delete_row endpoint containing the server's result for the delete operation (e.g., success status and any related messages).
+        """
         return self.s.post_json("/api/delete_row", {
             "server":   self.SERVER,
             "database": self.DATABASE,
@@ -476,14 +640,31 @@ class TestQueryRules(unittest.TestCase):
     TEST_RULE_ID = 900
 
     def setUp(self):
+        """
+        Prepare an authenticated ProxyWebSession and load the target table page to prime CSRF state for tests.
+        
+        This creates a ProxyWebSession, logs in with default credentials, and fetches the configured server/database/table page so subsequent requests have a valid CSRF token and session.
+        """
         self.s = ProxyWebSession()
         self.s.login()
         self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
 
     def _pk(self):
+        """
+        Return the primary-key mapping for the test query rule.
+        
+        Returns:
+            dict: A mapping with key "rule_id" and the test rule ID as a string.
+        """
         return {"rule_id": str(self.TEST_RULE_ID)}
 
     def _col_names(self):
+        """
+        Ordered list of column names used for full-row updates of the mysql_query_rules table.
+        
+        Returns:
+            list: Ordered list of column name strings in the exact sequence required for full updates via the API.
+        """
         return [
             "rule_id", "active", "username", "schemaname", "flagIN",
             "client_addr", "proxy_addr", "proxy_port", "digest",
@@ -497,6 +678,12 @@ class TestQueryRules(unittest.TestCase):
         ]
 
     def _insert(self):
+        """
+        Insert a test query rule into the configured server/table using the /api/insert_row endpoint.
+        
+        Returns:
+            dict: Parsed JSON response from the API containing the result of the insert operation.
+        """
         return self.s.post_json("/api/insert_row", {
             "server":      self.SERVER,
             "database":    self.DATABASE,
@@ -513,6 +700,12 @@ class TestQueryRules(unittest.TestCase):
         }).json()
 
     def _delete(self):
+        """
+        Request deletion of the test row via the ProxyWeb API.
+        
+        Returns:
+            dict: Parsed JSON response from the /api/delete_row endpoint containing the server's result for the delete operation (e.g., success status and any related messages).
+        """
         return self.s.post_json("/api/delete_row", {
             "server":   self.SERVER,
             "database": self.DATABASE,
@@ -589,6 +782,12 @@ class TestProxySQL1BackendSQL(unittest.TestCase):
     DB   = "testdb"
 
     def _conn(self):
+        """
+        Create a new PyMySQL connection configured for the test backend.
+        
+        Returns:
+            pymysql.connections.Connection: A connected PyMySQL connection to the configured host/port/database with autocommit enabled.
+        """
         return pymysql.connect(
             host=self.HOST, port=self.PORT,
             user=self.USER, password=self.PASS,
@@ -596,6 +795,9 @@ class TestProxySQL1BackendSQL(unittest.TestCase):
         )
 
     def test_select_returns_rows(self):
+        """
+        Verify that selecting id, name, and val from the backend `items` table returns at least one row and that one of the returned rows has the name "alpha".
+        """
         with self._conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT id, name, val FROM items ORDER BY id")
@@ -605,6 +807,11 @@ class TestProxySQL1BackendSQL(unittest.TestCase):
         self.assertIn("alpha", names)
 
     def test_insert_row(self):
+        """
+        Inserts a row into the test `items` table, verifies the inserted row persists with the expected values, and removes it.
+        
+        Asserts that the returned insert ID is greater than zero, that a subsequent select returns the inserted row with name `"ps1-test-insert"` and value `42`, and cleans up by deleting the inserted row.
+        """
         with self._conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -688,6 +895,12 @@ class TestProxySQL2BackendSQL(unittest.TestCase):
     DB   = "testdb2"
 
     def _conn(self):
+        """
+        Create a new PyMySQL connection configured for the test backend.
+        
+        Returns:
+            pymysql.connections.Connection: A connected PyMySQL connection to the configured host/port/database with autocommit enabled.
+        """
         return pymysql.connect(
             host=self.HOST, port=self.PORT,
             user=self.USER, password=self.PASS,
@@ -695,6 +908,11 @@ class TestProxySQL2BackendSQL(unittest.TestCase):
         )
 
     def test_select_returns_rows(self):
+        """
+        Verify the products table on the ProxySQL2 test backend returns data and includes a product named "widget".
+        
+        Asserts that a SELECT query against testdb2.products returns at least one row and that one of the returned rows has the name "widget".
+        """
         with self._conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT id, name, price FROM products ORDER BY id")
@@ -819,12 +1037,22 @@ class TestConfigDiffMemoryRuntime(unittest.TestCase):
     TEST_USER = "difftest-user"
 
     def setUp(self):
+        """
+        Prepare the test by creating an authenticated ProxyWeb session and loading the table page so a valid CSRF token is available for subsequent requests.
+        
+        This logs in with default credentials and performs a GET of the test table view.
+        """
         self.s = ProxyWebSession()
         self.s.login()
         self.s.get(f"/{self.SERVER}/{self.DB}/{self.TABLE}/")
 
     def tearDown(self):
         # Remove test user regardless of test outcome so it does not pollute state.
+        """
+        Clean up the test user from the mysql_users table to avoid leaving test state behind.
+        
+        Attempts to load the table page (to refresh CSRF) and delete the row identified by `TEST_USER`. Any errors during cleanup are suppressed so teardown does not raise.
+        """
         try:
             self.s.get(f"/{self.SERVER}/{self.DB}/{self.TABLE}/")
             self.s.post_json("/api/delete_row", {
@@ -907,6 +1135,9 @@ class TestMultiServer(unittest.TestCase):
     TEST_RULE_ID = 800
 
     def setUp(self):
+        """
+        Prepare an authenticated ProxyWebSession and store it as self.s for use by the test methods.
+        """
         self.s = ProxyWebSession()
         self.s.login()
 
@@ -921,6 +1152,11 @@ class TestMultiServer(unittest.TestCase):
         self.assertIn(self.S2, resp.text)
 
     def test_server1_table_view_accessible(self):
+        """
+        Verify server1's mysql_servers table view is accessible.
+        
+        Asserts the response status is 200 and the page contains the string "hostname".
+        """
         resp = self.s.get(f"/{self.S1}/{self.DB}/mysql_servers/")
         self.assertEqual(resp.status_code, 200)
         self.assertIn("hostname", resp.text)
@@ -935,7 +1171,9 @@ class TestMultiServer(unittest.TestCase):
     # ------------------------------------------------------------------
 
     def test_server1_has_mysql_backend(self):
-        """proxysql should list 'mysql' (not mysql2) as its backend."""
+        """
+        Assert that server1's mysql_servers page contains the backend host "mysql".
+        """
         resp = self.s.get(f"/{self.S1}/{self.DB}/mysql_servers/")
         self.assertIn("mysql", resp.text)
 
@@ -976,9 +1214,21 @@ class TestMultiServer(unittest.TestCase):
     # ------------------------------------------------------------------
 
     def _s2_pk(self):
+        """
+        Return the primary-key mapping for the server2 test query rule.
+        
+        Returns:
+            dict: A mapping with key `"rule_id"` and the rule id as a string.
+        """
         return {"rule_id": str(self.TEST_RULE_ID)}
 
     def _col_names(self):
+        """
+        Ordered list of column names used for full-row updates of the mysql_query_rules table.
+        
+        Returns:
+            list: Ordered list of column name strings in the exact sequence required for full updates via the API.
+        """
         return [
             "rule_id", "active", "username", "schemaname", "flagIN",
             "client_addr", "proxy_addr", "proxy_port", "digest",
@@ -992,6 +1242,15 @@ class TestMultiServer(unittest.TestCase):
         ]
 
     def _insert_s2_rule(self):
+        """
+        Insert a query rule on server S2's `mysql_query_rules` table and return the API response.
+        
+        The inserted rule uses `self.TEST_RULE_ID` for `rule_id` and sets `active=1`, `match_digest="^DELETE"`,
+        `destination_hostgroup=0`, and `apply=1`.
+        
+        Returns:
+            dict: Parsed JSON response returned by the `/api/insert_row` endpoint.
+        """
         self.s.get(f"/{self.S2}/{self.DB}/mysql_query_rules/")
         return self.s.post_json("/api/insert_row", {
             "server":      self.S2,
@@ -1009,6 +1268,12 @@ class TestMultiServer(unittest.TestCase):
         }).json()
 
     def _delete_s2_rule(self):
+        """
+        Delete the test query rule on the second server using its primary key.
+        
+        Returns:
+            dict: JSON response from the /api/delete_row endpoint containing the result of the delete operation.
+        """
         self.s.get(f"/{self.S2}/{self.DB}/mysql_query_rules/")
         return self.s.post_json("/api/delete_row", {
             "server":   self.S2,

@@ -46,6 +46,7 @@ trap 'rm -f "$TMPOUT"' EXIT
 
 TEST_EXIT=0
 
+# on_exit removes the temporary output file and either tears down the docker-compose stack or, when the --keep flag is set, prints stop instructions and the service endpoints/credentials.
 on_exit() {
     rm -f "$TMPOUT"
 

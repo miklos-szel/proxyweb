@@ -19,7 +19,10 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 /**
- * Load configuration data from server
+ * Fetches the current settings from the server and applies them to the UI.
+ *
+ * On success, stores the loaded configuration in the module-level state and updates the form to reflect it.
+ * On failure, updates the UI with an error status indicating the configuration could not be loaded.
  */
 function loadConfig() {
     fetch('/settings/load_ui/')
@@ -36,7 +39,17 @@ function loadConfig() {
 }
 
 /**
- * Populate the form with config data
+ * Populate the settings editor UI from a configuration object.
+ *
+ * Resets relevant form sections and fills inputs for global settings, servers
+ * (including DSNs and hide-tables), authentication, Flask settings, and misc
+ * sections according to the provided config.
+ *
+ * @param {Object} config - Configuration object. Recognized optional keys:
+ *   `global` (default_server, read_only, hide_tables), `servers` (map of
+ *   serverName -> serverData), `auth` (admin_user, admin_password),
+ *   `flask` (SECRET_KEY, SEND_FILE_MAX_AGE_DEFAULT, TEMPLATES_AUTO_RELOAD),
+ *   and `misc` (map of miscType -> array of items).
  */
 function populateForm(config) {
     // Global section — clear first so stale values don't persist on reset
@@ -150,7 +163,13 @@ function populateForm(config) {
 }
 
 /**
- * Create a misc section UI dynamically
+ * Add a new miscellaneous-items section to the settings UI for the given misc type.
+ *
+ * Appends a labeled section with an item container and an "Add Item" button to the
+ * element with id "misc_sections_container". The section includes an icon chosen
+ * from the misc type and a container with id `misc_{miscType}_container`.
+ *
+ * @param {string} miscType - The miscellaneous item category (e.g., "apply_config", "adhoc_report"); used to derive the section label, icon, and container id.
  */
 function createMiscSection(miscType) {
     const container = document.getElementById('misc_sections_container');
@@ -189,7 +208,8 @@ function createMiscSection(miscType) {
 }
 
 /**
- * Switch between UI Editor and Raw YAML modes
+ * Toggle the visible editor between the UI editor and the raw YAML editor.
+ * @param {string} mode - If `'ui'`, show the UI editor; any other value shows the raw YAML editor.
  */
 function switchMode(mode) {
     const uiEditor = document.getElementById('ui-editor');
@@ -211,7 +231,9 @@ function switchMode(mode) {
 }
 
 /**
- * Toggle collapsible sections
+ * Toggle visibility of the collapsible section immediately after a header element.
+ * This flips the header's `collapsed` CSS class so the associated content can be shown or hidden.
+ * @param {HTMLElement} element - The header element whose next sibling is the collapsible content.
  */
 function toggleSection(element) {
     const content = element.nextElementSibling;
@@ -219,7 +241,16 @@ function toggleSection(element) {
 }
 
 /**
- * Add a server configuration card
+ * Create and insert a new server configuration card into the settings UI.
+ *
+ * If provided, `serverData` populates the card's fields and any DSN or hide-table entries.
+ *
+ * @param {string} [serverName] - Optional initial server name to set in the card.
+ * @param {Object|null} [serverData] - Optional existing server configuration to populate the card.
+ *   @param {boolean} [serverData.read_only] - If present, sets the read-only override checkbox.
+ *   @param {Array<Object>} [serverData.dsn] - Array of DSN objects to populate DSN entries.
+ *   @param {Array<string>} [serverData.hide_tables] - Array of table names to populate hide-table entries.
+ * @returns {number} The assigned monotonic server index for the newly created card.
  */
 function addServer(serverName = '', serverData = null) {
     const container = document.getElementById('servers_container');
@@ -326,7 +357,13 @@ function addServer(serverName = '', serverData = null) {
 }
 
 /**
- * Remove a server configuration card
+ * Remove the DOM card for a server and update the UI server count.
+ *
+ * If a server element with the provided id exists, it is removed from the DOM
+ * and the global `serverCount` is decremented; no action is taken if the
+ * element is not found.
+ *
+ * @param {string} serverId - The DOM id of the server card to remove.
  */
 function removeServer(serverId) {
     const serverCard = document.getElementById(serverId);
@@ -340,7 +377,11 @@ function removeServer(serverId) {
 }
 
 /**
- * Expand/collapse server card
+ * Toggle visibility of the form-group fields inside a server card.
+ *
+ * Shows hidden `.form-group` elements or hides visible ones within the server card
+ * element identified by `serverId`.
+ * @param {string} serverId - The DOM element id of the server card to toggle.
  */
 function expandServer(serverId) {
     const serverCard = document.getElementById(serverId);
@@ -353,7 +394,15 @@ function expandServer(serverId) {
 }
 
 /**
- * Add a DSN configuration to a server
+ * Create and insert a DSN configuration block for the specified server and return its assigned index.
+ *
+ * Appends a new DSN card to the server's DSN container in the DOM, ensures the server's monotonic
+ * DSN index counter is updated, and refreshes the server's DSN count tracking.
+ *
+ * @param {number} serverIndex - The server's index identifying which server to attach the DSN to.
+ * @param {Object|null} [dsnData=null] - Optional initial values for the DSN fields (keys: `host`, `port`, `user`, `passwd`, `db`).
+ * @param {number|null} [dsnIndex=null] - Optional explicit index to assign to this DSN; when omitted a monotonic index is used.
+ * @returns {number} The index assigned to the newly created DSN block.
  */
 function addDSN(serverIndex, dsnData = null, dsnIndex = null) {
     const container = document.getElementById(`server_${serverIndex}_dsn_container`);
@@ -434,7 +483,9 @@ function addDSN(serverIndex, dsnData = null, dsnIndex = null) {
 }
 
 /**
- * Remove a DSN configuration
+ * Remove a DSN configuration card from the DOM and update the owning server's DSN count.
+ * @param {string} dsnId - The DOM element id of the DSN card to remove.
+ * @param {number} serverIndex - The index of the server that owns this DSN; used to update DSN counters.
  */
 function removeDSN(dsnId, serverIndex) {
     const dsnCard = document.getElementById(dsnId);
@@ -445,7 +496,13 @@ function removeDSN(dsnId, serverIndex) {
 }
 
 /**
- * Update DSN count for a server
+ * Ensure the hidden DSN-count input exists for a server and set it to the server's monotonic DSN index.
+ *
+ * Creates a hidden input named `server_<serverIndex>_dsn_count` if missing and sets its value to the
+ * monotonic next DSN index for the given server (or `0` if none), so backend range-processing covers
+ * non-sequential DSN indices.
+ *
+ * @param {number|string} serverIndex - The server's index used to build the hidden input's id and name.
  */
 function updateDSNCount(serverIndex) {
     let countInput = document.getElementById(`server_${serverIndex}_dsn_count`);
@@ -461,7 +518,13 @@ function updateDSNCount(serverIndex) {
 }
 
 /**
- * Add a hide table entry
+ * Append a new hide-table input row to the specified section's hide-tables container.
+ *
+ * If a container with id `${section}_hide_tables_container` exists, this creates an `.array-item`
+ * containing a text input (pre-filled with `value`) and a remove button, then appends it to the container.
+ *
+ * @param {string} section - The section prefix whose hide-tables container to target (used to build the container id).
+ * @param {string} [value=''] - Initial value for the new hide-table input.
  */
 function addHideTable(section, value = '') {
     const containerId = `${section}_hide_tables_container`;
@@ -485,7 +548,13 @@ function addHideTable(section, value = '') {
 }
 
 /**
- * Add a misc command/query entry
+ * Add a misc command/query block to the UI for the given misc type.
+ *
+ * Updates internal counters for that misc type and the hidden `misc_{type}_count` input so new items use a monotonic index.
+ * If `data` is provided, prefills the block's Title, Info, and SQL fields.
+ *
+ * @param {string} type - The misc type key used to find `misc_{type}_container` and name inputs.
+ * @param {{title?: string, info?: string, sql?: string}=} data - Optional initial values to populate the new item's fields.
  */
 function addMiscCommand(type, data = null) {
     const containerId = `misc_${type}_container`;
@@ -551,7 +620,16 @@ function addMiscCommand(type, data = null) {
 }
 
 /**
- * Remove a misc command/query entry
+ * Remove a misc command/query UI block and update its counters.
+ *
+ * Removes the misc item that contains the given remove button from the DOM
+ * and decrements the visible item count for the specified misc `type`.
+ * Note: `nextMiscIndex[type]` is intentionally not decremented; the hidden
+ * counter preserves the highest-ever-assigned index + 1 so the backend's
+ * range() covers any non-sequential remaining entries.
+ *
+ * @param {HTMLElement} button - The remove button element inside the misc item to delete.
+ * @param {string} type - The misc command type whose count should be decremented.
  */
 function removeMiscCommand(button, type) {
     button.parentElement.remove();
@@ -575,7 +653,10 @@ function setupFormHandlers() {
 }
 
 /**
- * Save settings to server
+ * Submit the current settings form to the server and update the UI status based on the response.
+ *
+ * Sends the data from the form with id "settings-form" to the server endpoint for saving and
+ * displays success or error messages using the page's status UI.
  */
 function saveSettings() {
     const form = document.getElementById('settings-form');
@@ -605,7 +686,16 @@ function saveSettings() {
 }
 
 /**
- * Show save status message
+ * Display a save status banner with an appropriate icon, title, and message.
+ *
+ * Updates the visible status area to reflect `type` (`success`, `error`, or other for info),
+ * sets the icon and color, and places `title` and `message` text into the banner.
+ * For `success` and `error` types the banner is automatically hidden after 5 seconds;
+ * `info` type remains visible until hidden by other UI actions.
+ *
+ * @param {string} type - One of `'success'`, `'error'`, or any other value interpreted as `'info'`.
+ * @param {string} title - Short title text shown in the status banner.
+ * @param {string} message - Detailed message text shown in the status banner.
  */
 function showSaveStatus(type, title, message) {
     const statusDiv = document.getElementById('saveStatus');
@@ -639,7 +729,10 @@ function showSaveStatus(type, title, message) {
 }
 
 /**
- * Export configuration as YAML
+ * Fetches the server-side configuration as YAML and initiates a browser download.
+ *
+ * If the export succeeds, a file named `config.yml` is downloaded containing the YAML.
+ * On failure, a UI error status is shown.
  */
 function exportConfig() {
     fetch('/settings/export/')
@@ -665,7 +758,9 @@ function exportConfig() {
 }
 
 /**
- * Show import modal
+ * Displays the import modal dialog.
+ *
+ * Makes the DOM element with id "importModal" visible.
  */
 function showImportModal() {
     const modal = document.getElementById('importModal');
@@ -673,7 +768,10 @@ function showImportModal() {
 }
 
 /**
- * Close import modal
+ * Hide the import modal and clear its YAML input.
+ *
+ * Hides the element with id "importModal" and resets the value of the textarea/input
+ * with id "importYamlContent" to an empty string.
  */
 function closeImportModal() {
     const modal = document.getElementById('importModal');
@@ -682,7 +780,12 @@ function closeImportModal() {
 }
 
 /**
- * Import configuration from YAML
+ * Import YAML configuration provided in the import modal and apply it on the server.
+ *
+ * Reads YAML from the import textarea, validates it is not empty, and posts it to /settings/import/
+ * (including an `X-CSRF-Token` header if a meta token is present). On success, shows a success status,
+ * closes the import modal, and reloads the page after 1.5 seconds. On failure, shows an error status
+ * using the server-provided message or the network error message.
  */
 function importConfig() {
     const yamlContent = document.getElementById('importYamlContent').value;
@@ -724,7 +827,9 @@ function importConfig() {
 }
 
 /**
- * Reset form to original values
+ * Restore the form to the originally loaded configuration after user confirmation.
+ *
+ * Prompts the user to confirm; if confirmed, reloads the original configuration into the form and displays a success status message.
  */
 function resetForm() {
     if (confirm('Are you sure you want to reset all changes? This will reload the original configuration.')) {
