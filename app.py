@@ -438,7 +438,9 @@ def update_config_skip_variables():
               `{'success': False, 'error': <message>}` on failure describing the error.
     """
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({'success': False, 'error': 'Invalid request'}), 400
         skip_variables = data.get('skip_variables', [])
 
         # Load current config
