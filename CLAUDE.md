@@ -19,7 +19,14 @@ python3 app.py
 gunicorn --chdir . wsgi:app -w 2 --threads 2 -b 0.0.0.0:5000
 ```
 
-There are no automated tests in this project.
+Integration tests live under `test/` — see `test/README.md` for details.
+
+```bash
+cd test
+bash run_tests.sh        # build stack, run all tests, write failure log if needed
+bash run_tests.sh --keep # same but leave the stack running afterwards
+make test                # equivalent via Makefile
+```
 
 ## Git Commits
 
@@ -87,6 +94,7 @@ The `SECRET_KEY` placeholder `12345678901234567890` is replaced at container sta
 4. Inline row edits/inserts/deletes go to `/api/update_row`, `/api/insert_row`, `/api/delete_row` — these call the corresponding `mdb.*_row()` functions which build and execute SQL against ProxySQL. All three check `mdb.get_read_only(server)` and reject `runtime_*` tables with 403 before mutating.
 5. The SQL form in `show_table_info.html` posts to `/<server>/<database>/<table>/sql/` — SELECT statements render `show_adhoc_report.html`, everything else executes as a change and refreshes the table.
 6. `/api/execute_proxysql_command` only accepts `LOAD`, `SAVE`, and `SELECT CONFIG` statements (validated per-statement after splitting on `;`).
+7. Config diff is at `/<server>/config_diff/` (parametric — works for any configured server). The route passes `server` to `mdb.get_config_diff(server)` and injects `window.configDiffServer` into the template.
 
 ### Config File Writes
 
@@ -121,6 +129,21 @@ All templates extend `base.html`. Key templates:
 - `show_adhoc_report.html` — results from SELECT queries and predefined adhoc reports
 - `settings.html` — raw YAML editor and structured UI editor for `config.yml`
 - `config_diff.html` — shows differences between ProxySQL Disk/Memory/Runtime configs
+
+### Integration Test Stack (`test/`)
+
+The `test/` directory contains a Docker Compose stack and a Python test suite (`test_proxyweb.py`).
+
+| Service | Image | Role |
+|---|---|---|
+| `mysql` | mysql:8.0 | Backend for proxysql (db: testdb) |
+| `mysql2` | mysql:8.0 | Backend for proxysql2 (db: testdb2) |
+| `proxysql` | proxysql/proxysql:2.7.1 | Admin :6032, SQL :6033 |
+| `proxysql2` | proxysql/proxysql:2.7.1 | Admin :6034, SQL :6035; hg1=writer, hg2=reader with read/write split rules |
+| `proxysql-init` / `proxysql2-init` | mysql:8.0 (one-shot) | Register backends, users, and query rules via admin SQL |
+| `proxyweb` | built from repo root | App under test on :5000 |
+
+Test failures are logged to `test/log/failure_YYYYMMDD_HHMMSS.log` (only created on failure) with full unittest tracebacks and filtered service logs. Passing runs produce no log file.
 
 ### Docker Environment Variables
 
