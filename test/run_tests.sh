@@ -52,7 +52,7 @@ on_exit() {
     if [[ $KEEP -eq 0 ]]; then
         echo ""
         echo "==> Tearing down stack..."
-        sudo docker compose down --volumes --remove-orphans
+#        sudo docker compose down --volumes --remove-orphans
     else
         echo ""
         echo "==> Stack left running (--keep). Stop with: sudo docker compose down -v --remove-orphans"
