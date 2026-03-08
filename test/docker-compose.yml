@@ -63,12 +63,30 @@ services:
       - proxyweb-test
     restart: "no"
 
+  mysql3:
+    image: mysql:8.0
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: testdb2
+    volumes:
+      - ./mysql/init3.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-prootpass"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    networks:
+      - proxyweb-test
+
   proxysql2:
     image: proxysql/proxysql:2.7.1
     volumes:
       - ./proxysql/proxysql2.cnf:/etc/proxysql.cnf
     depends_on:
       mysql2:
+        condition: service_healthy
+      mysql3:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "mysql -h 127.0.0.1 -P 6032 -u radmin -pradmin -e 'SELECT 1' 2>/dev/null"]
@@ -89,6 +107,8 @@ services:
       - ./proxysql/init2.sql:/init.sql
     depends_on:
       proxysql2:
+        condition: service_healthy
+      mysql3:
         condition: service_healthy
     networks:
       - proxyweb-test

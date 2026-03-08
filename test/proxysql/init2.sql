@@ -1,10 +1,12 @@
--- Register mysql2 in both hostgroups for proxysql2.
+-- Register mysql2 (writer + reader) and mysql3 (reader only) in proxysql2.
 -- hostgroup 1 = writer, hostgroup 2 = reader
-DELETE FROM mysql_servers WHERE hostname='mysql2' AND port=3306;
+DELETE FROM mysql_servers WHERE hostname IN ('mysql2','mysql3') AND port=3306;
 INSERT INTO mysql_servers (hostgroup_id, hostname, port, status, weight, max_connections)
 VALUES (1, 'mysql2', 3306, 'ONLINE', 1, 200);
 INSERT INTO mysql_servers (hostgroup_id, hostname, port, status, weight, max_connections)
 VALUES (2, 'mysql2', 3306, 'ONLINE', 1, 200);
+INSERT INTO mysql_servers (hostgroup_id, hostname, port, status, weight, max_connections)
+VALUES (2, 'mysql3', 3306, 'ONLINE', 1, 200);
 
 -- Register the application user for the second instance.
 DELETE FROM mysql_users WHERE username='proxyuser2';
