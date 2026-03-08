@@ -930,10 +930,11 @@ class TestProxySQL2BackendSQL(unittest.TestCase):
                 )
                 inserted_id = conn.insert_id()
         self.assertGreater(inserted_id, 0)
+        # FOR UPDATE routes to writer (hg1) to avoid replication lag on the reader
         with self._conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT name, price FROM products WHERE id = %s", (inserted_id,)
+                    "SELECT name, price FROM products WHERE id = %s FOR UPDATE", (inserted_id,)
                 )
                 row = cur.fetchone()
         self.assertIsNotNone(row)
@@ -960,10 +961,11 @@ class TestProxySQL2BackendSQL(unittest.TestCase):
                         ("49.99", row_id),
                     )
                     self.assertEqual(conn.affected_rows(), 1)
+            # FOR UPDATE routes to writer (hg1) to avoid replication lag on the reader
             with self._conn() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
-                        "SELECT price FROM products WHERE id = %s", (row_id,)
+                        "SELECT price FROM products WHERE id = %s FOR UPDATE", (row_id,)
                     )
                     self.assertAlmostEqual(float(cur.fetchone()[0]), 49.99, places=2)
         finally:
@@ -983,9 +985,11 @@ class TestProxySQL2BackendSQL(unittest.TestCase):
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM products WHERE id = %s", (row_id,))
                 self.assertEqual(conn.affected_rows(), 1)
+        # FOR UPDATE routes to writer (hg1) — ensures we verify against the
+        # authoritative source, not a potentially-lagging replica
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT id FROM products WHERE id = %s", (row_id,))
+                cur.execute("SELECT id FROM products WHERE id = %s FOR UPDATE", (row_id,))
                 self.assertIsNone(cur.fetchone())
 
     def test_proxysql2_data_isolated_from_proxysql1(self):
