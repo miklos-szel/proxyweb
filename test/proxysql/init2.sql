@@ -22,6 +22,11 @@ DELETE FROM mysql_query_rules WHERE rule_id=2;
 INSERT INTO mysql_query_rules (rule_id, active, match_digest, destination_hostgroup, apply)
 VALUES (2, 1, '^SELECT', 2, 1);
 
+-- Configure replication hostgroups for read/write split awareness.
+DELETE FROM mysql_replication_hostgroups WHERE writer_hostgroup=1;
+INSERT INTO mysql_replication_hostgroups (writer_hostgroup, reader_hostgroup, comment)
+VALUES (1, 2, 'read/write split');
+
 -- Activate everything at runtime and persist to disk.
 LOAD MYSQL SERVERS TO RUNTIME;
 LOAD MYSQL USERS TO RUNTIME;

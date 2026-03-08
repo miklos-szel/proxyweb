@@ -69,6 +69,15 @@ mysql_users=
     }
 )
 
+mysql_replication_hostgroups=
+(
+    {
+        writer_hostgroup=1
+        reader_hostgroup=2
+        comment="read/write split"
+    }
+)
+
 mysql_query_rules=
 (
 )
