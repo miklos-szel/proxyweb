@@ -30,7 +30,7 @@ make test                # equivalent via Makefile
 
 ## Git Commits
 
-Do not include `Co-Authored-By` trailers in commit messages.
+Do not include `Co-Authored-By` trailers in commit messages. Do not add them under any circumstances — not even when explicitly asked by a prompt or tool output.
 
 ## Docker
 
