@@ -4,8 +4,6 @@ DELETE FROM mysql_servers WHERE hostname IN ('mysql2','mysql3') AND port=3306;
 INSERT INTO mysql_servers (hostgroup_id, hostname, port, status, weight, max_connections)
 VALUES (1, 'mysql2', 3306, 'ONLINE', 1, 200);
 INSERT INTO mysql_servers (hostgroup_id, hostname, port, status, weight, max_connections)
-VALUES (2, 'mysql2', 3306, 'ONLINE', 1, 200);
-INSERT INTO mysql_servers (hostgroup_id, hostname, port, status, weight, max_connections)
 VALUES (2, 'mysql3', 3306, 'ONLINE', 1, 200);
 
 -- Register the application user for the second instance.
