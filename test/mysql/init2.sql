@@ -7,6 +7,10 @@ CREATE USER 'proxyuser2'@'%' IDENTIFIED WITH mysql_native_password BY 'proxypass
 GRANT ALL PRIVILEGES ON testdb2.* TO 'proxyuser2'@'%';
 GRANT SELECT ON performance_schema.* TO 'proxyuser2'@'%';
 
+-- Replication user (used by mysql3 replica to connect to this master)
+CREATE USER 'replicator'@'%' IDENTIFIED WITH mysql_native_password BY 'replicapass';
+GRANT REPLICATION SLAVE ON *.* TO 'replicator'@'%';
+
 FLUSH PRIVILEGES;
 
 -- Seed a distinct test table in the second database
