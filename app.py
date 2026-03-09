@@ -164,7 +164,7 @@ def logout():
 @login_required
 def render_list_dbs():
     try:
-        server = mdb.get_config(config)['global']['default_server']
+        server = mdb.get_default_server()
         session['history'] = []
         session['server'] = server
         session['dblist'] = mdb.get_all_dbs_and_tables(db, server)
@@ -682,7 +682,7 @@ def api_execute_proxysql_command():
             return jsonify({'success': False, 'error': 'Only ProxySQL LOAD/SAVE administrative commands are allowed'})
 
         # Get server from session
-        server = session.get('server', 'proxysql')
+        server = session.get('server') or mdb.get_default_server()
 
         if mdb.get_read_only(server):
             return jsonify({'success': False, 'error': 'Server is in read-only mode'})

@@ -1450,6 +1450,82 @@ class TestHideTables(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Default server fallback tests
+# ---------------------------------------------------------------------------
+
+class TestDefaultServerFallback(unittest.TestCase):
+    """
+    Regression tests for the hardcoded 'proxysql' server name fallback.
+
+    Bug guarded: app.py used session.get('server', 'proxysql') and
+    render_list_dbs read global.default_server directly from config without
+    checking whether that name actually exists in the servers dict.
+    If the first/only server was not named 'proxysql', the app would crash
+    with a KeyError whenever the session lacked a 'server' key.
+
+    Fixed by introducing mdb.get_default_server() which returns the configured
+    default_server if it exists in servers, otherwise falls back to the first
+    server in the list.
+    """
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        resp = self.s.get("/settings/export/")
+        body = resp.json()
+        self.assertTrue(body.get("success"), f"settings/export failed: {body.get('error')}")
+        self._original_yaml = body["yaml"]
+
+    def tearDown(self):
+        if hasattr(self, "_original_yaml"):
+            self.s.post_form("/settings/save/", {"settings": self._original_yaml})
+
+    def test_home_loads_when_default_server_name_is_wrong(self):
+        """/ must return 200 even if global.default_server names a non-existent server.
+
+        Before the fix, render_list_dbs read global.default_server verbatim and
+        passed it to get_all_dbs_and_tables, which crashed with a KeyError when
+        the name was not in the servers dict.
+        """
+        # Point default_server at a name that does not exist in servers
+        modified = self._original_yaml.replace(
+            "default_server: proxysql",
+            "default_server: nonexistent_server",
+            1,
+        )
+        resp = self.s.post_form("/settings/save/", {"settings": modified})
+        self.assertEqual(resp.status_code, 200,
+                         f"save returned {resp.status_code}: {resp.text[:200]!r}")
+
+        # Home page must still load (falls back to first real server)
+        resp = self.s.get("/")
+        self.assertEqual(resp.status_code, 200,
+                         f"/ returned {resp.status_code} after bad default_server; "
+                         f"body: {resp.text[:300]!r}")
+
+    def test_execute_proxysql_command_works_without_session_server(self):
+        """execute_proxysql_command must work even if 'server' is missing from session.
+
+        Before the fix, session.get('server', 'proxysql') was used; if the only
+        server was not named 'proxysql', the command would be executed against
+        the wrong (non-existent) server entry and crash.
+        """
+        # Fresh session: visit /settings/edit/ only (no /) so session has no 'server'
+        s2 = ProxyWebSession()
+        s2.login()
+        s2.get("/settings/edit/")
+
+        # Now call execute_proxysql_command — it must not crash
+        resp = s2.post_form(
+            "/api/execute_proxysql_command",
+            {"sql": "SELECT CONFIG VERSION INTO MEMORY"},
+        )
+        # We expect success OR a known non-crash error (e.g. read-only), not a 500
+        self.assertNotEqual(resp.status_code, 500,
+                            f"execute_proxysql_command returned 500 (crash): {resp.text[:300]!r}")
+
+
+# ---------------------------------------------------------------------------
 # Settings page recovery tests
 # ---------------------------------------------------------------------------
 

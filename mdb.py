@@ -506,7 +506,7 @@ def get_all_dbs_and_tables(db, server):
         raise ValueError(e)
 
 
-def get_config_diff(server='proxysql'):
+def get_config_diff(server=None):
     """
     Compute configuration differences for ProxySQL tables across disk, memory, and runtime layers.
     
@@ -535,6 +535,8 @@ def get_config_diff(server='proxysql'):
     try:
         # Get config to access hide_tables and skip_variables
         config = get_config()
+        if server is None:
+            server = get_default_server()
         hide_tables = config.get('global', {}).get('hide_tables', [])
         skip_variables = config.get('global', {}).get('config_diff_skip_variable', [])
 
@@ -869,6 +871,21 @@ def get_servers():
         return proxysql_servers
     except Exception as e:
         raise ValueError("Cannot get the serverlist from the config file")
+
+
+def get_default_server():
+    """Return the configured default_server, falling back to the first server
+    in the servers list if the configured name does not exist."""
+    cfg = get_config()
+    servers = cfg.get('servers', {})
+    configured = cfg.get('global', {}).get('default_server', '')
+    if configured in servers:
+        return configured
+    # Fallback: first server in the config
+    first = next(iter(servers), None)
+    if first is None:
+        raise ValueError("No servers defined in configuration")
+    return first
 
 def get_read_only(server):
     """
