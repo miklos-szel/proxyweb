@@ -41,14 +41,14 @@
             // Initialize DataTables
             if ($('#proxywebtable').length) {
                 $('#proxywebtable').DataTable({
-                    "lengthMenu": [[-1, 100, 50, 25], ["All", 100, 50, 25]],
-                    "pageLength": -1,
+                    "lengthMenu": [[25, 50, 100, -1], [25, 50, 100, "All"]],
+                    "pageLength": 100,
                     "responsive": true,
                     "autoWidth": false,
-                    "info": false,
-                    "paging": false,
-                    "dom": '<"row"<"col-12"f>>' +
-                           '<"row"<"col-12"rtip>',
+                    "info": true,
+                    "paging": true,
+                    "searching": {% if content is defined and content['rows']|length > 50 %}true{% else %}false{% endif %},
+                    "dom": {% if content is defined and content['rows']|length > 50 %}'<"row"<"col-6"f><"col-6"l>>' + '<"row"<"col-12"rtip>>'{% else %}'<"row"<"col-12"l>>' + '<"row"<"col-12"rtip>>'{% endif %},
                     "language": {
                         "search": "",
                         "searchPlaceholder": "Search..."

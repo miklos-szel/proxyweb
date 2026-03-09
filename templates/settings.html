@@ -14,12 +14,6 @@
         border-bottom: 1px solid #e0e0e0;
     }
 
-    .settings-header h1 {
-        margin: 0;
-        font-size: 1.1rem;
-        font-weight: 600;
-    }
-
     .settings-card {
         background: white;
         border-radius: var(--border-radius);
@@ -446,8 +440,13 @@
 </style>
 
 <div class="settings-header">
-    <div class="container">
-        <h1><i class="fas fa-cog"></i> Settings</h1>
+    <div class="container d-flex align-items-center gap-3">
+        <a href="/" style="display:flex;align-items:center;text-decoration:none;">
+            <img src="/static/images/app_icon.png" alt="ProxyWeb" style="height:28px;width:28px;">
+        </a>
+        <h1 style="margin:0;font-size:1.1rem;font-weight:600;">
+            <i class="fas fa-cog"></i> Settings
+        </h1>
     </div>
 </div>
 

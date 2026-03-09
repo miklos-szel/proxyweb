@@ -457,7 +457,15 @@
                 {% for row in content['rows'] %}
                     <tr>
                         {% for column in row %}
-                            <td>{{ column }}</td>
+                            {% set col_name = content['column_names'][loop.index0] %}
+                            {% if col_name == 'digest_text' and column and column|string|length > 60 %}
+                                <td style="white-space:pre-wrap;word-break:break-word;max-width:400px;">
+                                    <span class="digest-short">{{ column|string|truncate(60, False, '') }}</span><span class="digest-full" style="display:none;">{{ column }}</span>
+                                    <a href="#" class="digest-toggle" style="font-size:0.8em;margin-left:4px;" onclick="toggleDigest(this);return false;">&#9654; more</a>
+                                </td>
+                            {% else %}
+                                <td>{{ column }}</td>
+                            {% endif %}
                         {% endfor %}
                     </tr>
                 {% endfor %}
@@ -467,6 +475,21 @@
 </div>
 
 <script>
+function toggleDigest(link) {
+    const td = link.parentElement;
+    const short = td.querySelector('.digest-short');
+    const full = td.querySelector('.digest-full');
+    if (full.style.display === 'none') {
+        short.style.display = 'none';
+        full.style.display = '';
+        link.textContent = '\u25bc less';
+    } else {
+        full.style.display = 'none';
+        short.style.display = '';
+        link.textContent = '\u25ba more';
+    }
+}
+
 const SQL_EDITOR_STORAGE_KEY = 'proxyweb_sql_editor_collapsed';
 
 function toggleSqlEditor() {
