@@ -33,10 +33,8 @@ done
 
 LOG_DIR="log"
 mkdir -p "$LOG_DIR"
-find "$LOG_DIR" -name "failure_*.log" -mtime +30 -delete 2>/dev/null || true
 
-TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-LOG_FILE="$LOG_DIR/failure_${TIMESTAMP}.log"
+LOG_FILE="$LOG_DIR/last_run.log"
 TMPOUT=$(mktemp)
 trap 'rm -f "$TMPOUT"' EXIT
 
@@ -129,8 +127,18 @@ if [[ $TEST_EXIT -ne 0 ]]; then
     } > "$LOG_FILE"
 
     echo ""
-    echo "==> FAILED. Error log written to: $LOG_FILE"
+    echo "==> FAILED. Log written to: $LOG_FILE"
 else
+    {
+        echo "=== PROXYWEB TEST PASS REPORT ==="
+        echo "timestamp:  $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+        echo "git_commit: $(git -C .. rev-parse --short HEAD 2>/dev/null || echo unknown)"
+        echo "git_branch: $(git -C .. rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+        echo "====================================="
+        echo ""
+        cat "$TMPOUT"
+    } > "$LOG_FILE"
+
     echo ""
-    echo "==> All tests passed."
+    echo "==> All tests passed. Log written to: $LOG_FILE"
 fi

@@ -23,10 +23,12 @@ Integration tests live under `test/` — see `test/README.md` for details.
 
 ```bash
 cd test
-bash run_tests.sh        # build stack, run all tests, write failure log if needed
+bash run_tests.sh        # build stack, run all tests, always writes test/log/last_run.log
 bash run_tests.sh --keep # same but leave the stack running afterwards
 make test                # equivalent via Makefile
 ```
+
+After running tests, always read `test/log/last_run.log` to evaluate results — do not rely on the terminal output of `run_tests.sh`.
 
 ## Git Commits
 
@@ -170,3 +172,4 @@ Rules:
 | `hide_tables` config change not reflected in nav after save | `TestHideTables` |
 | `base.html` bare `session['key']` raises KeyError on fresh session → `/settings/edit/` returns 500, leaving broken config unrecoverable | `TestSettingsEditRecovery` |
 | hardcoded `'proxysql'` fallback in `render_list_dbs` and `execute_proxysql_command` crashes when first server is not named `proxysql` | `TestDefaultServerFallback` |
+| `dict_to_yaml()` rendered DSN list entries as inline JSON (`{"host": ...}`) instead of block YAML; new server with empty name silently dropped | `TestSettingsUIServer` |

@@ -227,6 +227,14 @@ function switchMode(mode) {
         rawYaml.style.display = 'block';
         btnRawYaml.classList.add('active');
         btnUiEditor.classList.remove('active');
+        // Refresh the textarea with the current saved config
+        fetch('/settings/export/')
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('settings-raw').value = data.yaml;
+                }
+            });
     }
 }
 
@@ -295,9 +303,6 @@ function addServer(serverName = '', serverData = null) {
                 <i class="fas fa-database"></i> DSN Configuration
             </label>
             <div id="server_${serverIndex}_dsn_container"></div>
-            <button type="button" class="btn btn-outline-primary btn-sm" onclick="addDSN(${serverIndex})" style="margin-top: 0.5rem;">
-                <i class="fas fa-plus"></i> Add DSN
-            </button>
         </div>
 
         <div class="form-group">
@@ -415,14 +420,6 @@ function addDSN(serverIndex, dsnData = null, dsnIndex = null) {
     dsnCard.id = `server_${serverIndex}_dsn_${index}`;
 
     dsnCard.innerHTML = `
-        <div class="dsn-card-header">
-            <h6 class="dsn-card-title">DSN Configuration #${index + 1}</h6>
-            <button type="button" class="btn btn-sm" onclick="removeDSN('server_${serverIndex}_dsn_${index}', ${serverIndex})"
-                    style="background: var(--danger-color); color: white;">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-
         <div class="row">
             <div class="col-md-6">
                 <div class="form-group">
@@ -482,18 +479,6 @@ function addDSN(serverIndex, dsnData = null, dsnIndex = null) {
     return index;
 }
 
-/**
- * Remove a DSN configuration card from the DOM and update the owning server's DSN count.
- * @param {string} dsnId - The DOM element id of the DSN card to remove.
- * @param {number} serverIndex - The index of the server that owns this DSN; used to update DSN counters.
- */
-function removeDSN(dsnId, serverIndex) {
-    const dsnCard = document.getElementById(dsnId);
-    if (dsnCard) {
-        dsnCard.remove();
-        updateDSNCount(serverIndex);
-    }
-}
 
 /**
  * Ensure the hidden DSN-count input exists for a server and set it to the server's monotonic DSN index.

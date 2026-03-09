@@ -19,6 +19,7 @@ __license__ = "GPLv3"
 
 import logging
 import secrets
+import subprocess
 from collections import defaultdict
 from flask import Flask, render_template, request, session, url_for, flash, redirect, jsonify, abort
 from functools import wraps
@@ -30,6 +31,19 @@ import yaml
 import mdb
 
 app = Flask(__name__)
+
+try:
+    _git_commit = subprocess.check_output(
+        ['git', 'rev-parse', '--short', 'HEAD'],
+        stderr=subprocess.DEVNULL,
+        cwd=os.path.dirname(os.path.abspath(__file__))
+    ).decode().strip()
+except Exception:
+    _git_commit = ''
+
+@app.context_processor
+def inject_git_commit():
+    return {'git_commit': _git_commit}
 
 config = "config/config.yml"
 

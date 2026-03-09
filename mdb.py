@@ -95,6 +95,8 @@ def dict_to_yaml(data, indent=0, prev_key=None):
 
             if isinstance(value, list) and not value:
                 yaml_str += f"{indent_str}{key}: []\n"
+            elif isinstance(value, dict) and not value:
+                yaml_str += f"{indent_str}{key}: {{}}\n"
             elif isinstance(value, (dict, list)) and value:
                 yaml_str += f"{indent_str}{key}:\n"
                 yaml_str += dict_to_yaml(value, indent + 1, key)
@@ -103,8 +105,12 @@ def dict_to_yaml(data, indent=0, prev_key=None):
     elif isinstance(data, list):
         for item in data:
             if isinstance(item, dict):
-                yaml_str += f"{indent_str}- "
-                yaml_str += dict_to_yaml_inline(item)
+                pairs = list(item.items())
+                if pairs:
+                    first_key, first_val = pairs[0]
+                    yaml_str += f"{indent_str}- {first_key}: {format_yaml_value(first_val)}\n"
+                    for key, val in pairs[1:]:
+                        yaml_str += f"{indent_str}  {key}: {format_yaml_value(val)}\n"
             else:
                 yaml_str += f"{indent_str}- {format_yaml_value(item)}\n"
     else:
@@ -112,22 +118,6 @@ def dict_to_yaml(data, indent=0, prev_key=None):
 
     return yaml_str
 
-
-def dict_to_yaml_inline(data):
-    """
-    Convert a dictionary to a single-line YAML-style mapping suitable for embedding in YAML arrays.
-    
-    Parameters:
-        data (dict): Mapping of string keys to values to be represented inline.
-    
-    Returns:
-        str: A single-line YAML-like mapping with quoted keys and YAML-formatted values, followed by a newline (e.g. {"key": value, ...}).
-    """
-    items = []
-    for key, value in data.items():
-        items.append(f'"{key}": {format_yaml_value(value)}')
-
-    return "{" + ", ".join(items) + "}\n"
 
 
 def format_yaml_value(value):
@@ -266,6 +256,7 @@ def form_data_to_yaml(form_data):
     for i in range(server_count):
         server_name = form_data.get(f'server_{i}_name')
         if not server_name:
+            logging.warning(f"form_data_to_yaml: skipping server index {i} — no name provided")
             continue
 
         server_config = {'dsn': []}
