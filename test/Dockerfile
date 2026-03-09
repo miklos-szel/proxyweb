@@ -1,5 +1,5 @@
-FROM python:3.14.0b1-bookworm
-LABEL maintainer="email@miklos-szel.com"
+FROM python:3.14-bookworm
+LABEL maintainer="contact@miklos-szel.com"
 
 ENV DEBIAN_FRONTEND=noninteractive
 

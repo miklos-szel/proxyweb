@@ -684,6 +684,9 @@ def api_execute_proxysql_command():
         # Get server from session
         server = session.get('server', 'proxysql')
 
+        if mdb.get_read_only(server):
+            return jsonify({'success': False, 'error': 'Server is in read-only mode'})
+
         # Execute the SQL commands
         error = mdb.execute_change(db, server, sql)
 

@@ -966,7 +966,13 @@ function buildUnifiedRows(table) {
         addRows(table.databases.memory.data, 'memory');
     }
     if (table.databases.runtime && table.databases.runtime.data) {
-        addRows(table.databases.runtime.data, 'runtime');
+        let runtimeRows = table.databases.runtime.data;
+        // runtime_mysql_users has two rows per username (frontend=1 and backend=1);
+        // only compare against the frontend=1 row to match the mysql_users structure
+        if (tableName === 'mysql_users') {
+            runtimeRows = runtimeRows.filter(row => String(row.frontend) === '1');
+        }
+        addRows(runtimeRows, 'runtime');
     }
 
     // Filter to only show rows with differences
@@ -1006,6 +1012,26 @@ function buildUnifiedTable(tableName, rows, tableData) {
         columnArray = Array.from(columnSet);
     }
 
+    // Columns to skip for diff comparison (table-specific)
+    const skipDiffCols = tableName === 'mysql_users' ? new Set(['frontend', 'backend']) : new Set();
+
+    // Identifying columns per table (used to highlight key cells when a row is absent from some layers)
+    const IDENT_COLS_MAP = {
+        'mysql_servers': ['hostgroup_id', 'hostname', 'port'],
+        'mysql_users': ['username'],
+        'mysql_query_rules': ['rule_id'],
+        'mysql_replication_hostgroups': ['writer_hostgroup'],
+        'mysql_group_replication_hostgroups': ['writer_hostgroup'],
+        'mysql_galera_hostgroups': ['writer_hostgroup'],
+        'mysql_aws_aurora_hostgroups': ['writer_hostgroup'],
+        'global_variables': ['variable_name'],
+        'admin_variables': ['variable_name'],
+        'mysql_variables': ['variable_name'],
+        'proxysql_servers': ['hostname', 'port'],
+        'scheduler': ['id']
+    };
+    const identCols = new Set(IDENT_COLS_MAP[tableName] || []);
+
     // First, calculate if each row has differences
     rows.forEach(row => {
         row.hasAnyDifference = false;
@@ -1019,7 +1045,7 @@ function buildUnifiedTable(tableName, rows, tableData) {
             if (row.memory && memoryVal !== null) presentValues.push(memoryVal);
             if (row.runtime && runtimeVal !== null) presentValues.push(runtimeVal);
 
-            if (presentValues.length > 1) {
+            if (!skipDiffCols.has(col) && presentValues.length > 1) {
                 const firstVal = presentValues[0];
                 if (presentValues.some(val => val !== firstVal)) {
                     row.hasAnyDifference = true;
@@ -1105,7 +1131,7 @@ function buildUnifiedTable(tableName, rows, tableData) {
             if (row.runtime && runtimeVal !== null) presentValues.push(runtimeVal);
 
             let hasDifference = false;
-            if (presentValues.length > 1) {
+            if (!skipDiffCols.has(col) && presentValues.length > 1) {
                 const firstVal = presentValues[0];
                 hasDifference = presentValues.some(val => val !== firstVal);
             }
@@ -1131,11 +1157,12 @@ function buildUnifiedTable(tableName, rows, tableData) {
                 { name: 'runtime', label: 'Runtime', badge: 'env-badge-runtime', present: row.runtime, data: row.runtimeData }
             ];
 
-            // Create signature for each environment (JSON of all column values)
+            // Create signature for each environment (JSON of all column values, excluding skipDiffCols)
             const envSignatures = envs.map(env => {
                 if (!env.present || !env.data) return null;
                 const sig = {};
                 columnArray.forEach(col => {
+                    if (skipDiffCols.has(col)) return;
                     sig[col] = env.data[col] !== undefined ? String(env.data[col]) : null;
                 });
                 return JSON.stringify(sig);
@@ -1181,27 +1208,10 @@ function buildUnifiedTable(tableName, rows, tableData) {
                 // Presence cells - show which environments have this signature
                 envs.forEach((e, idx) => {
                     const isInGroup = group.envIndices.includes(idx);
-
                     if (isInGroup && e.present) {
-                        // This env is in the current group and has data
-                        html += `<td class="presence-cell presence-yes" style="font-weight: 900; font-size: 1.1em;">
-                                    ✓
-                                 </td>`;
-                    } else if (isInGroup && !e.present) {
-                        // This env is in group but has no data - show X with red background
-                        html += `<td class="presence-cell" style="font-weight: 900; font-size: 1.1em; background: #dc2626 !important; color: black;">
-                                    X
-                                 </td>`;
-                    } else if (!isInGroup && e.present) {
-                        // This env is not in the current group but has data elsewhere - dimmed X with red
-                        html += `<td class="presence-cell" style="background: #f8b4b4 !important; color: black;">
-                                    X
-                                 </td>`;
+                        html += `<td class="presence-cell presence-yes">✓</td>`;
                     } else {
-                        // This env is not in the current group and has no data - dimmed X with lighter red
-                        html += `<td class="presence-cell" style="background: #fcd6d6 !important; color: black;">
-                                    X
-                                 </td>`;
+                        html += `<td class="presence-cell presence-no">✗</td>`;
                     }
                 });
 
@@ -1213,7 +1223,8 @@ function buildUnifiedTable(tableName, rows, tableData) {
                         ? String(representativeEnv.data[col])
                         : '';
 
-                    const cellClass = colInfo.hasDifference ? 'data-cell cell-diff' : 'data-cell';
+                    const notInAllLayers = !(row.disk && row.memory && row.runtime);
+                    const cellClass = (colInfo.hasDifference || (identCols.has(col) && notInAllLayers)) ? 'data-cell cell-diff' : 'data-cell';
                     html += `<td class="${cellClass}">${escapeHtml(envValue)}</td>`;
                 });
 
@@ -1237,7 +1248,9 @@ function buildUnifiedTable(tableName, rows, tableData) {
             // Data cells
             columnArray.forEach(col => {
                 const colInfo = columnDifferences[col];
-                html += `<td class="data-cell">${escapeHtml(colInfo.displayValue || '')}</td>`;
+                const notInAllLayers = !(row.disk && row.memory && row.runtime);
+                const cellClass = (identCols.has(col) && notInAllLayers) ? 'data-cell cell-diff' : 'data-cell';
+                html += `<td class="${cellClass}">${escapeHtml(colInfo.displayValue || '')}</td>`;
             });
 
             html += '</tr>';
