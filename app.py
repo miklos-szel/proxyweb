@@ -23,6 +23,7 @@ from collections import defaultdict
 from flask import Flask, render_template, request, session, url_for, flash, redirect, jsonify, abort
 from functools import wraps
 import re
+import errno
 import os
 import tempfile
 import yaml
@@ -54,12 +55,21 @@ def _atomic_write(path, content):
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_path, path)
-    except Exception:
+    except OSError as exc:
+        logging.warning(f"_atomic_write: os.replace failed errno={exc.errno} ({exc}); path={path}")
         try:
             os.unlink(tmp_path)
         except OSError:
             pass
-        raise
+        if exc.errno in (errno.EXDEV, errno.EBUSY):
+            # Docker file bind-mount: rename() can fail with EXDEV (cross-device)
+            # or EBUSY (device busy) when the target is a bind-mounted file.
+            # Fall back to a direct overwrite which is safe enough in this context.
+            logging.warning(f"_atomic_write: rename errno={exc.errno} fallback — writing directly to {path}")
+            with open(path, 'w') as f:
+                f.write(content)
+        else:
+            raise
 
 
 db = defaultdict(lambda: defaultdict(dict))
@@ -274,6 +284,7 @@ def render_settings(action):
             message = "success"
         return render_template("settings.html", config_file_content=config_file_content, message=message)
     except Exception as e:
+        logging.exception(f"Error in settings/{action}/")
         raise ValueError(e)
 
 
@@ -701,7 +712,7 @@ def handle_exception(e):
     Returns:
         tuple: A rendered error page response and the HTTP status code 500.
     """
-    print(e)
+    logging.exception(e)
     return render_template("error.html", error=e), 500
 
 

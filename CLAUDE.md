@@ -151,3 +151,20 @@ The container entrypoint (`misc/entry.sh`) respects:
 - `WEBSERVER_PORT` (default: 5000)
 - `WEBSERVER_WORKERS` (default: 2)
 - `WEBSERVER_THREADS` (default: 2)
+
+## Regression Tests
+
+When a bug is fixed, add an integration test that would have caught it, so it cannot regress silently.
+
+Rules:
+- One test (or test class) per bug, named/documented to describe the original problem
+- Tests live in `test/test_proxyweb.py` and use the existing `ProxyWebSession` helper
+- The test must **fail** on the un-fixed code and **pass** after the fix
+- Add a docstring explaining what bug the test guards against
+
+### Tests added for known bugs
+
+| Bug | Test class / method |
+|-----|---------------------|
+| `_atomic_write` fails with EBUSY/EXDEV on Docker bind-mount → config saves return 500 | `TestSettingsSave` |
+| `hide_tables` config change not reflected in nav after save | `TestHideTables` |

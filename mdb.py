@@ -93,7 +93,9 @@ def dict_to_yaml(data, indent=0, prev_key=None):
             if prev_key in subsection_breaks and key in subsection_breaks.get(prev_key, []):
                 yaml_str += "\n"
 
-            if isinstance(value, (dict, list)) and value:
+            if isinstance(value, list) and not value:
+                yaml_str += f"{indent_str}{key}: []\n"
+            elif isinstance(value, (dict, list)) and value:
                 yaml_str += f"{indent_str}{key}:\n"
                 yaml_str += dict_to_yaml(value, indent + 1, key)
             else:

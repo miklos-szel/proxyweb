@@ -53,10 +53,10 @@ on_exit() {
     if [[ $KEEP -eq 0 ]]; then
         echo ""
         echo "==> Tearing down stack..."
-        sudo docker compose down --volumes --remove-orphans
+        docker compose down --volumes --remove-orphans
     else
         echo ""
-        echo "==> Stack left running (--keep). Stop with: sudo docker compose down -v --remove-orphans"
+        echo "==> Stack left running (--keep). Stop with: docker compose down -v --remove-orphans"
         echo ""
         echo "    ProxyWeb UI      http://localhost:5000   admin / admin42"
         echo "    ProxySQL 1 admin localhost:6032          radmin / radmin"
@@ -72,11 +72,11 @@ trap on_exit EXIT
 # ---------------------------------------------------------------------------
 
 echo "==> Building and starting stack (this may take a few minutes on first run)..."
-sudo docker compose up -d --build --wait
+docker compose up -d --build --wait
 
 echo ""
 echo "==> Installing test dependencies..."
-sudo apt-get install -y -qq python3-requests python3-pymysql
+#apt-get install -y -qq python3-requests python3-pymysql
 
 # ---------------------------------------------------------------------------
 # Run tests — output goes to terminal; captured separately for error logging
@@ -112,12 +112,12 @@ if [[ $TEST_EXIT -ne 0 ]]; then
 
         echo ""
         echo "=== DOCKER SERVICE STATUS ==="
-        sudo docker compose ps --all 2>&1 || true
+        docker compose ps --all 2>&1 || true
 
         echo ""
         echo "=== SERVICE LOGS ==="
         for svc in proxyweb proxysql proxysql2 mysql mysql2 proxysql-init proxysql2-init; do
-            local_logs=$(sudo docker compose logs --no-color --tail=200 "$svc" 2>&1 || true)
+            local_logs=$(docker compose logs --no-color --tail=200 "$svc" 2>&1 || true)
             # Only include a service's logs if they contain an error indicator.
             if echo "$local_logs" | grep -qiE 'error|exception|traceback|fatal|critical'; then
                 echo ""

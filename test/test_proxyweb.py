@@ -1339,6 +1339,117 @@ class TestMultiServer(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Settings-save regression tests
+# ---------------------------------------------------------------------------
+
+class TestSettingsSave(unittest.TestCase):
+    """
+    Regression tests for /settings/save/.
+
+    Primary bug guarded: _atomic_write() failed with EBUSY (errno 16) or EXDEV
+    (errno 18) when the config file is a Docker bind-mount, causing every save
+    to return 500.  Fixed by falling back to a direct open()+write() when
+    os.replace() raises either errno.
+    """
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        resp = self.s.get("/settings/export/")
+        body = resp.json()
+        self.assertTrue(body.get("success"), f"export failed: {body.get('error')}")
+        self._original_yaml = body["yaml"]
+
+    def tearDown(self):
+        if hasattr(self, "_original_yaml"):
+            payload = {"settings": self._original_yaml, "_csrf_token": self.s.csrf_token}
+            self.s.session.post(f"{BASE_URL}/settings/save/", data=payload, timeout=10)
+
+    def test_export_then_save_roundtrip(self):
+        """Saving the unmodified exported YAML must succeed (200).
+        Catches: _atomic_write EBUSY/EXDEV fallback regression."""
+        payload = {"settings": self._original_yaml, "_csrf_token": self.s.csrf_token}
+        resp = self.s.session.post(f"{BASE_URL}/settings/save/", data=payload, timeout=10)
+        self.assertEqual(resp.status_code, 200,
+                         f"save returned {resp.status_code}; body: {resp.text!r}")
+
+    def test_save_invalid_yaml_returns_error(self):
+        """Submitting broken YAML must not return 200."""
+        payload = {"settings": "not: valid: yaml: [[[", "_csrf_token": self.s.csrf_token}
+        resp = self.s.session.post(f"{BASE_URL}/settings/save/", data=payload, timeout=10)
+        self.assertNotEqual(resp.status_code, 200,
+                            "broken YAML was accepted without error")
+
+    def test_save_missing_required_section_returns_error(self):
+        """YAML missing a required section (auth) must not return 200."""
+        bad_yaml = "global:\n  default_server: x\nflask:\n  SECRET_KEY: x\nservers:\n  x:\n    dsn: []\nmisc:\n  apply_config: []\n"
+        payload = {"settings": bad_yaml, "_csrf_token": self.s.csrf_token}
+        resp = self.s.session.post(f"{BASE_URL}/settings/save/", data=payload, timeout=10)
+        self.assertNotEqual(resp.status_code, 200,
+                            "YAML missing auth section was accepted without error")
+
+
+# ---------------------------------------------------------------------------
+# Hide-tables config tests
+# ---------------------------------------------------------------------------
+
+class TestHideTables(unittest.TestCase):
+    """Verify that the hide_tables config removes tables from the nav and restores them."""
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        resp = self.s.get("/settings/export/")
+        body = resp.json()
+        self.assertTrue(body.get("success"), f"settings/export failed: {body.get('error')}")
+        self._original_yaml = body["yaml"]
+
+    def tearDown(self):
+        if hasattr(self, "_original_yaml"):
+            self.s.post_form("/settings/save/", {"settings": self._original_yaml})
+
+    def _save_with_extra_hide_pattern(self, pattern):
+        """Prepend *pattern* to the global hide_tables list and save the config."""
+        # dict_to_yaml always indents list items under hide_tables with 4 spaces
+        modified = self._original_yaml.replace(
+            "hide_tables:\n",
+            f"hide_tables:\n    - {pattern}\n",
+            1,  # only the first occurrence (global section)
+        )
+        payload = {"settings": modified, "_csrf_token": self.s.csrf_token}
+        raw = self.s.session.post(f"{BASE_URL}/settings/save/", data=payload, timeout=10)
+        self.assertEqual(raw.status_code, 200,
+                         f"POST /settings/save/ returned {raw.status_code}; "
+                         f"body: {raw.text!r}")
+
+    def test_hidden_table_absent_from_nav(self):
+        """Adding a table to hide_tables must remove its nav link from the home page."""
+        # Precondition: mysql_servers appears in the Memory dropdown before hiding
+        resp = self.s.get("/")
+        self.assertIn("/main/mysql_servers/", resp.text)
+
+        self._save_with_extra_hide_pattern("mysql_servers")
+
+        # GET / always rebuilds session['dblist'] from the updated config
+        resp = self.s.get("/")
+        self.assertNotIn("/main/mysql_servers/", resp.text)
+
+    def test_unhidden_table_returns_to_nav(self):
+        """Restoring the original config brings a previously hidden table back to the nav."""
+        self._save_with_extra_hide_pattern("mysql_servers")
+
+        # Confirm it is gone
+        resp = self.s.get("/")
+        self.assertNotIn("/main/mysql_servers/", resp.text)
+
+        # Restore original config (hide_tables back to its previous state)
+        self.s.post_form("/settings/save/", {"settings": self._original_yaml})
+
+        resp = self.s.get("/")
+        self.assertIn("/main/mysql_servers/", resp.text)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
