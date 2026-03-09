@@ -97,6 +97,7 @@ body {
 .dropdown-item {
     border-radius: calc(var(--border-radius) - 2px);
     padding: 0.375rem 0.75rem;
+    font-size: 0.95rem;
     font-weight: 500;
     transition: all 0.2s ease;
     color: #333;

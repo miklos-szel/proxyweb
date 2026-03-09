@@ -1450,6 +1450,52 @@ class TestHideTables(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Settings page recovery tests
+# ---------------------------------------------------------------------------
+
+class TestSettingsEditRecovery(unittest.TestCase):
+    """
+    Regression tests for the unrecoverable-state bug in base.html.
+
+    Bug guarded: base.html used bare session['misc'], session['history'],
+    session['server'], session['database'], session['table'] which raise
+    KeyError when the session lacks those keys (e.g. after a broken config
+    save or when navigating directly to /settings/edit/ without first
+    visiting / to populate the session via render_list_dbs).
+
+    Fixed by replacing all session['key'] accesses with session.get('key', default).
+    """
+
+    def test_settings_edit_accessible_without_prior_navigation(self):
+        """GET /settings/edit/ with a fresh session (no / visit) must return 200.
+
+        Before the fix, base.html raised KeyError on session['misc'] because
+        render_list_dbs had never run, leaving the session empty.  This left
+        the user with no way to fix a broken config — navigating to /settings/edit/
+        itself crashed with a 500.
+        """
+        s = ProxyWebSession()
+        s.login()
+        # Do NOT visit / first — session has no server/table/misc keys
+        resp = s.get("/settings/edit/")
+        self.assertEqual(resp.status_code, 200,
+                         f"/settings/edit/ returned {resp.status_code} on fresh session; "
+                         f"body: {resp.text[:300]!r}")
+        self.assertIn("settings", resp.text.lower(),
+                      "/settings/edit/ response does not look like the settings page")
+
+    def test_settings_edit_accessible_after_nav(self):
+        """GET /settings/edit/ also works after visiting / (normal flow)."""
+        s = ProxyWebSession()
+        s.login()
+        s.get("/")  # populate session via render_list_dbs
+        resp = s.get("/settings/edit/")
+        self.assertEqual(resp.status_code, 200,
+                         f"/settings/edit/ returned {resp.status_code} after /; "
+                         f"body: {resp.text[:300]!r}")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

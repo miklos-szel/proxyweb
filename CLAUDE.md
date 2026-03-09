@@ -168,3 +168,4 @@ Rules:
 |-----|---------------------|
 | `_atomic_write` fails with EBUSY/EXDEV on Docker bind-mount → config saves return 500 | `TestSettingsSave` |
 | `hide_tables` config change not reflected in nav after save | `TestHideTables` |
+| `base.html` bare `session['key']` raises KeyError on fresh session → `/settings/edit/` returns 500, leaving broken config unrecoverable | `TestSettingsEditRecovery` |

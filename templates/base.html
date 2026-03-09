@@ -100,16 +100,16 @@
     </script>
 
     <script>
-        {% for item in session['misc'] %}
-            {% for subitem in session['misc'][item] %}
-                let {{ item }}_item_{{loop.index}} = {{ subitem['sql']|tojson }};
+        {% for item in session.get('misc', {}) %}
+            {% for subitem in session.get('misc', {})[item] %}
+                let {{ item }}_item_{{loop.index}} = {{ subitem.get('sql', '')|tojson }};
             {% endfor %}
         {% endfor %}
     </script>
 
     <script>
-        {% if session['history'] %}
-            {% for item in session['history'][:25]|reverse %}
+        {% if session.get('history') %}
+            {% for item in session.get('history', [])[:25]|reverse %}
                 let history_item_{{loop.index}} = {{ item|tojson }};
             {% endfor %}
         {% endif %}
@@ -121,8 +121,8 @@
 
         // Helper function to check if table is editable
         function isTableEditable() {
-            const database = '{{ session['database'] }}';
-            const tableName = '{{ session['table'] }}';
+            const database = '{{ session.get('database', '') }}';
+            const tableName = '{{ session.get('table', '') }}';
             const isReadOnly = {{ session.get('read_only', false) | tojson }};
 
             console.log('[DEBUG isTableEditable] database:', database);
@@ -140,8 +140,8 @@
 
         // Helper function to check if rows can be added
         function canAddRows() {
-            const database = '{{ session['database'] }}';
-            const tableName = '{{ session['table'] }}';
+            const database = '{{ session.get('database', '') }}';
+            const tableName = '{{ session.get('table', '') }}';
             const isReadOnly = {{ session.get('read_only', false) | tojson }};
 
             console.log('[DEBUG canAddRows] database:', database);
@@ -161,7 +161,7 @@
 
         // Load table schema on page load
         async function loadTableSchema() {
-            const tableName = '{{ session['table'] }}';
+            const tableName = '{{ session.get('table', '') }}';
             try {
                 const response = await fetch(`/api/get_schema?table=${encodeURIComponent(tableName)}`);
                 const data = await response.json();
@@ -644,9 +644,9 @@
             const cells = row.querySelectorAll('td:not(.edit-controls)');
             const allHeaderCells = row.closest('table').querySelectorAll('thead th');
             const headerCells = Array.from(allHeaderCells).filter(th => !th.classList.contains('actions-header'));
-            const tableName = '{{ session['table'] }}';
-            const database = '{{ session['database'] }}';
-            const server = '{{ session['server'] }}';
+            const tableName = '{{ session.get('table', '') }}';
+            const database = '{{ session.get('database', '') }}';
+            const server = '{{ session.get('server', '') }}';
 
             const updatedData = {};
             const columnNames = [];
@@ -787,9 +787,9 @@
         function deleteRow(button) {
             const row = button.closest('tr');
             const table = row.closest('table');
-            const tableName = '{{ session['table'] }}';
-            const database = '{{ session['database'] }}';
-            const server = '{{ session['server'] }}';
+            const tableName = '{{ session.get('table', '') }}';
+            const database = '{{ session.get('database', '') }}';
+            const server = '{{ session.get('server', '') }}';
             const storedColNames = JSON.parse(row.dataset.columnNames || '[]');
             const storedRowData  = JSON.parse(row.dataset.rowData   || '[]');
             const pkValues = {};
@@ -987,9 +987,9 @@
             const cells = row.querySelectorAll('td:not(.edit-controls)');
             const allHeaderCells = row.closest('table').querySelectorAll('thead th');
             const headerCells = Array.from(allHeaderCells).filter(th => !th.classList.contains('actions-header'));
-            const tableName = '{{ session['table'] }}';
-            const database = '{{ session['database'] }}';
-            const server = '{{ session['server'] }}';
+            const tableName = '{{ session.get('table', '') }}';
+            const database = '{{ session.get('database', '') }}';
+            const server = '{{ session.get('server', '') }}';
 
             const rowData = {};
             const columnNames = [];
