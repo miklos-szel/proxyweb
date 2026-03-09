@@ -30,7 +30,7 @@ RUN apt-get update -y && \
     wget https://dev.mysql.com/get/Downloads/MySQL-8.4/mysql-common_8.4.5-1debian12_amd64.deb && \
     wget https://dev.mysql.com/get/Downloads/MySQL-8.4/mysql-community-client-plugins_8.4.5-1debian12_amd64.deb && \
     wget https://dev.mysql.com/get/Downloads/MySQL-8.4/mysql-community-client-core_8.4.5-1debian12_amd64.deb && \
-    wget https://cdn.mysql.com/Downloads/MySQL-8.4/mysql-community-client_8.4.5-1debian12_amd64.deb && \
+    wget https://dev.mysql.com/get/Downloads/MySQL-8.4/mysql-community-client_8.4.5-1debian12_amd64.deb && \
     wget https://dev.mysql.com/get/Downloads/MySQL-8.4/mysql-client_8.4.5-1debian12_amd64.deb && \
     dpkg -i \
         mysql-common_8.4.5-1debian12_amd64.deb \
