@@ -44,6 +44,20 @@ With Docker:
 ```
 docker run -h proxyweb --name proxyweb --network="host" -d proxyweb/proxyweb:latest
 ```
+
+## Building from source
+
+```bash
+make proxyweb-build                        # linux/amd64, tag: latest
+make proxyweb-build PLATFORM=linux/arm64   # cross-compile for ARM
+make proxyweb-build TAG=1.2.3              # custom tag
+make proxyweb-build PLATFORM=linux/arm64 TAG=1.2.3
+```
+
+| Variable   | Default        | Description                        |
+|------------|----------------|------------------------------------|
+| `PLATFORM` | `linux/amd64`  | Target architecture passed to `docker build --platform` |
+| `TAG`      | `latest`       | Docker image tag (`proxyweb/proxyweb:<TAG>`) |
 ## Install it as a systemd service (Ubuntu)
 ```
 git clone https://github.com/miklos-szel/proxyweb
