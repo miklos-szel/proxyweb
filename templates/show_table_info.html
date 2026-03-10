@@ -323,7 +323,7 @@
     }
 </style>
 
-{% if not session['read_only'] %}
+{% if not session['read_only'] or session.get('role') == 'readonly' %}
     <div class="sql-editor-card">
         <div class="sql-editor-header" onclick="toggleSqlEditor()">
             <h5><i class="fas fa-code"></i> SQL Query Editor

@@ -22,6 +22,8 @@ servers:
 auth:
   admin_user: admin
   admin_password: admin42
+  readonly_user: readonly
+  readonly_password: readonly42
 flask:
   SECRET_KEY: 12345678901234567890
   SEND_FILE_MAX_AGE_DEFAULT: 0

@@ -156,17 +156,30 @@ def login():
     """
     session.clear()
     message=""
-    admin_user = mdb.get_config(config)['auth']['admin_user']
-    admin_password = mdb.get_config(config)['auth']['admin_password']
+    auth_cfg = mdb.get_config(config)['auth']
+    admin_user = auth_cfg['admin_user']
+    admin_password = auth_cfg['admin_password']
+    readonly_user = auth_cfg.get('readonly_user', 'readonly')
+    readonly_password = auth_cfg.get('readonly_password', '')
 
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
         if admin_user == username and admin_password == password:
             session['logged_in'] = True
+            session['role'] = 'admin'
+            return redirect(url_for('render_list_dbs'))
+        elif readonly_user and readonly_password and username == readonly_user and password == readonly_password:
+            session['logged_in'] = True
+            session['role'] = 'readonly'
             return redirect(url_for('render_list_dbs'))
         message="Invalid credentials!"
-    return render_template("login.html", message=message)
+
+    show_default_creds = (
+        (admin_user == 'admin' and admin_password == 'admin42')
+        or (readonly_user == 'readonly' and readonly_password == 'readonly42')
+    )
+    return render_template("login.html", message=message, show_default_creds=show_default_creds)
 
 @app.route('/logout')
 def logout():
@@ -179,11 +192,19 @@ def logout():
 def render_list_dbs():
     try:
         server = mdb.get_default_server()
+    except ValueError:
+        if session.get('role') == 'readonly':
+            return render_template("error.html", error="No servers configured. Ask an admin to set one up."), 503
+        flash('No servers configured. Please add one below.', 'warning')
+        return redirect(url_for('render_settings', action='edit'))
+    try:
         session['history'] = []
         session['server'] = server
         session['dblist'] = mdb.get_all_dbs_and_tables(db, server)
         session['servers'] = mdb.get_servers()
         session['read_only'] = mdb.get_read_only(server)
+        if session.get('role') == 'readonly':
+            session['read_only'] = True
         session['misc'] = mdb.get_config(config)['misc']
 
         return render_template("list_dbs.html", server=server)
@@ -206,6 +227,8 @@ def render_show_table_content(server, database="main", table="global_variables")
         session['database'] = database
         session['misc'] = mdb.get_config(config)['misc']
         session['read_only'] = mdb.get_read_only(server)
+        if session.get('role') == 'readonly':
+            session['read_only'] = True
         content = mdb.get_table_content(db, server, database, table)
         mdb.process_table_content(table,content)
         return render_template("show_table_info.html", content=content)
@@ -235,6 +258,10 @@ def render_change(server, database, table):
 
         mdb.logging.debug(session['history'])
         select = re.search(r'^\s*SELECT\b.*\bFROM\b', session['sql'], re.I | re.S)
+        if not select and session.get('role') == 'readonly':
+            error = "Read-only user cannot execute non-SELECT statements"
+            content = mdb.get_table_content(db, server, database, table)
+            return render_template("show_table_info.html", content=content, error=error, message="")
         if select:
             content = mdb.execute_adhoc_query(db, server, session['sql'])
             content['order'] = 'true'
@@ -269,16 +296,18 @@ def adhoc_report(server):
 def render_settings(action):
     """
     Render the settings page and optionally persist updated configuration.
-    
+
     Parameters:
         action (str): 'edit' to load the current configuration file for editing, or 'save' to validate and atomically persist the submitted YAML configuration.
-    
+
     Returns:
         A Flask response rendering the 'settings.html' template with `config_file_content` and `message`.
-    
+
     Raises:
         ValueError: If YAML validation, file I/O, or write operations fail.
     """
+    if session.get('role') == 'readonly':
+        abort(403)
     try:
         config_file_content = ""
         message = ""
@@ -307,14 +336,16 @@ def render_settings(action):
 def settings_ui_save():
     """
     Save UI-submitted settings to the application's configuration after validation and backup.
-    
+
     Validates the provided YAML and configuration shape, writes a backup of the current config file, and atomically replaces the config with the validated content.
-    
+
     Returns:
         dict: On success, JSON {'success': True, 'message': 'Settings saved successfully'}.
         dict: On validation failure, JSON {'success': False, 'error': <message>} with HTTP 400.
         dict: On other errors, JSON {'success': False, 'error': <message>}.
     """
+    if session.get('role') == 'readonly':
+        abort(403)
     try:
         # Get form data and build YAML
         form_data = request.form.to_dict()
@@ -344,12 +375,14 @@ def settings_ui_save():
 def settings_load_ui():
     """
     Return the current application configuration formatted for the UI.
-    
+
     Returns:
         Response: JSON object with either:
             - {'success': True, 'config': <dict>} on success, or
             - {'success': False, 'error': '<error message>'} on failure.
     """
+    if session.get('role') == 'readonly':
+        abort(403)
     try:
         config_data = mdb.get_config(config)
         return jsonify({'success': True, 'config': config_data})
@@ -363,12 +396,14 @@ def settings_load_ui():
 def settings_export():
     """
     Provide the YAML representation of the current configuration.
-    
+
     Returns:
         dict: JSON-serializable payload with either:
             - {'success': True, 'yaml': <str>} on success, where <str> is the config YAML, or
             - {'success': False, 'error': <str>} on failure, where <str> is the error message.
     """
+    if session.get('role') == 'readonly':
+        abort(403)
     try:
         config_data = mdb.get_config(config)
         yaml_content = mdb.dict_to_yaml(config_data)
@@ -383,13 +418,15 @@ def settings_export():
 def settings_import():
     """
     Import a new application configuration from uploaded YAML content.
-    
+
     Validates the uploaded YAML for syntax and required configuration shape before modifying persistent state, creates a backup of the existing config file as "<config>.bak", then atomically replaces the configuration file with the provided YAML. On success returns a JSON object indicating success; on failure returns a JSON object with an error message and logs the exception.
-    
+
     Returns:
         dict: JSON-serializable mapping. On success: `{'success': True, 'message': 'Configuration imported successfully'}`.
               On error: `{'success': False, 'error': '<error message>'}`.
     """
+    if session.get('role') == 'readonly':
+        abort(403)
     try:
         # Get uploaded YAML content
         yaml_content = request.form.get('yaml_content', '')
@@ -453,15 +490,17 @@ def get_config_diff(server):
 def update_config_skip_variables():
     """
     Update the list of variables to skip when computing configuration differences.
-    
+
     Expects a JSON request body containing a `skip_variables` array of variable names to store
     under the config's `global.config_diff_skip_variable` key. Persists the updated configuration
     to disk (creates a `.bak` backup of the existing config before writing).
-    
+
     Returns:
         dict: JSON response with `{'success': True}` on success, or
               `{'success': False, 'error': <message>}` on failure describing the error.
     """
+    if session.get('role') == 'readonly':
+        abort(403)
     try:
         data = request.get_json(silent=True)
         if not data:
@@ -526,7 +565,7 @@ def api_update_row():
         column_names = data['columnNames']
         row_data = data['data']
 
-        if mdb.get_read_only(server) or table.startswith('runtime_'):
+        if mdb.get_read_only(server) or table.startswith('runtime_') or session.get('role') == 'readonly':
             return jsonify({'success': False, 'error': 'table is read-only'}), 403
 
         logging.debug("=" * 80)
@@ -578,7 +617,7 @@ def api_delete_row():
         table = data['table']
         pk_values = data['pkValues']
 
-        if mdb.get_read_only(server) or table.startswith('runtime_'):
+        if mdb.get_read_only(server) or table.startswith('runtime_') or session.get('role') == 'readonly':
             return jsonify({'success': False, 'error': 'table is read-only'}), 403
 
         logging.debug("=" * 80)
@@ -623,7 +662,7 @@ def api_insert_row():
         column_names = data['columnNames']
         row_data = data['data']
 
-        if mdb.get_read_only(server) or table.startswith('runtime_'):
+        if mdb.get_read_only(server) or table.startswith('runtime_') or session.get('role') == 'readonly':
             return jsonify({'success': False, 'error': 'table is read-only'}), 403
 
         logging.debug("=" * 80)
@@ -698,7 +737,7 @@ def api_execute_proxysql_command():
         # Get server from session
         server = session.get('server') or mdb.get_default_server()
 
-        if mdb.get_read_only(server):
+        if mdb.get_read_only(server) or session.get('role') == 'readonly':
             return jsonify({'success': False, 'error': 'Server is in read-only mode'})
 
         # Execute the SQL commands
@@ -722,13 +761,16 @@ def api_execute_proxysql_command():
 def handle_exception(e):
     """
     Render an error page for an exception.
-    
+
     Parameters:
         e (Exception): The exception to display on the error page; passed to the template as `error`.
-    
+
     Returns:
         tuple: A rendered error page response and the HTTP status code 500.
     """
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return e.get_response()
     logging.exception(e)
     return render_template("error.html", error=e), 500
 

@@ -302,6 +302,12 @@ def form_data_to_yaml(form_data):
     if 'auth_admin_password' in form_data:
         config['auth']['admin_password'] = form_data['auth_admin_password']
 
+    if 'auth_readonly_user' in form_data:
+        config['auth']['readonly_user'] = form_data['auth_readonly_user']
+
+    if 'auth_readonly_password' in form_data:
+        config['auth']['readonly_password'] = form_data['auth_readonly_password']
+
     # Process flask section
     if 'flask_SECRET_KEY' in form_data:
         config['flask']['SECRET_KEY'] = form_data['flask_SECRET_KEY']

@@ -175,3 +175,6 @@ Rules:
 | `dict_to_yaml()` rendered DSN list entries as inline JSON (`{"host": ...}`) instead of block YAML; new server with empty name silently dropped | `TestSettingsUIServer` |
 | `digest_text` in `stats_mysql_query_digest` had leading whitespace, used `pre-wrap`, truncated at 60 chars, and showed raw Unicode arrows instead of FA chevrons | `TestDigestTextDisplay` |
 | `stats_mysql_query_digest` must serve > 100 rows so DataTables activates client-side pagination; pagination HTML is JS-rendered so the test counts `<tr>` in `<tbody>` | `TestZPagination` |
+| readonly user must not modify data, access settings, execute LOAD/SAVE, or run non-SELECT SQL; can browse tables, view config diff, use SQL editor for SELECTs | `TestReadOnlyUser` |
+| login page should show default credentials hint when passwords are at defaults; hint disappears after changing passwords | `TestDefaultCredentialsHint` |
+| `render_list_dbs` crashes with ValueError when `servers:` is empty; admin should be redirected to settings, readonly gets error page | `TestNoServersRedirect` |

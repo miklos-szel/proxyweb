@@ -102,6 +102,37 @@
         font-size: 0.9rem;
     }
 
+    .alert-info-custom {
+        background-color: #e8f4fd;
+        border: 1px solid #bee5eb;
+        border-left: 4px solid #17a2b8;
+        border-radius: 8px;
+        color: #0c5460;
+        padding: 1rem 1.25rem;
+        margin-bottom: 1.5rem;
+        font-size: 0.9rem;
+        display: flex;
+        gap: 0.75rem;
+        align-items: flex-start;
+    }
+
+    .alert-info-custom i.fa-info-circle {
+        font-size: 1.25rem;
+        margin-top: 0.15rem;
+        color: #17a2b8;
+    }
+
+    .alert-info-custom p {
+        margin: 0.25rem 0 0 0;
+    }
+
+    .alert-info-custom code {
+        background: rgba(0,0,0,0.06);
+        padding: 0.1rem 0.35rem;
+        border-radius: 3px;
+        font-size: 0.85rem;
+    }
+
     .login-footer {
         text-align: center;
         padding: 2rem 2.5rem;
@@ -134,6 +165,18 @@
         <div class="alert alert-danger" role="alert">
             <i class="fas fa-exclamation-circle me-2"></i>
             <strong>{{ message }}</strong>
+        </div>
+        {% endif %}
+
+        {% if show_default_creds %}
+        <div class="alert-info-custom">
+            <i class="fas fa-info-circle"></i>
+            <div>
+                <strong>Default credentials detected</strong>
+                <p>Admin: <code>admin</code> / <code>admin42</code></p>
+                <p>Read-only: <code>readonly</code> / <code>readonly42</code></p>
+                <p>Please change these in Settings after logging in.</p>
+            </div>
         </div>
         {% endif %}
 

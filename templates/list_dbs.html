@@ -185,6 +185,7 @@
                                 <i class="fas fa-chart-line me-2"></i>ProxySQL Report
                             </a>
                         </li>
+                        {% if session.get('role') != 'readonly' %}
                         <li><hr class="dropdown-divider"></li>
                         <li>
                             <a class="dropdown-item" href="#" onclick="executeProxySQLCommand('Load Memory to Runtime', 'LOAD MYSQL USERS TO RUNTIME;LOAD MYSQL SERVERS TO RUNTIME;LOAD MYSQL QUERY RULES TO RUNTIME;LOAD MYSQL VARIABLES TO RUNTIME;LOAD ADMIN VARIABLES TO RUNTIME;LOAD PROXYSQL SERVERS TO RUNTIME;LOAD SCHEDULER TO RUNTIME;'); return false;">
@@ -206,6 +207,7 @@
                                 <i class="fas fa-arrow-down me-2"></i>Load Runtime to Memory
                             </a>
                         </li>
+                        {% endif %}
                     </ul>
                 </li>
                 <!-- misc menu end -->
@@ -239,11 +241,13 @@
                 </li>
                 <!-- servers menu end -->
 
+                {% if session.get('role') != 'readonly' %}
                 <li class="nav-item me-2">
                     <a class="nav-link" href="/settings/edit/" title="Settings">
                         <i class="fas fa-cog"></i>
                     </a>
                 </li>
+                {% endif %}
 
                 <li class="nav-item">
                     <a class="nav-link" href="/logout" title="Logout">

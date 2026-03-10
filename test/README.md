@@ -98,6 +98,19 @@ PROXYWEB_USER=admin PROXYWEB_PASS=admin42 python3 test_proxyweb.py
 | `TestMySQLServers`     | Full CRUD on `mysql_servers` via proxyweb API              |
 | `TestQueryRules`       | Full CRUD on `mysql_query_rules` including end-to-end cycle |
 | `TestMultiServer`      | Server switching; backend isolation (mysql vs mysql2); cross-server query rule differences; independent CRUD and config diff on proxysql2 |
+| `TestProxySQL1BackendSQL` | SQL execution against ProxySQL 1 MySQL frontend            |
+| `TestProxySQL2BackendSQL` | SQL execution against ProxySQL 2 MySQL frontend            |
+| `TestConfigDiffMemoryRuntime` | Config diff between memory and runtime layers         |
+| `TestSettingsSave`     | Config save round-trip; invalid YAML rejection; missing section rejection |
+| `TestHideTables`       | hide_tables config hides/unhides tables in nav             |
+| `TestDefaultServerFallback` | Fallback when default_server name doesn't match any server |
+| `TestSettingsEditRecovery` | Settings edit page accessible without prior navigation  |
+| `TestSettingsUIServer` | UI form produces block YAML; empty server name rejected    |
+| `TestDigestTextDisplay`| digest_text truncation, whitespace, and chevron rendering  |
+| `TestZPagination`      | DataTables pagination activates with >100 rows             |
+| `TestReadOnlyUser`     | Read-only user restrictions on data modification and settings |
+| `TestDefaultCredentialsHint` | Login page shows/hides default credential hint       |
+| `TestNoServersRedirect`| Empty servers config redirects admin to settings; readonly gets error |
 
 ## Directory structure
 
@@ -126,7 +139,8 @@ test/
 
 | What                              | Username   | Password   |
 |-----------------------------------|------------|------------|
-| ProxyWeb UI                       | admin      | admin42    |
+| ProxyWeb UI (admin)               | admin      | admin42    |
+| ProxyWeb UI (read-only)           | readonly   | readonly42 |
 | ProxySQL 1 admin interface        | radmin     | radmin     |
 | ProxySQL 1 monitor (MySQL)        | monitor    | monitor    |
 | MySQL 1 application user          | proxyuser  | proxypass  |

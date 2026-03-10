@@ -94,6 +94,8 @@ function populateForm(config) {
     // Auth section — clear first
     document.getElementById('auth_admin_user').value = '';
     document.getElementById('auth_admin_password').value = '';
+    document.getElementById('auth_readonly_user').value = '';
+    document.getElementById('auth_readonly_password').value = '';
 
     if (config.auth) {
         const auth = config.auth;
@@ -104,6 +106,14 @@ function populateForm(config) {
 
         if (auth.admin_password) {
             document.getElementById('auth_admin_password').value = auth.admin_password;
+        }
+
+        if (auth.readonly_user) {
+            document.getElementById('auth_readonly_user').value = auth.readonly_user;
+        }
+
+        if (auth.readonly_password) {
+            document.getElementById('auth_readonly_password').value = auth.readonly_password;
         }
     }
 
