@@ -1,0 +1,100 @@
+datadir="/var/lib/proxysql"
+
+admin_variables=
+{
+    # "admin:admin" is the default admin user; "radmin:radmin" is used by proxyweb
+    admin_credentials="admin:admin;radmin:radmin"
+    mysql_ifaces="0.0.0.0:6032"
+    refresh_interval=2000
+}
+
+mysql_variables=
+{
+    threads=4
+    max_connections=2048
+    default_query_delay=0
+    default_query_timeout=36000000
+    have_compress=true
+    poll_timeout=2000
+    interfaces="0.0.0.0:6033"
+    default_schema="information_schema"
+    stacksize=1048576
+    server_version="8.0.0"
+    connect_timeout_server=3000
+    monitor_username="monitor"
+    monitor_password="monitor"
+    monitor_history=600000
+    monitor_connect_interval=60000
+    monitor_ping_interval=10000
+    monitor_read_only_interval=1500
+    monitor_read_only_timeout=500
+    ping_interval_server_msec=120000
+    ping_timeout_server=500
+    commands_stats=true
+    sessions_sort=true
+    connect_retries_on_failure=10
+}
+
+mysql_servers=
+(
+    {
+        address="mysql2"
+        port=3306
+        hostgroup=1
+        status="ONLINE"
+        weight=1
+        compression=0
+        max_connections=200
+    },
+    {
+        address="mysql2"
+        port=3306
+        hostgroup=2
+        status="ONLINE"
+        weight=1
+        compression=0
+        max_connections=200
+    },
+    {
+        address="mysql3"
+        port=3306
+        hostgroup=2
+        status="ONLINE"
+        weight=1
+        compression=0
+        max_connections=200
+    }
+)
+
+mysql_users=
+(
+    {
+        username="proxyuser2"
+        password="proxypass2"
+        default_hostgroup=1
+        max_connections=200
+        default_schema="testdb2"
+        active=1
+    }
+)
+
+mysql_replication_hostgroups=
+(
+    {
+        writer_hostgroup=1
+        reader_hostgroup=2
+        comment="read/write split"
+    }
+)
+
+mysql_query_rules=
+(
+)
+
+scheduler=
+(
+)
+
+proxysql_servers=
+(
+)

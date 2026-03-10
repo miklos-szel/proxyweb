@@ -1,0 +1,54 @@
+global:
+  default_server: proxysql
+  read_only: false
+  hide_tables:
+    - ".*aurora.*"
+    - ".*galera.*"
+    - ".*pgsql.*"
+    - ".*mysql_firewall.*"
+    - mysql_collations
+  config_diff_skip_variable: []
+
+servers:
+  proxysql:
+    dsn:
+      - host: proxysql
+        user: radmin
+        passwd: radmin
+        port: 6032
+        db: main
+  proxysql2:
+    dsn:
+      - host: proxysql2
+        user: radmin
+        passwd: radmin
+        port: 6032
+        db: main
+
+auth:
+  admin_user: admin
+  admin_password: admin42
+  readonly_user: readonly
+  readonly_password: readonly42
+
+flask:
+  SECRET_KEY: 12345678901234567890
+  SEND_FILE_MAX_AGE_DEFAULT: 0
+  TEMPLATES_AUTO_RELOAD: true
+
+misc:
+
+  apply_config:
+    - title: LOAD EVERYTHING TO RUNTIME
+      info: Load all config items from memory to runtime.
+      sql: LOAD MYSQL USERS TO RUNTIME; LOAD MYSQL SERVERS TO RUNTIME; LOAD MYSQL QUERY RULES TO RUNTIME; LOAD MYSQL VARIABLES TO RUNTIME; LOAD ADMIN VARIABLES TO RUNTIME; LOAD PROXYSQL SERVERS TO RUNTIME; LOAD SCHEDULER TO RUNTIME;
+    - title: SAVE EVERYTHING TO DISK
+      info: Save all config items from memory to disk.
+      sql: SAVE MYSQL USERS TO DISK; SAVE MYSQL SERVERS TO DISK; SAVE MYSQL QUERY RULES TO DISK; SAVE MYSQL VARIABLES TO DISK; SAVE ADMIN VARIABLES TO DISK; SAVE PROXYSQL SERVERS TO DISK; SAVE SCHEDULER TO DISK;
+
+  update_config: []
+
+  adhoc_report:
+    - title: Top 10 SELECTs by sum_time
+      info: Queries with the highest cumulative execution time.
+      sql: "SELECT sum_time,digest,username,schemaname,SUBSTR(digest_text,0,80),count_star FROM stats_mysql_query_digest WHERE digest_text like 'SELECT%' ORDER BY sum_time DESC LIMIT 10;"

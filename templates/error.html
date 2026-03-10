@@ -1,28 +1,227 @@
 {% extends 'base.html' %}
 
-{% block error  %}
+{% block error %}
+<style>
+    body {
+        background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 0;
+    }
 
-<nav class="navbar navbar-expand-sm navbar-dark primary-color ">
-    <a class="navbar-brand" href="/">ProxyWeb</a>
+    .error-container {
+        max-width: 800px;
+        width: 100%;
+        margin: 0 auto;
+        padding: 0 1rem;
+    }
 
-    <a class="nav-link" href="/settings/edit/">
-        <i class="fas fa-cog fa-lg white-text"></i> </a>
-    <a class="nav-link" href="/logout" title="Logout">
-            <i class="fa fa-sign-out fa-lg white-text" aria-hidden="true"></i></a>
+    .error-card {
+        background: white;
+        border-radius: 16px;
+        box-shadow: var(--box-shadow-lg);
+        overflow: hidden;
+    }
 
+    .error-header {
+        background: linear-gradient(135deg, var(--danger-color) 0%, #dc2626 100%);
+        color: white;
+        padding: 3rem 2rem;
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+    }
 
-</nav>
+    .error-header::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        right: -50%;
+        width: 200%;
+        height: 200%;
+        background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+        animation: pulse 4s ease-in-out infinite;
+    }
 
+    @keyframes pulse {
+        0%, 100% { transform: scale(1); opacity: 0.5; }
+        50% { transform: scale(1.1); opacity: 0.8; }
+    }
 
-{% if error %}
-<span class="border border-primary">
-<div class="note note-danger">
-    <pre><strong>Error! </strong>{{ error }}<br><br></pre>
+    .error-icon {
+        font-size: 5rem;
+        margin-bottom: 1rem;
+        animation: bounce 2s ease-in-out infinite;
+    }
 
-<strong>If this seems settings related you can edit the config by <a href="/settings/edit/">clicking here.</a></strong>
-</span>
+    @keyframes bounce {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-10px); }
+    }
 
+    .error-header h1 {
+        margin: 0;
+        font-size: 2.5rem;
+        font-weight: 700;
+        position: relative;
+        z-index: 1;
+    }
 
-{%  endif %}
+    .error-header p {
+        margin: 1rem 0 0 0;
+        opacity: 0.95;
+        font-size: 1.1rem;
+        position: relative;
+        z-index: 1;
+    }
 
+    .error-body {
+        padding: 3rem 2rem;
+    }
+
+    .error-content {
+        background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+        border-left: 4px solid var(--danger-color);
+        border-radius: var(--border-radius);
+        padding: 2rem;
+        margin-bottom: 2rem;
+        box-shadow: var(--box-shadow);
+    }
+
+    .error-content h3 {
+        margin: 0 0 1rem 0;
+        color: var(--danger-color);
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .error-content pre {
+        background: #1e293b;
+        color: #e2e8f0;
+        padding: 1.5rem;
+        border-radius: var(--border-radius);
+        overflow-x: auto;
+        margin: 1rem 0;
+        font-size: 0.9rem;
+        line-height: 1.6;
+    }
+
+    .error-actions {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        justify-content: center;
+        margin-top: 2rem;
+    }
+
+    .error-actions .btn {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem 2rem;
+        font-weight: 600;
+    }
+
+    .help-text {
+        background: linear-gradient(135deg, #f0fdfa 0%, #ccfbf1 100%);
+        border-left: 4px solid var(--info-color);
+        padding: 1.5rem;
+        border-radius: var(--border-radius);
+        margin-bottom: 2rem;
+        box-shadow: var(--box-shadow);
+    }
+
+    .help-text h5 {
+        margin: 0 0 1rem 0;
+        color: var(--dark-color);
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .help-text p {
+        margin: 0;
+        color: var(--secondary-color);
+        line-height: 1.6;
+    }
+
+    @media (max-width: 768px) {
+        .error-header h1 {
+            font-size: 2rem;
+        }
+
+        .error-icon {
+            font-size: 4rem;
+        }
+
+        .error-header,
+        .error-body {
+            padding-left: 1.5rem;
+            padding-right: 1.5rem;
+        }
+
+        .error-actions {
+            flex-direction: column;
+        }
+
+        .error-actions .btn {
+            width: 100%;
+        }
+    }
+</style>
+
+<div class="error-container">
+    <div class="error-card fade-in">
+        {% if error %}
+            <div class="error-header">
+                <div class="error-icon">
+                    <i class="fas fa-exclamation-triangle"></i>
+                </div>
+                <h1>Oops! Something went wrong</h1>
+                <p>An error has occurred in the application</p>
+            </div>
+
+            <div class="error-body">
+                <div class="error-content">
+                    <h3>
+                        <i class="fas fa-bug"></i>
+                        Error Details
+                    </h3>
+                    <pre>{{ error }}</pre>
+                </div>
+
+                <div class="help-text">
+                    <h5>
+                        <i class="fas fa-lightbulb"></i>
+                        Troubleshooting
+                    </h5>
+                    <p>
+                        If this error appears to be related to configuration settings, you can edit the configuration file.
+                        Check the logs for more detailed error information.
+                    </p>
+                </div>
+
+                <div class="error-actions">
+                    <a href="/settings/edit/" class="btn btn-primary">
+                        <i class="fas fa-cog"></i>
+                        Edit Settings
+                    </a>
+                    <a href="/" class="btn btn-outline-secondary">
+                        <i class="fas fa-home"></i>
+                        Go Home
+                    </a>
+                    <button onclick="history.back()" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i>
+                        Go Back
+                    </button>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>
 {% endblock %}

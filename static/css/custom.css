@@ -1,0 +1,761 @@
+/* ProxyWeb Custom Styles */
+
+:root {
+    --primary-color: #475569;
+    --primary-dark: #334155;
+    --primary-light: #64748b;
+    --secondary-color: #64748b;
+    --success-color: #7ba99f;
+    --danger-color: #d97966;
+    --warning-color: #d4a373;
+    --info-color: #6b9fb5;
+    --dark-color: #1e293b;
+    --light-color: #f1f5f9;
+    --border-radius: 0.5rem;
+    --box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+    --box-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+    background-color: #f8fafc;
+    color: #334155;
+    line-height: 1.75;
+    font-size: 15px;
+    padding-top: 70px; /* Space for fixed navbar */
+}
+
+.navbar-brand {
+    font-weight: 700;
+    font-size: 1.3rem;
+    letter-spacing: -0.5px;
+    color: #333;
+    display: flex;
+    align-items: center;
+}
+
+.navbar-brand:hover {
+    color: #000;
+}
+
+.navbar {
+    background: white;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    padding: 0.25rem 0;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.navbar-toggler {
+    border-color: #ccc;
+}
+
+.navbar-toggler-icon {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba%280, 0, 0, 0.55%29' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
+}
+
+.navbar-nav .nav-link {
+    font-weight: 500;
+    padding: 0.375rem 0.625rem;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    color: #555;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+}
+
+.navbar-nav .nav-item {
+    display: flex;
+    align-items: center;
+}
+
+.navbar-nav .nav-link:hover {
+    background-color: #f5f5f5;
+    color: #333;
+}
+
+.navbar-nav .nav-link.active,
+.navbar-nav .nav-link.show {
+    color: var(--primary-color);
+    background-color: #f0f0f0;
+}
+
+.dropdown-menu {
+    background: white;
+    border: 1px solid #ddd;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border-radius: var(--border-radius);
+    padding: 0.375rem;
+    margin-top: 0.25rem;
+    max-height: 90vh;
+    overflow-y: auto;
+    overflow-x: visible;  /* Allow submenu to overflow horizontally */
+    z-index: 1050;
+    scroll-behavior: smooth;
+}
+
+.dropdown-item {
+    border-radius: calc(var(--border-radius) - 2px);
+    padding: 0.375rem 0.75rem;
+    font-size: 0.95rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    color: #333;
+}
+
+.dropdown-item:hover {
+    background-color: #f0f0f0;
+    color: #1a1a1a;
+    transform: translateX(2px);
+}
+
+.dropdown-item.active {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+.card {
+    border: none;
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+    transition: box-shadow 0.3s ease;
+}
+
+.card:hover {
+    box-shadow: var(--box-shadow-lg);
+}
+
+.card-header {
+    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+    border-bottom: 1px solid #e2e8f0;
+    padding: 1rem;
+    border-radius: var(--border-radius) var(--border-radius) 0 0 !important;
+}
+
+.card-body {
+    padding: 1.5rem;
+}
+
+.btn {
+    border-radius: var(--border-radius);
+    font-weight: 600;
+    padding: 0.5rem 1rem;
+    transition: all 0.2s ease;
+    border: none;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--box-shadow);
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-light) 100%);
+    box-shadow: 0 4px 6px -1px rgba(71, 85, 105, 0.3);
+}
+
+.btn-primary:hover {
+    background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary-color) 100%);
+    box-shadow: 0 10px 15px -3px rgba(71, 85, 105, 0.4);
+}
+
+.btn-outline-primary {
+    border: 2px solid var(--primary-color);
+    color: var(--primary-color);
+}
+
+.btn-outline-primary:hover {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    box-shadow: 0 4px 6px -1px rgba(71, 85, 105, 0.3);
+}
+
+/* Override Bootstrap's bright blue active states for outline buttons */
+.btn-outline-primary:active,
+.btn-outline-primary.active,
+.btn-outline-primary.show,
+.btn-outline-primary:focus {
+    background-color: var(--primary-color) !important;
+    border-color: var(--primary-color) !important;
+    color: white !important;
+    box-shadow: 0 0 0 0.2rem rgba(71, 85, 105, 0.25) !important;
+}
+
+/* Override Bootstrap's bright cyan for info outline buttons */
+.btn-outline-info {
+    border-color: var(--info-color);
+    color: var(--info-color);
+}
+
+.btn-outline-info:hover {
+    background-color: var(--info-color);
+    border-color: var(--info-color);
+    color: white;
+}
+
+.btn-outline-info:active,
+.btn-outline-info.active,
+.btn-outline-info:focus {
+    background-color: var(--info-color) !important;
+    border-color: var(--info-color) !important;
+    color: white !important;
+    box-shadow: 0 0 0 0.2rem rgba(107, 159, 181, 0.25) !important;
+}
+
+/* Override Quick Queries dropdown toggle active state */
+.dropdown-toggle.show,
+#quickQueriesBtn.show {
+    background-color: var(--primary-color) !important;
+    border-color: var(--primary-color) !important;
+    color: white !important;
+}
+
+.btn-floating {
+    border-radius: 50%;
+    width: 48px;
+    height: 48px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 0.5rem;
+}
+
+.table {
+    border-radius: var(--border-radius);
+    overflow: visible;
+    box-shadow: var(--box-shadow);
+    background-color: white;
+}
+
+.table thead th {
+    background: #f8f9fa;
+    color: #333;
+    font-weight: 600;
+    border: 1px solid #dee2e6;
+    padding: 0.375rem 0.5rem;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.5px;
+}
+
+/* Special styling for Add Row column */
+.add-row-header {
+    background: #f8f9fa !important;
+    color: #333 !important;
+    border: 1px solid #dee2e6 !important;
+    padding: 0.375rem 0.5rem !important;
+    text-transform: none !important;
+    font-size: 0.875rem !important;
+    letter-spacing: normal !important;
+    width: auto !important;
+    white-space: nowrap !important;
+}
+
+.add-row-header .btn-success {
+    background: var(--success-color);
+    border: none;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    border-radius: 4px;
+}
+
+.add-row-header .btn-success:hover {
+    background: #6a9588;
+}
+
+.table tbody tr {
+    transition: background-color 0.2s ease;
+}
+
+.table tbody tr:hover {
+    background-color: #f8fafc;
+}
+
+.table tbody td {
+    padding: 0.5rem 0.75rem;
+    border-color: #e2e8f0;
+    vertical-align: middle;
+    line-height: 1.6;
+}
+
+.form-control {
+    border: 2px solid #e2e8f0;
+    border-radius: var(--border-radius);
+    padding: 0.5rem 0.75rem;
+    transition: all 0.2s ease;
+    font-size: 1rem;
+    line-height: 1.6;
+}
+
+.form-control:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(71, 85, 105, 0.1);
+}
+
+.form-label {
+    font-weight: 600;
+    color: var(--dark-color);
+    margin-bottom: 0.75rem;
+    font-size: 0.95rem;
+}
+
+.alert {
+    border: none;
+    border-radius: var(--border-radius);
+    padding: 1.25rem 1.75rem;
+    box-shadow: var(--box-shadow);
+    margin-bottom: 2rem;
+}
+
+.alert-success {
+    background-color: #e0f2ed;
+    color: #4a6b62;
+}
+
+.alert-danger {
+    background-color: #f5e6e3;
+    color: #8b5a4e;
+}
+
+.alert-info {
+    background-color: #e8f0f4;
+    color: #4a6673;
+}
+
+.page-header {
+    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+    padding: 3rem 0;
+    margin-bottom: 3rem;
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+}
+
+.note {
+    background-color: white;
+    border-left: 4px solid var(--primary-dark);
+    padding: 2rem;
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+    margin: 2rem 0;
+}
+
+.note-danger {
+    border-left-color: var(--danger-color);
+    background-color: #f5e6e3;
+}
+
+.note-success {
+    border-left-color: var(--success-color);
+    background-color: #e0f2ed;
+}
+
+.navbar-text {
+    font-weight: 600;
+    font-size: 1rem;
+    padding: 0.375rem 0.75rem;
+    display: flex;
+    align-items: center;
+}
+
+/* Ensure dropdown toggles are vertically centered */
+.dropdown-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.badge {
+    padding: 0.625rem 1rem;
+    border-radius: calc(var(--border-radius) - 2px);
+    font-weight: 600;
+    font-size: 0.875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.info-panel {
+    background: linear-gradient(135deg, #e8f0f4 0%, #d4e4eb 100%);
+    border: 1px solid #b0cbd9;
+    border-radius: var(--border-radius);
+    padding: 2rem;
+    margin: 2rem 0;
+}
+
+pre {
+    background-color: #1e293b;
+    color: #e2e8f0;
+    padding: 2rem;
+    border-radius: var(--border-radius);
+    overflow-x: auto;
+    font-size: 0.95rem;
+    line-height: 1.7;
+    margin-bottom: 1.5rem;
+}
+
+footer {
+    margin-top: 3rem;
+    padding: 2rem 0;
+    text-align: center;
+    color: var(--secondary-color);
+    font-size: 0.875rem;
+}
+
+.floating-action-button {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--info-color) 0%, #06b6d4 100%);
+    color: white;
+    border: none;
+    box-shadow: var(--box-shadow-lg);
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.floating-action-button:hover {
+    transform: scale(1.1);
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+/* DataTables custom styling */
+.dataTables_wrapper {
+    padding: 1.5rem 0;
+    position: relative;
+    /* No overflow: keeps dataTables_wrapper a non-scroll-container so
+       position:sticky on thead th works relative to the viewport */
+}
+
+/* Float search box to the right */
+.dataTables_filter {
+    float: right;
+    text-align: right;
+}
+
+.dataTables_filter input {
+    border: 2px solid #e2e8f0;
+    border-radius: var(--border-radius);
+    padding: 0.375rem 0.75rem;
+    margin-left: 0.5rem;
+    font-size: 0.95rem;
+}
+
+/* Edit controls column header - always sticky */
+/* Actions header column */
+.table thead th.actions-header {
+    position: sticky !important;
+    left: 0;
+    background-color: #e2e8f0 !important;
+    z-index: 11;
+    width: 100px;
+    min-width: 100px;
+    max-width: 100px;
+    border-right: 1px solid #000000 !important;
+}
+
+.table thead th.edit-controls {
+    position: sticky !important;
+    left: 0;
+    background-color: #e2e8f0 !important;
+    z-index: 11;
+    border-right: 1px solid #000000 !important;
+}
+
+/* Edit controls - sticky on left */
+.table td.edit-controls {
+    position: sticky !important;
+    left: 0;
+    background-color: white !important;
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    width: 100px;
+    min-width: 100px;
+    max-width: 100px;
+    z-index: 10;
+    border-right: 1px solid #000000 !important;
+}
+
+/* Action buttons container - always visible for sticky left column */
+.table td.edit-controls .action-buttons {
+    display: inline-flex;
+    gap: 8px;
+    opacity: 1;
+    transform: translateX(0);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    background: transparent;
+    padding: 4px 8px;
+    border-radius: 8px;
+}
+
+/* Highlight action buttons on row hover */
+.table tbody tr:hover td.edit-controls .action-buttons {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+/* Icon buttons - larger touch targets */
+.btn-icon {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: transparent;
+    position: relative;
+}
+
+/* Edit button styling */
+.btn-icon.edit-btn {
+    color: #3b82f6;
+    background-color: rgba(59, 130, 246, 0.1);
+}
+
+.btn-icon.edit-btn:hover {
+    background-color: #3b82f6;
+    color: white;
+    transform: scale(1.1);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+/* Delete button styling */
+.btn-icon.delete-btn {
+    color: #ef4444;
+    background-color: rgba(239, 68, 68, 0.1);
+}
+
+.btn-icon.delete-btn:hover {
+    background-color: #ef4444;
+    color: white;
+    transform: scale(1.1);
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+}
+
+/* Success button (for save actions) */
+.btn-icon.btn-icon-success {
+    color: #10b981;
+    background-color: rgba(16, 185, 129, 0.1);
+}
+
+.btn-icon.btn-icon-success:hover {
+    background-color: #10b981;
+    color: white;
+    transform: scale(1.1);
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+
+/* Secondary button (for cancel actions) */
+.btn-icon.btn-icon-secondary {
+    color: #6b7280;
+    background-color: rgba(107, 114, 128, 0.1);
+}
+
+.btn-icon.btn-icon-secondary:hover {
+    background-color: #6b7280;
+    color: white;
+    transform: scale(1.1);
+    box-shadow: 0 4px 12px rgba(107, 114, 128, 0.3);
+}
+
+/* Disabled state */
+.btn-icon:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none !important;
+}
+
+/* Floating/sticky edit and delete buttons - now always sticky on left */
+/* This rule is kept for backward compatibility but values are overridden above */
+.table tbody tr.has-overflow td.edit-controls {
+    /* Sticky behavior now applied to all rows via base .table td.edit-controls rule */
+}
+
+/* Ensure table-responsive wrapper has proper positioning context for sticky elements */
+.table-responsive {
+    position: relative !important;
+}
+
+
+/* Enhanced row hover state */
+.table tbody tr:hover {
+    background-color: #f8fafc;
+    transition: background-color 0.15s ease;
+}
+
+/* Keep action buttons visible while editing */
+.table tbody tr.editing td.edit-controls .action-buttons {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+/* Smooth focus ring for accessibility */
+.btn-icon:focus {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+/* Add Row button container */
+#add-row-container {
+    padding: 0.5rem;
+    background: transparent;
+    border: none;
+    border-radius: var(--border-radius);
+    margin-bottom: 1rem;
+}
+
+#add-row-container .btn-success {
+    background: linear-gradient(135deg, #7ba99f 0%, #6a9588 100%);
+    border: none;
+    box-shadow: 0 4px 6px -1px rgba(123, 169, 159, 0.3);
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+#add-row-container .btn-success:hover {
+    background: linear-gradient(135deg, #6a9588 0%, #5a8276 100%);
+    box-shadow: 0 10px 15px -3px rgba(123, 169, 159, 0.4);
+    transform: translateY(-1px);
+}
+
+/* Clear floats after DataTables controls */
+.dataTables_wrapper .row {
+    clear: both;
+}
+
+.dataTables_filter input:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(71, 85, 105, 0.1);
+    outline: none;
+}
+
+.page-item .page-link {
+    border: none;
+    color: var(--dark-color);
+    padding: 0.5rem 0.75rem;
+    margin: 0 0.25rem;
+    border-radius: calc(var(--border-radius) - 2px);
+    transition: all 0.2s ease;
+    font-size: 0.95rem;
+}
+
+.page-item .page-link:hover {
+    background-color: var(--primary-color);
+    color: white;
+    transform: translateY(-1px);
+}
+
+.page-item.active .page-link {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+/* Responsive design improvements */
+@media (max-width: 768px) {
+    .navbar-nav .nav-link {
+        padding: 1rem 1.25rem;
+    }
+
+    .card-body {
+        padding: 2rem;
+    }
+
+    .table-responsive {
+        border-radius: var(--border-radius);
+    }
+
+    .btn {
+        width: 100%;
+        margin-bottom: 0.75rem;
+    }
+
+    .floating-action-button {
+        bottom: 1.5rem;
+        right: 1.5rem;
+    }
+
+    /* Stack DataTables controls on mobile */
+    .dataTables_filter {
+        float: none;
+        text-align: left;
+        margin-bottom: 1rem;
+    }
+
+    .dataTables_length,
+    .dataTables_info {
+        margin-bottom: 0.5rem;
+    }
+}
+
+/* Loading animation */
+.loading {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: white;
+    animation: spin 1s ease-in-out infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Fade-in animation */
+.fade-in {
+    animation: fadeIn 0.5s ease-in;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Info Panel - Instant Expansion */
+#queryInfo {
+    transition: none !important;
+}
+
+/* DataTables toolbar: show-entries | pagination (center) | search on one line */
+.dt-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.45rem 1rem;
+    border-bottom: 1px solid #e0e0e0;
+    flex-wrap: wrap;
+}
+.dt-toolbar-bottom {
+    border-bottom: none;
+    border-top: 1px solid #e0e0e0;
+}
+.dt-toolbar-center {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+}
+.dt-toolbar .dataTables_length,
+.dt-toolbar .dataTables_filter {
+    margin: 0;
+}
+.dt-toolbar .dataTables_filter input {
+    width: 200px;
+}
+.dt-toolbar .dataTables_paginate {
+    margin: 0;
+}

@@ -1,41 +1,218 @@
 {% extends 'base.html' %}
 
 {% block settings %}
-<nav class="navbar navbar-expand-sm navbar-dark primary-color">
-    <a class="navbar-brand" href="/">ProxyWeb</a>
+<style>
+    body {
+        padding-top: 0 !important;
+        background: #f8f9fa;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+    }
 
-    <a class="nav-link" href="/settings/edit/">
-        <i class="fas fa-cog fa-lg text-white"></i>
-    </a>
-    <a class="nav-link" href="/logout" title="Logout">
-        <i class="fa fa-sign-out fa-lg text-white" aria-hidden="true"></i>
-    </a>
-</nav>
+    .login-container {
+        max-width: 450px;
+        width: 100%;
+        margin: 0 auto;
+    }
 
-{% if message %}
-<div class="container mt-4" style="max-width: 400px;">
-    <div class="border border-danger rounded p-3 text-center text-danger shadow" role="alert">
-        <strong>{{ message }}</strong>
-    </div>
-</div>
-{% endif %}
-<div class="container mt-5" style="max-width: 400px;">
-    <div class="card shadow">
-        <div class="card-body">
-            <h4 class="card-title text-center mb-4">Login</h4>
+    .login-card {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        overflow: hidden;
+        border: 1px solid #e0e0e0;
+    }
+
+    .login-header {
+        background: #f8f9fa;
+        padding: 2rem 2rem;
+        text-align: center;
+        color: #333;
+        border-bottom: 1px solid #e0e0e0;
+    }
+
+    .login-header h1 {
+        margin: 0;
+        font-size: 1.75rem;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+    }
+
+    .login-header p {
+        margin: 0.5rem 0 0 0;
+        color: #666;
+        font-size: 0.95rem;
+    }
+
+    .login-body {
+        padding: 2rem 2rem;
+    }
+
+    .form-floating {
+        margin-bottom: 2rem;
+    }
+
+    .form-floating > .form-control {
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        height: 56px;
+        padding: 1rem 1.25rem;
+        font-size: 0.95rem;
+        transition: all 0.2s ease;
+    }
+
+    .form-floating > label {
+        padding: 1rem 1.25rem;
+        color: #666;
+        font-size: 0.9rem;
+    }
+
+    .form-floating > .form-control:focus {
+        border-color: #007bff;
+        box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+    }
+
+    .btn-login {
+        width: 100%;
+        height: 50px;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 0.95rem;
+        margin-top: 0.5rem;
+        background: #007bff;
+        border: none;
+        box-shadow: 0 2px 4px rgba(0, 123, 255, 0.2);
+        transition: all 0.2s ease;
+    }
+
+    .btn-login:hover {
+        background: #0056b3;
+        box-shadow: 0 4px 8px rgba(0, 123, 255, 0.3);
+        transform: translateY(-1px);
+    }
+
+    .alert-danger {
+        background-color: #f8d7da;
+        border: 1px solid #f5c6cb;
+        border-radius: 8px;
+        color: #721c24;
+        padding: 1rem 1.25rem;
+        margin-bottom: 1.5rem;
+        font-size: 0.9rem;
+    }
+
+    .alert-info-custom {
+        background-color: #e8f4fd;
+        border: 1px solid #bee5eb;
+        border-left: 4px solid #17a2b8;
+        border-radius: 8px;
+        color: #0c5460;
+        padding: 1rem 1.25rem;
+        margin-bottom: 1.5rem;
+        font-size: 0.9rem;
+        display: flex;
+        gap: 0.75rem;
+        align-items: flex-start;
+    }
+
+    .alert-info-custom i.fa-info-circle {
+        font-size: 1.25rem;
+        margin-top: 0.15rem;
+        color: #17a2b8;
+    }
+
+    .alert-info-custom p {
+        margin: 0.25rem 0 0 0;
+    }
+
+    .alert-info-custom code {
+        background: rgba(0,0,0,0.06);
+        padding: 0.1rem 0.35rem;
+        border-radius: 3px;
+        font-size: 0.85rem;
+    }
+
+    .login-footer {
+        text-align: center;
+        padding: 2rem 2.5rem;
+        background-color: #f8fafc;
+        color: #64748b;
+        font-size: 0.95rem;
+        line-height: 1.6;
+    }
+
+    .brand-icon {
+        font-size: 3.5rem;
+        margin-bottom: 1.25rem;
+    }
+
+    @media (max-width: 576px) {
+        .login-container {
+            padding: 1rem;
+        }
+
+        .login-header, .login-body, .login-footer {
+            padding-left: 1.5rem;
+            padding-right: 1.5rem;
+        }
+    }
+</style>
+
+<div class="container login-container">
+    <div class="login-card fade-in">
+        {% if message %}
+        <div class="alert alert-danger" role="alert">
+            <i class="fas fa-exclamation-circle me-2"></i>
+            <strong>{{ message }}</strong>
+        </div>
+        {% endif %}
+
+        {% if show_default_creds %}
+        <div class="alert-info-custom">
+            <i class="fas fa-info-circle"></i>
+            <div>
+                <strong>Default credentials detected</strong>
+                <p>Admin: <code>admin</code> / <code>admin42</code></p>
+                <p>Read-only: <code>readonly</code> / <code>readonly42</code></p>
+                <p>Please change these in Settings after logging in.</p>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="login-header">
+            <div class="brand-icon">
+                <i class="fas fa-server"></i>
+            </div>
+            <h1>ProxyWeb</h1>
+            <p>Modern ProxySQL Management</p>
+        </div>
+
+        <div class="login-body">
             <form method="post">
-                <div class="form-group">
-                    <label for="username">Username</label>
-                    <input class="form-control" id="username" type="text" name="username" required>
+                <div class="form-floating mb-3">
+                    <input type="text" class="form-control" id="username" name="username" placeholder=" " required autofocus>
+                    <label for="username">
+                        <i class="fas fa-user me-2"></i>Username
+                    </label>
                 </div>
-                <div class="form-group mt-3">
-                    <label for="password">Password</label>
-                    <input class="form-control" id="password" type="password" name="password" required>
+
+                <div class="form-floating mb-4">
+                    <input type="password" class="form-control" id="password" name="password" placeholder=" " required>
+                    <label for="password">
+                        <i class="fas fa-lock me-2"></i>Password
+                    </label>
                 </div>
-                <div class="mt-4 text-center">
-                    <button class="btn btn-primary w-100" type="submit">Login</button>
-                </div>
+
+                <button type="submit" class="btn btn-primary btn-login">
+                    <i class="fas fa-sign-in-alt me-2"></i>Login
+                </button>
             </form>
+        </div>
+
+        <div class="login-footer">
+            <i class="fas fa-shield-alt me-2"></i>
+            Secure authentication required to access ProxySQL management
         </div>
     </div>
 </div>

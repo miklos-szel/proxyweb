@@ -1,0 +1,1468 @@
+{% extends 'list_dbs.html' %}
+
+{% block show_adhoc_report %}
+<style>
+    .config-diff-container {
+        max-width: 100%;
+    }
+
+    .report-card {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        margin-bottom: 2rem;
+        overflow: hidden;
+        border: 1px solid #e0e0e0;
+    }
+
+    .report-header {
+        background: #f8f9fa;
+        color: #333;
+        padding: 1.5rem;
+        border-bottom: 1px solid #e0e0e0;
+    }
+
+    .report-title {
+        margin: 0;
+        font-weight: 600;
+        font-size: 1.25rem;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .summary-cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 1.5rem;
+        padding: 1.5rem;
+        background: white;
+    }
+
+    .summary-card {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 1.5rem;
+        border: 1px solid #e0e0e0;
+    }
+
+    .summary-card-title {
+        font-size: 0.85rem;
+        color: #64748b;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .summary-card-value {
+        font-size: 2rem;
+        font-weight: 700;
+        color: #1e293b;
+    }
+
+    .summary-card-subtitle {
+        font-size: 0.85rem;
+        color: #94a3b8;
+        margin-top: 0.25rem;
+    }
+
+    .diff-content {
+        padding: 0 1.5rem 1.5rem 1.5rem;
+    }
+
+    .table-comparison {
+        background: white;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        overflow: hidden;
+        margin-bottom: 1.5rem;
+    }
+
+    .table-header {
+        background: #f8f9fa;
+        padding: 1rem 1.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid #e0e0e0;
+    }
+
+    .table-name {
+        font-size: 1.05rem;
+        font-weight: 600;
+        color: #333;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .status-badge {
+        padding: 0.375rem 0.875rem;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .status-badge.has-diff {
+        background: #fee2e2;
+        color: #dc2626;
+    }
+
+    .status-badge.no-diff {
+        background: #d1fae5;
+        color: #16a34a;
+    }
+
+    .layer-grid {
+        display: grid;
+        grid-template-columns: 150px repeat(3, 1fr);
+        border-bottom: 1px solid #e0e0e0;
+    }
+
+    .layer-grid:last-child {
+        border-bottom: none;
+    }
+
+    .layer-cell {
+        padding: 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.95rem;
+    }
+
+    .layer-cell-header {
+        background: #f8f9fa;
+        font-weight: 600;
+        color: #475569;
+        border-right: 1px solid #e0e0e0;
+    }
+
+    .layer-cell-content {
+        color: #334155;
+    }
+
+    .layer-icon {
+        font-size: 1.1rem;
+    }
+
+    .icon-disk { color: #8b5cf6; }
+    .icon-memory { color: #3b82f6; }
+    .icon-runtime { color: #10b981; }
+
+    .row-count {
+        background: #e2e8f0;
+        color: #475569;
+        padding: 0.25rem 0.625rem;
+        border-radius: 4px;
+        font-size: 0.85rem;
+        font-weight: 600;
+    }
+
+    .loading-state {
+        text-align: center;
+        padding: 4rem 2rem;
+        color: #64748b;
+    }
+
+    .loading-state i {
+        font-size: 3rem;
+        animation: spin 1s linear infinite;
+        margin-bottom: 1rem;
+    }
+
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+
+    .error-state {
+        background: #fee2e2;
+        color: #dc2626;
+        padding: 2rem;
+        border-radius: 8px;
+        margin: 1.5rem;
+        text-align: center;
+        font-weight: 600;
+        border: 1px solid #fecaca;
+    }
+
+    .error-state i {
+        font-size: 2rem;
+        margin-bottom: 1rem;
+        display: block;
+    }
+
+    .differences-section {
+        padding: 1.5rem;
+        background: #fafbfc;
+    }
+
+    .diff-comparison {
+        margin-bottom: 1.5rem;
+    }
+
+    .diff-comparison:last-child {
+        margin-bottom: 0;
+    }
+
+    .diff-comparison-title {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #475569;
+        margin-bottom: 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .diff-group {
+        background: white;
+        border: 1px solid #e0e0e0;
+        border-radius: 6px;
+        margin-bottom: 0.75rem;
+        overflow: hidden;
+    }
+
+    .diff-group:last-child {
+        margin-bottom: 0;
+    }
+
+    .diff-group-header {
+        padding: 0.875rem 1.25rem;
+        background: #f8f9fa;
+        font-weight: 600;
+        color: #475569;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 0.9rem;
+        border-bottom: 1px solid #e0e0e0;
+    }
+
+    .diff-group-header-text {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .diff-count {
+        background: #e2e8f0;
+        color: #475569;
+        padding: 0.25rem 0.5rem;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 700;
+    }
+
+    .diff-rows {
+        max-height: 300px;
+        overflow-y: auto;
+    }
+
+    .diff-row {
+        padding: 0.875rem 1.25rem;
+        border-bottom: 1px solid #f1f5f9;
+        font-family: 'Courier New', monospace;
+        font-size: 0.85rem;
+        line-height: 1.5;
+    }
+
+    .diff-row:last-child {
+        border-bottom: none;
+    }
+
+    .diff-row-only-disk {
+        background: #fef3c7;
+        border-left: 3px solid #f59e0b;
+    }
+
+    .diff-row-only-memory {
+        background: #dbeafe;
+        border-left: 3px solid #3b82f6;
+    }
+
+    .diff-row-only-runtime {
+        background: #d1fae5;
+        border-left: 3px solid #10b981;
+    }
+
+    .diff-content-json {
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: #1e293b;
+    }
+
+    .no-differences {
+        padding: 2rem;
+        text-align: center;
+        color: #16a34a;
+        background: #f0fdf4;
+        border-radius: 6px;
+        font-weight: 500;
+    }
+
+    .no-differences i {
+        font-size: 2rem;
+        margin-bottom: 0.5rem;
+        display: block;
+    }
+
+    /* Unified Table Styles */
+    .unified-table-wrapper {
+        overflow-x: auto;
+        background: white;
+        padding: 1.5rem;
+    }
+
+    .unified-config-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9rem;
+        border: 2px solid #94a3b8;
+        overflow: visible;
+    }
+
+    .unified-config-table th {
+        background: #f8f9fa;
+        color: #475569;
+        padding: 0.875rem;
+        text-align: left;
+        font-weight: 600;
+        border: 2px solid #cbd5e1;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+
+    .unified-config-table th.sortable {
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .unified-config-table th.sortable:hover {
+        background: #e2e8f0;
+    }
+
+    .unified-config-table td {
+        padding: 0.75rem 0.875rem;
+        border: 2px solid #cbd5e1;
+        color: #1e293b;
+        white-space: nowrap;
+    }
+
+    .unified-config-table td.data-cell {
+        font-family: 'Courier New', monospace;
+        font-size: 0.85rem;
+        white-space: nowrap;
+    }
+
+    .unified-config-table td.cell-diff {
+        background: #fef3c7;
+        font-weight: 600;
+        border-left: 3px solid #f59e0b;
+        border-right: 3px solid #f59e0b;
+    }
+
+    .unified-config-table th.presence-col {
+        text-align: center;
+        font-weight: 700;
+        width: 90px;
+        min-width: 90px;
+        max-width: 90px;
+        background: #e2e8f0 !important;
+        border-left: 1px solid #000000 !important;
+        border-right: 1px solid #000000 !important;
+    }
+
+    .unified-config-table th.presence-col:nth-child(1) {
+        position: sticky;
+        left: 0;
+        z-index: 11;
+        border-left: 1px solid #000000 !important;
+    }
+
+    .unified-config-table th.presence-col:nth-child(2) {
+        position: sticky;
+        left: 90px;
+        z-index: 11;
+    }
+
+    .unified-config-table th.presence-col:nth-child(3) {
+        position: sticky;
+        left: 180px;
+        z-index: 11;
+    }
+
+    .unified-config-table td.presence-cell {
+        text-align: center;
+        font-weight: 600;
+        width: 90px;
+        min-width: 90px;
+        max-width: 90px;
+        position: sticky;
+        z-index: 10;
+        border-left: 1px solid #000000 !important;
+        border-right: 1px solid #000000 !important;
+    }
+
+    .unified-config-table td.presence-cell:not(.presence-yes):not(.presence-no) {
+        background-color: white !important;
+    }
+
+    .unified-config-table td.presence-cell:nth-child(1) {
+        left: 0;
+        border-left: 1px solid #000000 !important;
+    }
+
+    .unified-config-table td.presence-cell:nth-child(2) {
+        left: 90px;
+    }
+
+    .unified-config-table td.presence-cell:nth-child(3) {
+        left: 180px;
+        box-shadow: 2px 0 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .presence-yes {
+        background: #d1fae5 !important;
+        color: #065f46;
+    }
+
+    .presence-no {
+        background: #fee2e2 !important;
+        color: #991b1b;
+    }
+
+    .unified-config-table tbody tr {
+        background: white;
+    }
+
+    .unified-config-table tbody tr:hover {
+        background: #f8f9fa;
+    }
+
+    .cell-diff {
+        background: #fef3c7 !important;
+        font-weight: 600;
+        border-left: 3px solid #f59e0b !important;
+        border-right: 3px solid #f59e0b !important;
+    }
+
+    .cell-diff:first-of-type {
+        border-left: 3px solid #f59e0b !important;
+    }
+
+    .cell-diff:last-of-type {
+        border-right: 3px solid #f59e0b !important;
+    }
+
+    /* Environment Sub-rows */
+    .unified-config-table tr.env-subrow {
+        background: #fafbfc;
+    }
+
+    .unified-config-table tr.env-subrow:hover {
+        background: #f1f5f9;
+    }
+
+    .unified-config-table tr.env-subrow td {
+        padding: 0.5rem 0.875rem;
+        border-bottom: 1px solid #f1f5f9;
+    }
+
+    .unified-config-table tr.env-subrow:last-child td {
+        border-bottom: 1px solid #e0e0e0;
+    }
+
+    .env-badge {
+        display: inline-block;
+        padding: 0.25rem 0.625rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-right: 0.5rem;
+    }
+
+    .env-badge-disk {
+        background: #ede9fe;
+        color: #7c3aed;
+    }
+
+    .env-badge-memory {
+        background: #dbeafe;
+        color: #2563eb;
+    }
+
+    .env-badge-runtime {
+        background: #d1fae5;
+        color: #059669;
+    }
+
+    /* Action Buttons */
+    .action-buttons {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        flex-wrap: wrap;
+        padding: 1rem 1.5rem;
+        background: #f8f9fa;
+        border-top: 1px solid #e0e0e0;
+    }
+
+    .action-btn {
+        padding: 0.5rem 1rem;
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+        font-size: 0.85rem;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .action-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .action-btn-runtime {
+        background: #10b981;
+        color: white;
+    }
+
+    .action-btn-runtime:hover {
+        background: #059669;
+    }
+
+    .action-btn-disk {
+        background: #8b5cf6;
+        color: white;
+    }
+
+    .action-btn-disk:hover {
+        background: #7c3aed;
+    }
+
+    .action-btn-load-disk {
+        background: #f59e0b;
+        color: white;
+    }
+
+    .action-btn-load-disk:hover {
+        background: #d97706;
+    }
+
+    .action-btn-refresh {
+        background: #3b82f6;
+        color: white;
+    }
+
+    .action-btn-refresh:hover {
+        background: #2563eb;
+    }
+
+    .global-actions {
+        padding: 1rem 0;
+        margin-bottom: 1.5rem;
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+    }
+
+    @media (max-width: 768px) {
+        .summary-cards {
+            grid-template-columns: 1fr;
+        }
+
+        .layer-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .layer-cell-header {
+            border-right: none;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .table-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 0.75rem;
+        }
+
+        .action-buttons {
+            flex-direction: column;
+        }
+
+        .action-btn {
+            width: 100%;
+            justify-content: center;
+        }
+    }
+</style>
+
+<div class="config-diff-container">
+    <div class="report-card fade-in">
+        <div class="report-header">
+            <h3 class="report-title">
+                <i class="fas fa-code-compare"></i>
+                Configuration Diff
+            </h3>
+            <p style="margin: 0.5rem 0 0 0; color: #64748b; font-size: 0.95rem;">Compare ProxySQL configurations across Disk, Memory, and Runtime layers</p>
+        </div>
+
+        <div class="summary-cards">
+            <div class="summary-card">
+                <div class="summary-card-title">Total Tables</div>
+                <div class="summary-card-value" id="total-tables">-</div>
+                <div class="summary-card-subtitle">Configuration tables compared</div>
+            </div>
+
+            <div class="summary-card">
+                <div class="summary-card-title">Tables with Changes</div>
+                <div class="summary-card-value" id="tables-with-diff">-</div>
+                <div class="summary-card-subtitle">Require attention</div>
+            </div>
+
+            <div class="summary-card">
+                <div class="summary-card-title">Sync Status</div>
+                <div class="summary-card-value" id="sync-status">-</div>
+                <div class="summary-card-subtitle">Current state</div>
+            </div>
+        </div>
+
+        <div class="diff-content" id="diff-content">
+            <div class="loading-state">
+                <i class="fas fa-spinner"></i>
+                <p style="margin: 0; font-size: 1.05rem;">Loading configuration diff...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+window.configDiffServer = {{ server | tojson }};
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadConfigDiff();
+});
+
+// Map table names to ProxySQL component names (only tables with valid LOAD/SAVE commands)
+const TABLE_TO_COMPONENT = {
+    'mysql_servers': 'MYSQL SERVERS',
+    'mysql_replication_hostgroups': 'MYSQL SERVERS',
+    'mysql_users': 'MYSQL USERS',
+    'mysql_query_rules': 'MYSQL QUERY RULES',
+    'mysql_variables': 'MYSQL VARIABLES',
+    'admin_variables': 'ADMIN VARIABLES',
+    'global_variables': 'ADMIN VARIABLES',
+    'proxysql_servers': 'PROXYSQL SERVERS',
+    'scheduler': 'SCHEDULER'
+};
+
+// Valid components for global commands
+const VALID_COMPONENTS = [
+    'MYSQL USERS',
+    'MYSQL SERVERS',
+    'MYSQL QUERY RULES',
+    'MYSQL VARIABLES',
+    'ADMIN VARIABLES',
+    'PROXYSQL SERVERS',
+    'SCHEDULER'
+];
+
+function loadConfigDiff() {
+    console.log('Loading config diff...');
+
+    // Show loading state
+    const container = document.getElementById('diff-content');
+    container.innerHTML = `
+        <div class="loading-state">
+            <i class="fas fa-spinner"></i>
+            <p style="margin: 0; font-size: 1.05rem;">Loading configuration diff...</p>
+        </div>
+    `;
+
+    fetch('/' + (window.configDiffServer || 'proxysql') + '/config_diff/get', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || {}).content || '',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            console.log('Config diff loaded successfully');
+            displayDiff(data.diff);
+        } else {
+            displayError(data.error || 'Failed to load configuration diff');
+        }
+    })
+    .catch(error => {
+        console.error('Error loading diff:', error);
+        displayError('Error loading diff: ' + error.message);
+    });
+}
+
+function executeProxySQLCommandAndRefresh(title, sql) {
+    // Check if executeProxySQLCommand is available (from base.html)
+    if (typeof executeProxySQLCommand === 'function') {
+        executeProxySQLCommand(title, sql);
+        // Refresh after 3 seconds to allow command to complete
+        setTimeout(function() {
+            console.log('Auto-refreshing config diff...');
+            loadConfigDiff();
+        }, 3000);
+    } else {
+        console.error('executeProxySQLCommand is not defined');
+        alert('Error: Command execution function not available');
+    }
+}
+
+function displayDiff(diffData) {
+    const container = document.getElementById('diff-content');
+
+    // Store skip variables globally for use in row filtering
+    window.configDiffSkipVariables = diffData.config_diff_skip_variable || [];
+
+    // Update summary cards
+    document.getElementById('total-tables').textContent = diffData.summary.total_tables;
+    document.getElementById('tables-with-diff').textContent = diffData.summary.tables_with_differences;
+
+    const syncPercentage = diffData.summary.total_tables > 0
+        ? Math.round(((diffData.summary.total_tables - diffData.summary.tables_with_differences) / diffData.summary.total_tables) * 100)
+        : 100;
+    document.getElementById('sync-status').textContent = syncPercentage + '%';
+
+    // Build global actions
+    let html = `
+        <div class="global-actions">
+            <button class="action-btn action-btn-runtime" onclick="executeGlobalCommand('LOAD TO RUNTIME')">
+                <i class="fas fa-play-circle"></i>
+                Load All to Runtime
+            </button>
+            <button class="action-btn action-btn-disk" onclick="executeGlobalCommand('SAVE TO DISK')">
+                <i class="fas fa-save"></i>
+                Save All to Disk
+            </button>
+            <button class="action-btn action-btn-load-disk" onclick="executeGlobalCommand('LOAD FROM DISK')">
+                <i class="fas fa-download"></i>
+                Load All from Disk
+            </button>
+            <button class="action-btn action-btn-refresh" onclick="loadConfigDiff()">
+                <i class="fas fa-sync-alt"></i>
+                Refresh Diff
+            </button>
+            <button class="action-btn action-btn-refresh" onclick="showSkipVariablesModal()" style="background: #64748b;">
+                <i class="fas fa-cog"></i>
+                Skip Variables (${window.configDiffSkipVariables.length})
+            </button>
+        </div>
+    `;
+
+    // Build table comparisons - only show tables with differences
+    let actualTablesWithDiff = 0;
+    diffData.tables.forEach(table => {
+        // Build unified table to see if there are actual visible differences after filtering
+        const unifiedRows = buildUnifiedRows(table);
+
+        // Skip tables that have no visible differences after filtering
+        if (unifiedRows.length === 0) {
+            return;
+        }
+
+        actualTablesWithDiff++;
+
+        const statusClass = 'has-diff';
+        const statusText = '<i class="fas fa-exclamation-circle"></i> Changes Detected';
+
+        html += `
+            <div class="table-comparison">
+                <div class="table-header">
+                    <div class="table-name">
+                        <i class="fas fa-table"></i>
+                        ${table.table_name}
+                    </div>
+                    <span class="status-badge ${statusClass}">
+                        ${statusText}
+                    </span>
+                </div>`;
+
+        html += '<div class="unified-table-wrapper">';
+        html += buildUnifiedTable(table.table_name, unifiedRows, table);
+        html += '</div>';
+
+        // Add action buttons
+        const component = TABLE_TO_COMPONENT[table.table_name];
+        if (component) {
+            html += `
+                <div class="action-buttons">
+                    <button class="action-btn action-btn-runtime"
+                            onclick="executeTableCommand('${table.table_name}', 'LOAD TO RUNTIME')">
+                        <i class="fas fa-play-circle"></i>
+                        Load to Runtime
+                    </button>
+                    <button class="action-btn action-btn-disk"
+                            onclick="executeTableCommand('${table.table_name}', 'SAVE TO DISK')">
+                        <i class="fas fa-save"></i>
+                        Save to Disk
+                    </button>
+                    <button class="action-btn action-btn-load-disk"
+                            onclick="executeTableCommand('${table.table_name}', 'LOAD FROM DISK')">
+                        <i class="fas fa-download"></i>
+                        Load from Disk
+                    </button>
+                </div>`;
+        } else {
+            html += `
+                <div class="action-buttons">
+                    <div style="padding: 0.75rem; color: #64748b; font-style: italic;">
+                        <i class="fas fa-info-circle"></i>
+                        No direct LOAD/SAVE commands available for this table
+                    </div>
+                </div>`;
+        }
+
+        html += '</div>';
+    });
+
+    container.innerHTML = html;
+
+    // Update summary with actual filtered counts
+    document.getElementById('tables-with-diff').textContent = actualTablesWithDiff;
+    const actualSyncPercentage = diffData.summary.total_tables > 0
+        ? Math.round(((diffData.summary.total_tables - actualTablesWithDiff) / diffData.summary.total_tables) * 100)
+        : 100;
+    document.getElementById('sync-status').textContent = actualSyncPercentage + '%';
+}
+
+function buildUnifiedRows(table) {
+    const rowMap = new Map();
+    const tableName = table.table_name;
+
+    // Define identifying columns (primary keys) for each table
+    const IDENTIFYING_COLUMNS = {
+        'mysql_servers': ['hostgroup_id', 'hostname', 'port'],
+        'mysql_users': ['username'],
+        'mysql_query_rules': ['rule_id'],
+        'mysql_replication_hostgroups': ['writer_hostgroup'],
+        'mysql_group_replication_hostgroups': ['writer_hostgroup'],
+        'mysql_galera_hostgroups': ['writer_hostgroup'],
+        'mysql_aws_aurora_hostgroups': ['writer_hostgroup'],
+        'global_variables': ['variable_name'],
+        'admin_variables': ['variable_name'],
+        'mysql_variables': ['variable_name'],
+        'proxysql_servers': ['hostname', 'port'],
+        'scheduler': ['id']
+    };
+
+    // Get identifying columns for this table
+    const identifyingCols = IDENTIFYING_COLUMNS[tableName] || [];
+
+    // Helper to create a unique key for a row based on identifying columns
+    function getRowKey(row) {
+        if (identifyingCols.length === 0) {
+            // Fallback: use all columns if no identifying columns defined
+            return JSON.stringify(row, Object.keys(row).sort());
+        }
+
+        // Use only identifying columns
+        const keyObj = {};
+        identifyingCols.forEach(col => {
+            keyObj[col] = row[col] !== undefined ? row[col] : null;
+        });
+        return JSON.stringify(keyObj, Object.keys(keyObj).sort());
+    }
+
+    // Helper to normalize row for comparison (handles special cases)
+    function normalizeRow(row, layer) {
+        const normalized = {...row};
+
+        // For mysql_users: normalize default_schema (treat "" and null as the same)
+        if (tableName === 'mysql_users' && 'default_schema' in normalized) {
+            if (normalized.default_schema === '' || normalized.default_schema === null || normalized.default_schema === 'null') {
+                normalized.default_schema = null;
+            }
+        }
+
+        // For mysql_users: exclude frontend and backend columns from comparison
+        if (tableName === 'mysql_users') {
+            delete normalized.frontend;
+            delete normalized.backend;
+        }
+
+        return normalized;
+    }
+
+    // Helper to check if row should be skipped (for variable_name tables)
+    function shouldSkipRow(row) {
+        // Check if this table has variable_name column
+        if ('variable_name' in row && window.configDiffSkipVariables) {
+            return window.configDiffSkipVariables.includes(row.variable_name);
+        }
+        return false;
+    }
+
+    // Helper to check if a row has any differences across layers
+    function hasRowDifferences(entry) {
+        if (!entry.disk || !entry.memory || !entry.runtime) {
+            // Row doesn't exist in all layers - that's a difference
+            return true;
+        }
+
+        // Row exists in all three layers - check if column values differ
+        const normalized1 = normalizeRow(entry.diskData);
+        const normalized2 = normalizeRow(entry.memoryData);
+        const normalized3 = normalizeRow(entry.runtimeData);
+
+        const str1 = JSON.stringify(normalized1, Object.keys(normalized1).sort());
+        const str2 = JSON.stringify(normalized2, Object.keys(normalized2).sort());
+        const str3 = JSON.stringify(normalized3, Object.keys(normalized3).sort());
+
+        return !(str1 === str2 && str2 === str3);
+    }
+
+    // Helper to add rows to map
+    function addRows(rows, layer) {
+        rows.forEach(row => {
+            // Skip rows in the skip list
+            if (shouldSkipRow(row)) {
+                return;
+            }
+
+            const key = getRowKey(row);
+
+            if (!rowMap.has(key)) {
+                rowMap.set(key, {
+                    data: row,
+                    disk: false,
+                    memory: false,
+                    runtime: false,
+                    diskData: null,
+                    memoryData: null,
+                    runtimeData: null
+                });
+            }
+            const entry = rowMap.get(key);
+            entry[layer] = true;
+            entry[layer + 'Data'] = row;
+        });
+    }
+
+    // Add all rows from each layer
+    if (table.databases.disk && table.databases.disk.data) {
+        addRows(table.databases.disk.data, 'disk');
+    }
+    if (table.databases.memory && table.databases.memory.data) {
+        addRows(table.databases.memory.data, 'memory');
+    }
+    if (table.databases.runtime && table.databases.runtime.data) {
+        let runtimeRows = table.databases.runtime.data;
+        // runtime_mysql_users has two rows per username (frontend=1 and backend=1);
+        // only compare against the frontend=1 row to match the mysql_users structure
+        if (tableName === 'mysql_users') {
+            runtimeRows = runtimeRows.filter(row => String(row.frontend) === '1');
+        }
+        addRows(runtimeRows, 'runtime');
+    }
+
+    // Filter to only show rows with differences
+    return Array.from(rowMap.values()).filter(row => hasRowDifferences(row));
+}
+
+function buildUnifiedTable(tableName, rows, tableData) {
+    if (rows.length === 0) return '';
+
+    // Get column order from the backend (preserves database schema order)
+    let columnArray = [];
+    const layers = ['disk', 'memory', 'runtime'];
+
+    for (const layer of layers) {
+        if (tableData.databases[layer] && tableData.databases[layer].column_order && tableData.databases[layer].column_order.length > 0) {
+            columnArray = tableData.databases[layer].column_order;
+            break;
+        }
+    }
+
+    // Fallback: If no column_order from backend, try to get from data
+    if (columnArray.length === 0) {
+        for (const layer of layers) {
+            if (tableData.databases[layer] && tableData.databases[layer].data && tableData.databases[layer].data.length > 0) {
+                columnArray = Object.keys(tableData.databases[layer].data[0]);
+                break;
+            }
+        }
+    }
+
+    // Final fallback: use row data
+    if (columnArray.length === 0) {
+        const columnSet = new Set();
+        rows.forEach(row => {
+            Object.keys(row.data).forEach(col => columnSet.add(col));
+        });
+        columnArray = Array.from(columnSet);
+    }
+
+    // Columns to skip for diff comparison (table-specific)
+    const skipDiffCols = tableName === 'mysql_users' ? new Set(['frontend', 'backend']) : new Set();
+
+    // Identifying columns per table (used to highlight key cells when a row is absent from some layers)
+    const IDENT_COLS_MAP = {
+        'mysql_servers': ['hostgroup_id', 'hostname', 'port'],
+        'mysql_users': ['username'],
+        'mysql_query_rules': ['rule_id'],
+        'mysql_replication_hostgroups': ['writer_hostgroup'],
+        'mysql_group_replication_hostgroups': ['writer_hostgroup'],
+        'mysql_galera_hostgroups': ['writer_hostgroup'],
+        'mysql_aws_aurora_hostgroups': ['writer_hostgroup'],
+        'global_variables': ['variable_name'],
+        'admin_variables': ['variable_name'],
+        'mysql_variables': ['variable_name'],
+        'proxysql_servers': ['hostname', 'port'],
+        'scheduler': ['id']
+    };
+    const identCols = new Set(IDENT_COLS_MAP[tableName] || []);
+
+    // First, calculate if each row has differences
+    rows.forEach(row => {
+        row.hasAnyDifference = false;
+        columnArray.forEach(col => {
+            const diskVal = row.diskData && row.diskData[col] !== undefined ? String(row.diskData[col]) : null;
+            const memoryVal = row.memoryData && row.memoryData[col] !== undefined ? String(row.memoryData[col]) : null;
+            const runtimeVal = row.runtimeData && row.runtimeData[col] !== undefined ? String(row.runtimeData[col]) : null;
+
+            const presentValues = [];
+            if (row.disk && diskVal !== null) presentValues.push(diskVal);
+            if (row.memory && memoryVal !== null) presentValues.push(memoryVal);
+            if (row.runtime && runtimeVal !== null) presentValues.push(runtimeVal);
+
+            if (!skipDiffCols.has(col) && presentValues.length > 1) {
+                const firstVal = presentValues[0];
+                if (presentValues.some(val => val !== firstVal)) {
+                    row.hasAnyDifference = true;
+                }
+            }
+        });
+    });
+
+    // Sort rows: first by differences (differences first), then by primary key columns
+    const hasVariableName = columnArray.includes('variable_name');
+    const hasHostgroupId = columnArray.includes('hostgroup_id');
+    const hasHostname = columnArray.includes('hostname');
+    const hasPort = columnArray.includes('port');
+
+    rows.sort((a, b) => {
+        // Sort by differences first (rows with differences come first)
+        if (a.hasAnyDifference !== b.hasAnyDifference) {
+            return a.hasAnyDifference ? -1 : 1;
+        }
+
+        // Then sort by primary key in ascending order
+        if (hasVariableName) {
+            // For global_variables and similar tables
+            const aName = String(a.data.variable_name || '').toLowerCase();
+            const bName = String(b.data.variable_name || '').toLowerCase();
+            return aName.localeCompare(bName);
+        } else if (hasHostgroupId && hasHostname && hasPort) {
+            // For mysql_servers and similar tables with composite PK
+            const aHostgroup = parseInt(a.data.hostgroup_id) || 0;
+            const bHostgroup = parseInt(b.data.hostgroup_id) || 0;
+            if (aHostgroup !== bHostgroup) return aHostgroup - bHostgroup;
+
+            const aHostname = String(a.data.hostname || '').toLowerCase();
+            const bHostname = String(b.data.hostname || '').toLowerCase();
+            if (aHostname !== bHostname) return aHostname.localeCompare(bHostname);
+
+            const aPort = parseInt(a.data.port) || 0;
+            const bPort = parseInt(b.data.port) || 0;
+            return aPort - bPort;
+        } else {
+            // For other tables, sort by the first column
+            const firstCol = columnArray[0];
+            if (firstCol) {
+                const aVal = String(a.data[firstCol] || '').toLowerCase();
+                const bVal = String(b.data[firstCol] || '').toLowerCase();
+                return aVal.localeCompare(bVal);
+            }
+        }
+        return 0;
+    });
+
+    // Build table header
+    let html = '<table class="unified-config-table">';
+    html += '<thead><tr>';
+
+    // Presence columns FIRST (left side)
+    html += '<th class="presence-col">Disk</th>';
+    html += '<th class="presence-col">Memory</th>';
+    html += '<th class="presence-col">Runtime</th>';
+
+    // Data columns
+    columnArray.forEach(col => {
+        html += `<th class="sortable">${escapeHtml(col)}</th>`;
+    });
+
+    html += '</tr></thead>';
+
+    // Build table rows
+    html += '<tbody>';
+    rows.forEach(row => {
+        // First, check if ANY column has different values across environments
+        let hasAnyDifference = false;
+        const columnDifferences = {};
+
+        columnArray.forEach(col => {
+            const diskVal = row.diskData && row.diskData[col] !== undefined ? String(row.diskData[col]) : null;
+            const memoryVal = row.memoryData && row.memoryData[col] !== undefined ? String(row.memoryData[col]) : null;
+            const runtimeVal = row.runtimeData && row.runtimeData[col] !== undefined ? String(row.runtimeData[col]) : null;
+
+            const presentValues = [];
+            if (row.disk && diskVal !== null) presentValues.push(diskVal);
+            if (row.memory && memoryVal !== null) presentValues.push(memoryVal);
+            if (row.runtime && runtimeVal !== null) presentValues.push(runtimeVal);
+
+            let hasDifference = false;
+            if (!skipDiffCols.has(col) && presentValues.length > 1) {
+                const firstVal = presentValues[0];
+                hasDifference = presentValues.some(val => val !== firstVal);
+            }
+
+            columnDifferences[col] = {
+                hasDifference,
+                diskVal,
+                memoryVal,
+                runtimeVal,
+                displayValue: diskVal !== null ? diskVal : (memoryVal !== null ? memoryVal : runtimeVal)
+            };
+
+            if (hasDifference) {
+                hasAnyDifference = true;
+            }
+        });
+
+        if (hasAnyDifference) {
+            // Group environments by their row signature (combination of all column values)
+            const envs = [
+                { name: 'disk', label: 'Disk', badge: 'env-badge-disk', present: row.disk, data: row.diskData },
+                { name: 'memory', label: 'Memory', badge: 'env-badge-memory', present: row.memory, data: row.memoryData },
+                { name: 'runtime', label: 'Runtime', badge: 'env-badge-runtime', present: row.runtime, data: row.runtimeData }
+            ];
+
+            // Create signature for each environment (JSON of all column values, excluding skipDiffCols)
+            const envSignatures = envs.map(env => {
+                if (!env.present || !env.data) return null;
+                const sig = {};
+                columnArray.forEach(col => {
+                    if (skipDiffCols.has(col)) return;
+                    sig[col] = env.data[col] !== undefined ? String(env.data[col]) : null;
+                });
+                return JSON.stringify(sig);
+            });
+
+            // Group environments with the same signature
+            const groups = [];
+            const processed = new Set();
+
+            envs.forEach((env, idx) => {
+                if (processed.has(idx)) return;
+
+                const signature = envSignatures[idx];
+                const group = {
+                    signature,
+                    envs: [env],
+                    envIndices: [idx]
+                };
+
+                // Find other envs with same signature
+                for (let i = idx + 1; i < envs.length; i++) {
+                    if (!processed.has(i) && envSignatures[i] === signature && signature !== null) {
+                        group.envs.push(envs[i]);
+                        group.envIndices.push(i);
+                        processed.add(i);
+                    }
+                }
+
+                processed.add(idx);
+                groups.push(group);
+            });
+
+            // Render each group as a row
+            groups.forEach(group => {
+                // Skip groups where none of the environments in the group have data
+                const hasAnyData = group.envs.some(env => env.present && env.data);
+                if (!hasAnyData) {
+                    return; // Skip this group entirely
+                }
+
+                html += `<tr class="env-subrow">`;
+
+                // Presence cells - show which environments have this signature
+                envs.forEach((e, idx) => {
+                    const isInGroup = group.envIndices.includes(idx);
+                    if (isInGroup && e.present) {
+                        html += `<td class="presence-cell presence-yes">✓</td>`;
+                    } else {
+                        html += `<td class="presence-cell presence-no">✗</td>`;
+                    }
+                });
+
+                // Data cells - use data from first env in group
+                const representativeEnv = group.envs[0];
+                columnArray.forEach(col => {
+                    const colInfo = columnDifferences[col];
+                    const envValue = representativeEnv.data && representativeEnv.data[col] !== undefined
+                        ? String(representativeEnv.data[col])
+                        : '';
+
+                    const notInAllLayers = !(row.disk && row.memory && row.runtime);
+                    const cellClass = (colInfo.hasDifference || (identCols.has(col) && notInAllLayers)) ? 'data-cell cell-diff' : 'data-cell';
+                    html += `<td class="${cellClass}">${escapeHtml(envValue)}</td>`;
+                });
+
+                html += '</tr>';
+            });
+        } else {
+            // No differences - show single compact row
+            html += `<tr>`;
+
+            // Presence cells
+            html += `<td class="presence-cell ${row.disk ? 'presence-yes' : 'presence-no'}">
+                        ${row.disk ? '✓' : '✗'}
+                     </td>`;
+            html += `<td class="presence-cell ${row.memory ? 'presence-yes' : 'presence-no'}">
+                        ${row.memory ? '✓' : '✗'}
+                     </td>`;
+            html += `<td class="presence-cell ${row.runtime ? 'presence-yes' : 'presence-no'}">
+                        ${row.runtime ? '✓' : '✗'}
+                     </td>`;
+
+            // Data cells
+            columnArray.forEach(col => {
+                const colInfo = columnDifferences[col];
+                const notInAllLayers = !(row.disk && row.memory && row.runtime);
+                const cellClass = (identCols.has(col) && notInAllLayers) ? 'data-cell cell-diff' : 'data-cell';
+                html += `<td class="${cellClass}">${escapeHtml(colInfo.displayValue || '')}</td>`;
+            });
+
+            html += '</tr>';
+        }
+    });
+    html += '</tbody></table>';
+
+    return html;
+}
+
+function executeTableCommand(tableName, commandType) {
+    const component = TABLE_TO_COMPONENT[tableName] || tableName.toUpperCase();
+    let sql = '';
+    let title = '';
+
+    if (commandType === 'LOAD TO RUNTIME') {
+        sql = `LOAD ${component} TO RUNTIME;`;
+        title = `Load ${tableName} to Runtime`;
+    } else if (commandType === 'SAVE TO DISK') {
+        sql = `SAVE ${component} TO DISK;`;
+        title = `Save ${tableName} to Disk`;
+    } else if (commandType === 'LOAD FROM DISK') {
+        sql = `LOAD ${component} FROM DISK;`;
+        title = `Load ${tableName} from Disk`;
+    }
+
+    executeProxySQLCommandAndRefresh(title, sql);
+}
+
+function executeGlobalCommand(commandType) {
+    let sql = '';
+    let title = '';
+
+    if (commandType === 'LOAD TO RUNTIME') {
+        sql = VALID_COMPONENTS.map(c => `LOAD ${c} TO RUNTIME;`).join('\n');
+        title = 'Load All to Runtime';
+    } else if (commandType === 'SAVE TO DISK') {
+        sql = VALID_COMPONENTS.map(c => `SAVE ${c} TO DISK;`).join('\n');
+        title = 'Save All to Disk';
+    } else if (commandType === 'LOAD FROM DISK') {
+        sql = VALID_COMPONENTS.map(c => `LOAD ${c} FROM DISK;`).join('\n');
+        title = 'Load All from Disk';
+    }
+
+    executeProxySQLCommandAndRefresh(title, sql);
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function displayError(message) {
+    const container = document.getElementById('diff-content');
+    container.innerHTML = `
+        <div class="error-state">
+            <i class="fas fa-exclamation-triangle"></i>
+            <p>${message}</p>
+        </div>
+    `;
+}
+
+function showSkipVariablesModal() {
+    const skipVars = window.configDiffSkipVariables || [];
+    const listHtml = skipVars.map((v, idx) => `
+        <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; background: #f8f9fa; border-radius: 4px; margin-bottom: 0.5rem;">
+            <code style="flex: 1; font-size: 0.9rem;">${escapeHtml(v)}</code>
+            <button onclick="removeSkipVariable(${idx})" style="padding: 0.25rem 0.5rem; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+    `).join('');
+
+    const modalHtml = `
+        <div id="skip-variables-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;">
+            <div style="background: white; border-radius: 8px; padding: 2rem; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
+                <h3 style="margin: 0 0 1rem 0; display: flex; align-items: center; justify-content: space-between;">
+                    <span><i class="fas fa-cog"></i> Skip Variables Configuration</span>
+                    <button onclick="closeSkipVariablesModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #64748b;">×</button>
+                </h3>
+                <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 1rem;">
+                    Variables in this list will be ignored when comparing configuration differences.
+                </p>
+                <div id="skip-variables-list" style="margin-bottom: 1rem;">
+                    ${listHtml || '<p style="color: #94a3b8; font-style: italic;">No variables in skip list</p>'}
+                </div>
+                <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+                    <input type="text" id="new-skip-variable" placeholder="variable_name (e.g., mysql-server_capabilities)" style="flex: 1; padding: 0.5rem; border: 1px solid #e0e0e0; border-radius: 4px;">
+                    <button onclick="addSkipVariable()" style="padding: 0.5rem 1rem; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">
+                        <i class="fas fa-plus"></i> Add
+                    </button>
+                </div>
+                <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #e0e0e0; display: flex; gap: 0.5rem; justify-content: flex-end;">
+                    <button onclick="closeSkipVariablesModal()" style="padding: 0.5rem 1rem; background: #e0e0e0; border: none; border-radius: 4px; cursor: pointer;">
+                        Cancel
+                    </button>
+                    <button onclick="saveSkipVariables()" style="padding: 0.5rem 1rem; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">
+                        <i class="fas fa-save"></i> Save to Config
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+function closeSkipVariablesModal() {
+    const modal = document.getElementById('skip-variables-modal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+function removeSkipVariable(index) {
+    window.configDiffSkipVariables.splice(index, 1);
+    closeSkipVariablesModal();
+    showSkipVariablesModal();
+}
+
+function addSkipVariable() {
+    const input = document.getElementById('new-skip-variable');
+    const value = input.value.trim();
+    if (value && !window.configDiffSkipVariables.includes(value)) {
+        window.configDiffSkipVariables.push(value);
+        input.value = '';
+        closeSkipVariablesModal();
+        showSkipVariablesModal();
+    }
+}
+
+function saveSkipVariables() {
+    // Save to backend (config.yml)
+    fetch('/api/update_config_skip_variables', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || {}).content || '',
+        },
+        body: JSON.stringify({
+            skip_variables: window.configDiffSkipVariables
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showNotificationModal('Success', 'Skip variables saved successfully!', 'success');
+            closeSkipVariablesModal();
+            loadConfigDiff(); // Reload to apply changes
+        } else {
+            showNotificationModal('Error', 'Error saving: ' + (data.error || 'Unknown error'), 'danger');
+        }
+    })
+    .catch(error => {
+        showNotificationModal('Error', 'Error saving: ' + error.message, 'danger');
+    });
+}
+
+// Store the keyboard event listener so we can remove it later
+let notificationModalKeyListener = null;
+
+function showNotificationModal(title, message, type) {
+    // Remove any existing notification modal
+    const existingModal = document.getElementById('notification-modal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+
+    // Determine icon based on type
+    const icon = type === 'success' ? '✓' : '⚠';
+    const iconColor = type === 'success' ? '#10b981' : '#dc2626';
+
+    const modalHtml = `
+        <div id="notification-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 2000; display: flex; align-items: center; justify-content: center;">
+            <div style="background: white; border-radius: 8px; padding: 2rem; max-width: 400px; width: 90%; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <div style="text-align: center; margin-bottom: 1rem;">
+                    <div style="font-size: 3rem; color: ${iconColor}; margin-bottom: 0.5rem;">${icon}</div>
+                    <h3 style="margin: 0; font-size: 1.25rem; font-weight: 600; color: #1e293b;">${escapeHtml(title)}</h3>
+                </div>
+                <p style="color: #64748b; text-align: center; margin: 0 0 1.5rem 0;">${escapeHtml(message)}</p>
+                <div style="text-align: center;">
+                    <button onclick="closeNotificationModal()" style="padding: 0.5rem 2rem; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                        OK
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    // Add ENTER key listener to close the modal
+    notificationModalKeyListener = function(event) {
+        if (event.key === 'Enter') {
+            closeNotificationModal();
+        }
+    };
+    document.addEventListener('keydown', notificationModalKeyListener);
+}
+
+function closeNotificationModal() {
+    const modal = document.getElementById('notification-modal');
+    if (modal) {
+        modal.remove();
+    }
+
+    // Remove the keyboard event listener to prevent memory leaks
+    if (notificationModalKeyListener) {
+        document.removeEventListener('keydown', notificationModalKeyListener);
+        notificationModalKeyListener = null;
+    }
+}
+</script>
+{% endblock %}

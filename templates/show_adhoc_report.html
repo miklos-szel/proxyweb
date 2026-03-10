@@ -1,78 +1,238 @@
-{%  extends 'list_dbs.html' %}
-
+{% extends 'list_dbs.html' %}
 
 {% block show_adhoc_report %}
+<style>
+    .report-card {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        margin-bottom: 2rem;
+        overflow: hidden;
+        border: 1px solid #e0e0e0;
+    }
 
+    .report-header {
+        background: #f8f9fa;
+        color: #333;
+        padding: 1.5rem;
+        position: relative;
+        border-bottom: 1px solid #e0e0e0;
+    }
+
+    .report-title {
+        margin: 0;
+        font-weight: 600;
+        font-size: 1.25rem;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .report-actions {
+        margin-top: 1rem;
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .report-info {
+        background: white;
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin: 1.5rem;
+        border: 1px solid #e0e0e0;
+        transition: all 0.2s ease;
+    }
+
+    .report-info:hover {
+        background: #f8f9fa;
+        border-color: var(--primary-color);
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .report-info h6 {
+        margin: 0 0 1rem 0;
+        font-weight: 600;
+        color: #333;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.95rem;
+        font-size: 1.05rem;
+    }
+
+    .report-info p {
+        margin: 0;
+        color: var(--secondary-color);
+        line-height: 1.7;
+        font-size: 0.95rem;
+    }
+
+    .report-sql {
+        background: #1e293b;
+        color: #e2e8f0;
+        padding: 2rem;
+        margin: 0 2rem 2rem 2rem;
+        border-radius: var(--border-radius);
+        overflow-x: auto;
+        font-family: 'Courier New', monospace;
+        font-size: 0.95rem;
+        line-height: 1.7;
+        transition: all 0.2s ease;
+    }
+
+    .report-sql:hover {
+        background: #2d3748;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    .report-table {
+        margin: 0 2rem 2rem 2rem;
+    }
+
+    .table {
+        background: white;
+        border-radius: var(--border-radius);
+        overflow: hidden;
+    }
+
+    .report-stats {
+        background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+        padding: 2rem;
+        margin: 0 2rem 2rem 2rem;
+        border-radius: var(--border-radius);
+        display: flex;
+        gap: 2.5rem;
+        flex-wrap: wrap;
+    }
+
+    .stat-item {
+        display: flex;
+        align-items: center;
+        gap: 0.625rem;
+        color: var(--secondary-color);
+        font-size: 0.95rem;
+    }
+
+    .stat-item strong {
+        color: var(--dark-color);
+    }
+
+    .btn-collapse {
+        background: var(--primary-color);
+        border: 2px solid var(--primary-color);
+        color: white;
+        padding: 0.75rem 1.75rem;
+        border-radius: var(--border-radius);
+        font-weight: 600;
+        font-size: 0.95rem;
+        transition: all 0.3s ease;
+    }
+
+    .btn-collapse:hover {
+        background: var(--primary-dark);
+        border-color: var(--primary-dark);
+        color: white;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    @media (max-width: 768px) {
+        .report-title {
+            font-size: 1.4rem;
+        }
+
+        .report-actions,
+        .report-stats {
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .report-info,
+        .report-sql,
+        .report-table,
+        .report-stats {
+            margin-left: 1rem;
+            margin-right: 1rem;
+        }
+    }
+</style>
 
 {% for result in adhoc_results %}
-</br></br>
-<table id="adhoc_results" class=" table table-striped  table-bordered table-sm" cellspacing="0" width="100%">
-    <!-- Buttons trigger collapse -->
+    <div class="report-card fade-in">
+        <div class="report-header">
+            <h3 class="report-title">
+                <i class="fas fa-chart-line"></i>
+                {{ result['title'] }}
+            </h3>
 
+            <div class="report-actions">
+                <button class="btn btn-collapse" type="button" data-bs-toggle="collapse" data-bs-target="#info{{ loop.index }}" aria-expanded="false">
+                    <i class="fas fa-info-circle me-2"></i>Show Info
+                </button>
+                <button class="btn btn-collapse" type="button" data-bs-toggle="collapse" data-bs-target="#sql{{ loop.index }}" aria-expanded="false">
+                    <i class="fas fa-code me-2"></i>Show SQL
+                </button>
+            </div>
+        </div>
 
-    <!-- Collapse buttons -->
-    <div class="text-center">
-        <button class=" btn  btn-outline-dark" type="button" data-toggle="collapse"
-                data-target="#collapse{{loop.index}}"
-                aria-expanded="false" aria-controls="collapse">
-            {{ result['title'] }}
-        </button>
-        </br>
+        <div class="collapse" id="info{{ loop.index }}">
+            <div class="report-info" style="cursor: pointer;" onclick="this.parentElement.classList.toggle('show')">
+                <h6>
+                    <i class="fas fa-info-circle"></i>
+                    Report Information
+                </h6>
+                <p>{{ result['info'] }}</p>
+            </div>
+        </div>
 
+        <div class="collapse" id="sql{{ loop.index }}">
+            <div class="report-sql" style="cursor: pointer;" onclick="this.parentElement.classList.toggle('show')">
+                <i class="fas fa-code me-2"></i>
+                <strong>SQL Query:</strong>
+                <pre style="margin-top: 0.5rem; margin-bottom: 0;">{{ result['sql'] }}</pre>
+            </div>
+        </div>
 
-    </div>
-    <!-- / Collapse buttons -->
+        <div class="report-stats">
+            <div class="stat-item">
+                <i class="fas fa-columns"></i>
+                <span><strong>Columns:</strong> {{ result['column_names']|length }}</span>
+            </div>
+            <div class="stat-item">
+                <i class="fas fa-list"></i>
+                <span><strong>Rows:</strong> {{ result['rows']|length }}</span>
+            </div>
+            <div class="stat-item">
+                <i class="fas fa-table"></i>
+                <span><strong>Table:</strong> {{ result['title'] }}</span>
+            </div>
+        </div>
 
-    <!-- Collapsible element -->
-        <div class="collapse text-left dark-grey-text" id="collapse{{loop.index}}">
-        <div class="container my-3 py-3 z-depth-1">
-            <p class="font-weight-bold">Info</p>
-            <section class="dark-grey-text ">
-                {{ result['info'] }}
-            </section>
-
+        <div class="report-table">
+            <div class="table-responsive">
+                <table id="adhoc_results" class="table table-hover table-striped mb-0">
+                    <thead>
+                        <tr>
+                            {% for column_name in result['column_names'] %}
+                                <th>{{ column_name }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in result['rows'] %}
+                            <tr>
+                                {% for column in row %}
+                                    <td>{{ column }}</td>
+                                {% endfor %}
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
-    <div class="collapse text-left dark-grey-text" id="collapse{{loop.index}}">
-        <div class="container my-3 py-3 z-depth-1">
-            <section class="dark-grey-text ">
-                {{ result['sql'] }}
-            </section>
-
-        </div>
-    </div>
-    <!-- / Collapsible element -->
-
-    <thead>
-
-    <tr>
-        {% for column_name in result['column_names'] %}
-        <th class="th-sm">{{ column_name }}
-
-        </th>
-        {% endfor %}
-    </tr>
-    </thead>
-
-    <tbody>
-    {% for row in result['rows'] %}
-    <tr>
-        {% for column in row %}
-        <td style="max-width:850px;"> {{ column }}</td>
-        {% endfor %}
-    </tr>
-
-    {% endfor %}
-
-    </tbody>
-
-
-</table>
-
 {% endfor %}
-
-
-</br>
-
-
-{%  endblock %}
+{% endblock %}
