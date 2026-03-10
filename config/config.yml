@@ -11,7 +11,7 @@ global:
   - admin-cluster_mysql_servers_diffs_before_sync
   - mysql-server_capabilities
   - pgsql-interfaces
-servers:
+servers: {}
 auth:
   admin_user: admin
   admin_password: admin42
