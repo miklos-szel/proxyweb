@@ -20,6 +20,7 @@ __license__ = "GPLv3"
 
 import mysql.connector
 import logging
+import os
 import yaml
 import subprocess
 import re
@@ -53,9 +54,53 @@ def get_config(config="config/config.yml"):
     try:
         with open(config, 'r') as yml:
             cfg = yaml.safe_load(yml)
+        cfg = _apply_env_overrides(cfg)
         return cfg
     except Exception as e:
         raise ValueError("Error opening or parsing the file: %s" % config)
+
+
+def _apply_env_overrides(cfg):
+    """Override config values with PROXYWEB_* environment variables when set."""
+    if not cfg:
+        return cfg
+
+    # Auth credentials
+    _ENV_AUTH_MAP = {
+        'PROXYWEB_ADMIN_USER':       ('auth', 'admin_user'),
+        'PROXYWEB_ADMIN_PASSWORD':    ('auth', 'admin_password'),
+        'PROXYWEB_READONLY_USER':     ('auth', 'readonly_user'),
+        'PROXYWEB_READONLY_PASSWORD': ('auth', 'readonly_password'),
+    }
+    for env_key, (section, key) in _ENV_AUTH_MAP.items():
+        value = os.environ.get(env_key)
+        if value is not None:
+            cfg.setdefault(section, {})[key] = value
+            logging.info("Config override: %s.%s from env %s", section, key, env_key)
+
+    # Per-server DSN overrides: PROXYWEB_SERVER_<NAME>_{USER,PASSWORD,HOST,PORT,DATABASE}
+    _DSN_FIELD_MAP = {
+        'USER': 'user',
+        'PASSWORD': 'passwd',
+        'HOST': 'host',
+        'PORT': 'port',
+        'DATABASE': 'db',
+    }
+    for server_name, server_cfg in cfg.get('servers', {}).items():
+        prefix = f"PROXYWEB_SERVER_{server_name.upper()}_"
+        overrides = {}
+        for env_suffix, dsn_key in _DSN_FIELD_MAP.items():
+            value = os.environ.get(prefix + env_suffix)
+            if value is not None:
+                overrides[dsn_key] = int(value) if dsn_key == 'port' else value
+
+        if overrides:
+            logging.info("Config override: server %s DSN fields %s from env",
+                         server_name, list(overrides.keys()))
+            for dsn in server_cfg.get('dsn', []):
+                dsn.update(overrides)
+
+    return cfg
 
 
 def dict_to_yaml(data, indent=0, prev_key=None):

@@ -102,6 +102,34 @@ section.
 > 
 > These can be changed by editing the config file.
 
+## Environment Variable Overrides
+
+You can override sensitive values from `config/config.yml` without editing the file by setting environment variables before starting ProxyWeb.
+
+**Web UI credentials:**
+| Variable | Overrides |
+|----------|-----------|
+| `PROXYWEB_ADMIN_USER` | `auth.admin_user` |
+| `PROXYWEB_ADMIN_PASSWORD` | `auth.admin_password` |
+| `PROXYWEB_READONLY_USER` | `auth.readonly_user` |
+| `PROXYWEB_READONLY_PASSWORD` | `auth.readonly_password` |
+
+**Per-server DSN** (replace `<SERVERNAME>` with the uppercase server key from config):
+| Variable | Overrides |
+|----------|-----------|
+| `PROXYWEB_SERVER_<SERVERNAME>_USER` | DSN `user` |
+| `PROXYWEB_SERVER_<SERVERNAME>_PASSWORD` | DSN `passwd` |
+| `PROXYWEB_SERVER_<SERVERNAME>_HOST` | DSN `host` |
+| `PROXYWEB_SERVER_<SERVERNAME>_PORT` | DSN `port` |
+| `PROXYWEB_SERVER_<SERVERNAME>_DATABASE` | DSN `db` |
+
+Example for the default `proxysql` server:
+```bash
+export PROXYWEB_SERVER_PROXYSQL_USER=myuser
+export PROXYWEB_SERVER_PROXYSQL_PASSWORD=mypassword
+```
+
+When running in Docker, you can place variables in a `.env` file mounted at `/app/.env` (or set `PROXYWEB_ENV_FILE` to a custom path). The entrypoint loads it automatically before startup.
 
 ---
 
