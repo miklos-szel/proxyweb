@@ -12,13 +12,6 @@ global:
   - mysql-server_capabilities
   - pgsql-interfaces
 servers:
-  proxysql:
-    dsn:
-    - host: host.docker.internal
-      user: radmin
-      passwd: radmin
-      port: 16032
-      db: main
 auth:
   admin_user: admin
   admin_password: admin42
