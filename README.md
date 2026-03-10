@@ -1,146 +1,138 @@
 # ProxyWeb
-Open Source Web UI for [ProxySQL](https://proxysql.com/)
 
-## Table of Contents
+A modern, open-source web UI for managing [ProxySQL](https://proxysql.com/) servers.
 
-- [Introduction](#introduction)
-- [Features](#features)
-- [Setup](#setup)
-  - [Install ProxyWeb next to ProxySQL](#install-proxyweb-next-to-proxysql)
-  - [Install it as a systemd service (Ubuntu)](#install-it-as-a-systemd-service-ubuntu)
-  - [Install ProxyWeb to work with remote ProxySQL servers](#install-proxyweb-to-work-with-remote-proxysql-servers)
+![ProxyWeb — table browser with pagination and search](misc/images/table_browser.png)
 
+## Overview
 
-![ProxyWeb ui](misc/images/ProxyWeb_main.jpg)
+ProxyWeb gives you full control over ProxySQL through a clean web interface — browse tables, edit rows inline, run SQL queries, compare configurations across layers, and manage multiple ProxySQL instances from a single dashboard.
 
-## Introduction
-ProxyWeb is a modern, lightweight web-based interface for ProxySQL, the popular high-performance MySQL proxy. Designed for simplicity and full control, ProxyWeb allows administrators to manage ProxySQL servers, users, query rules, and variables—all through an intuitive web UI.
+## Features
 
-## Features:
-- Clean and responsive design
-- [Multi-server support](misc/images/ProxyWeb_servers.jpg)
-- [Configurable reporting](misc/images/ProxyWeb_report.jpg)
-- Global and per-server options
-- Hide unused tables (global or per-server basis)
-- Sort content by any column (asc/desc)
-- Online config editor
-- Narrow-down content search
-- Paginate content
-- Command history and SQL dropdown menu 
-- Adhoc MySQL queries
-- Basic authentication
+- **Multi-server management** — switch between ProxySQL instances from the nav bar
+- **Table browser** — view, search, sort, and paginate any ProxySQL table
+- **Inline editing** — insert, update, and delete rows directly in the browser
+- **SQL query editor** — run ad-hoc queries with quick-query shortcuts for common operations
+- **Config diff** — compare Disk / Memory / Runtime layers side by side, spot drift instantly
+- **Role-based access** — admin and read-only users with separate credentials
+- **Environment variable overrides** — inject credentials and DSN settings without editing files
+- **Settings UI** — edit `config.yml` through a structured form or raw YAML editor
+- **Hide tables** — filter out unused tables globally or per server
+- **Configurable reports** — define reusable SQL reports in config
+- **Docker and systemd** — run as a container or install as a native service
 
+| Config diff view | SQL editor with quick queries |
+|:---:|:---:|
+| ![Config diff](misc/images/config_diff.png) | ![SQL editor](misc/images/sql_editor.png) |
 
-# Setup
+## Quick Start
 
-## Prerequisites
-
-- Docker installed on your system
-- Git installed
-- Basic understanding of ProxySQL and MySQL
-
-## Install ProxyWeb next to ProxySQL
-With Docker:
-```
+```bash
 docker run -h proxyweb --name proxyweb --network="host" -d proxyweb/proxyweb:latest
 ```
 
-## Building from source
+Then open `http://<host>:5000` and log in with the default credentials (`admin` / `admin42`).
+
+> [!NOTE]
+> The login page shows a hint when default credentials are still in use.
+> Change them in Settings or via environment variables after first login.
+
+## Setup
+
+### Prerequisites
+
+- Docker (or Python 3 + pip for bare-metal)
+- A running ProxySQL instance with admin interface enabled
+
+### Docker (alongside ProxySQL)
+
+```bash
+# Same host as ProxySQL (uses host networking)
+docker run -h proxyweb --name proxyweb --network="host" -d proxyweb/proxyweb:latest
+
+# Remote ProxySQL (expose port 5000)
+docker run -h proxyweb --name proxyweb -p 5000:5000 -d proxyweb/proxyweb:latest
+```
+
+After starting, visit `/settings/edit/` to configure your ProxySQL server connection.
+
+### Building from source
 
 ```bash
 make proxyweb-build                        # linux/amd64, tag: latest
 make proxyweb-build PLATFORM=linux/arm64   # cross-compile for ARM
 make proxyweb-build TAG=1.2.3              # custom tag
-make proxyweb-build PLATFORM=linux/arm64 TAG=1.2.3
 ```
 
-| Variable   | Default        | Description                        |
-|------------|----------------|------------------------------------|
-| `PLATFORM` | `linux/amd64`  | Target architecture passed to `docker build --platform` |
-| `TAG`      | `latest`       | Docker image tag (`proxyweb/proxyweb:<TAG>`) |
-## Install it as a systemd service (Ubuntu)
-```
+| Variable   | Default       | Description                                              |
+|------------|---------------|----------------------------------------------------------|
+| `PLATFORM` | `linux/amd64` | Target architecture passed to `docker build --platform`  |
+| `TAG`      | `latest`      | Docker image tag (`proxyweb/proxyweb:<TAG>`)             |
+
+### Systemd service (Ubuntu)
+
+```bash
 git clone https://github.com/miklos-szel/proxyweb
 cd proxyweb
 make install
 ```
-Visit  [http://ip_of_the_host:5000/setting/edit](http://ip_of_the_host:5000/setting/edit) first and adjust the credentials if needed.
-The default connection is the local one with the default credentials.
 
+Visit `http://<host>:5000/settings/edit/` to configure the server connection.
 
-## Install ProxyWeb to work with remote ProxySQL servers
-### Configure ProxySQL for remote admin access
+### Remote ProxySQL access
 
-ProxySQL only allows local admin connections by default.
+ProxySQL only allows local admin connections by default. To enable remote access:
 
-In order to enable remote connections you have to enable it in ProxySQL:
-
-```
-set admin-admin_credentials="admin:admin;radmin:radmin";
-load admin variables to runtime; save admin variables to disk;
+```sql
+SET admin-admin_credentials="admin:admin;radmin:radmin";
+LOAD ADMIN VARIABLES TO RUNTIME;
+SAVE ADMIN VARIABLES TO DISK;
 ```
 
-After this we can connect to the ProxySQL with:
-- username: radmin
-- password: radmin
-- port: 6032 (default)
+Then configure ProxyWeb with `host`, `user: radmin`, `passwd: radmin`, `port: 6032`.
 
-Run:
-```
-docker run -h proxyweb --name proxyweb -p 5000:5000 -d proxyweb/proxyweb:latest
-```
+## Configuration
 
-Visit [http://ip_of_the_host:5000/setting/edit](http://ip_of_the_host:5000/setting/edit) first and edit the `servers`
-section.
+### Default credentials
 
-> [!NOTE]  
-> Basic authentication is turned on by default in the latest version, default credentials are as follows:
->
-> - username: admin 
->
-> - password: admin42
-> 
-> These can be changed by editing the config file.
+| Role      | Username   | Password     |
+|-----------|------------|--------------|
+| Admin     | `admin`    | `admin42`    |
+| Read-only | `readonly` | `readonly42` |
 
-## Environment Variable Overrides
+### Environment variable overrides
 
-You can override sensitive values from `config/config.yml` without editing the file by setting environment variables before starting ProxyWeb.
+Override sensitive values from `config/config.yml` without editing the file.
 
 **Web UI credentials:**
-| Variable | Overrides |
-|----------|-----------|
-| `PROXYWEB_ADMIN_USER` | `auth.admin_user` |
-| `PROXYWEB_ADMIN_PASSWORD` | `auth.admin_password` |
-| `PROXYWEB_READONLY_USER` | `auth.readonly_user` |
+
+| Variable                     | Overrides              |
+|------------------------------|------------------------|
+| `PROXYWEB_ADMIN_USER`        | `auth.admin_user`      |
+| `PROXYWEB_ADMIN_PASSWORD`    | `auth.admin_password`  |
+| `PROXYWEB_READONLY_USER`     | `auth.readonly_user`   |
 | `PROXYWEB_READONLY_PASSWORD` | `auth.readonly_password` |
 
 **Per-server DSN** (replace `<SERVERNAME>` with the uppercase server key from config):
-| Variable | Overrides |
-|----------|-----------|
-| `PROXYWEB_SERVER_<SERVERNAME>_USER` | DSN `user` |
-| `PROXYWEB_SERVER_<SERVERNAME>_PASSWORD` | DSN `passwd` |
-| `PROXYWEB_SERVER_<SERVERNAME>_HOST` | DSN `host` |
-| `PROXYWEB_SERVER_<SERVERNAME>_PORT` | DSN `port` |
-| `PROXYWEB_SERVER_<SERVERNAME>_DATABASE` | DSN `db` |
 
-Example for the default `proxysql` server:
+| Variable                                | Overrides    |
+|-----------------------------------------|--------------|
+| `PROXYWEB_SERVER_<SERVERNAME>_USER`     | DSN `user`   |
+| `PROXYWEB_SERVER_<SERVERNAME>_PASSWORD` | DSN `passwd` |
+| `PROXYWEB_SERVER_<SERVERNAME>_HOST`     | DSN `host`   |
+| `PROXYWEB_SERVER_<SERVERNAME>_PORT`     | DSN `port`   |
+| `PROXYWEB_SERVER_<SERVERNAME>_DATABASE` | DSN `db`     |
+
+Example:
 ```bash
 export PROXYWEB_SERVER_PROXYSQL_USER=myuser
 export PROXYWEB_SERVER_PROXYSQL_PASSWORD=mypassword
 ```
 
-When running in Docker, you can place variables in a `.env` file mounted at `/app/.env` (or set `PROXYWEB_ENV_FILE` to a custom path). The entrypoint loads it automatically before startup.
+When running in Docker, place variables in a `.env` file mounted at `/app/.env` (or set `PROXYWEB_ENV_FILE` to a custom path). The entrypoint loads it automatically before startup.
 
----
+## Credits
 
-### Features on the roadmap
-- ability to edit tables
-- better input validation
-
----
-### Credits:
-
-- Thanks for René Cannaò and the SysOwn team  [ProxySQL](https://proxysql.com/).
+- René Cannaò and the SysOwn team for [ProxySQL](https://proxysql.com/)
 - Tripolszky 'Tripy' Zsolt
-
-
