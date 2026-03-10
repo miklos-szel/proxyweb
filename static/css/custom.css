@@ -428,15 +428,8 @@ footer {
 .dataTables_wrapper {
     padding: 1.5rem 0;
     position: relative;
-    overflow-x: auto;
-    overflow-y: visible;
-}
-
-/* Ensure DataTables scroll body has proper positioning context */
-.dataTables_wrapper .table-responsive {
-    position: relative !important;
-    overflow-x: visible;
-    overflow-y: visible;
+    /* No overflow: keeps dataTables_wrapper a non-scroll-container so
+       position:sticky on thead th works relative to the viewport */
 }
 
 /* Float search box to the right */
@@ -593,10 +586,6 @@ footer {
     position: relative !important;
 }
 
-/* DataTables wrapper needs proper overflow handling */
-.dataTables_wrapper {
-    position: relative;
-}
 
 /* Enhanced row hover state */
 .table tbody tr:hover {
@@ -739,4 +728,34 @@ footer {
 /* Info Panel - Instant Expansion */
 #queryInfo {
     transition: none !important;
+}
+
+/* DataTables toolbar: show-entries | pagination (center) | search on one line */
+.dt-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.45rem 1rem;
+    border-bottom: 1px solid #e0e0e0;
+    flex-wrap: wrap;
+}
+.dt-toolbar-bottom {
+    border-bottom: none;
+    border-top: 1px solid #e0e0e0;
+}
+.dt-toolbar-center {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+}
+.dt-toolbar .dataTables_length,
+.dt-toolbar .dataTables_filter {
+    margin: 0;
+}
+.dt-toolbar .dataTables_filter input {
+    width: 200px;
+}
+.dt-toolbar .dataTables_paginate {
+    margin: 0;
 }

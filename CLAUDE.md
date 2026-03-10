@@ -173,3 +173,5 @@ Rules:
 | `base.html` bare `session['key']` raises KeyError on fresh session → `/settings/edit/` returns 500, leaving broken config unrecoverable | `TestSettingsEditRecovery` |
 | hardcoded `'proxysql'` fallback in `render_list_dbs` and `execute_proxysql_command` crashes when first server is not named `proxysql` | `TestDefaultServerFallback` |
 | `dict_to_yaml()` rendered DSN list entries as inline JSON (`{"host": ...}`) instead of block YAML; new server with empty name silently dropped | `TestSettingsUIServer` |
+| `digest_text` in `stats_mysql_query_digest` had leading whitespace, used `pre-wrap`, truncated at 60 chars, and showed raw Unicode arrows instead of FA chevrons | `TestDigestTextDisplay` |
+| `stats_mysql_query_digest` must serve > 100 rows so DataTables activates client-side pagination; pagination HTML is JS-rendered so the test counts `<tr>` in `<tbody>` | `TestZPagination` |

@@ -43,15 +43,16 @@
                 $('#proxywebtable').DataTable({
                     "lengthMenu": [[25, 50, 100, -1], [25, 50, 100, "All"]],
                     "pageLength": 100,
-                    "responsive": true,
+                    "responsive": false,
                     "autoWidth": false,
-                    "info": true,
+                    "info": false,
                     "paging": true,
-                    "searching": {% if content is defined and content['rows']|length > 50 %}true{% else %}false{% endif %},
-                    "dom": {% if content is defined and content['rows']|length > 50 %}'<"row"<"col-6"f><"col-6"l>>' + '<"row"<"col-12"rtip>>'{% else %}'<"row"<"col-12"l>>' + '<"row"<"col-12"rtip>>'{% endif %},
+                    "searching": true,
+                    "dom": '<"dt-toolbar"l<"dt-toolbar-center"p>f>t<"dt-toolbar dt-toolbar-bottom"l<"dt-toolbar-center"p>f>',
                     "language": {
                         "search": "",
-                        "searchPlaceholder": "Search..."
+                        "searchPlaceholder": "Search...",
+                        "lengthMenu": "Show _MENU_ entries"
                     }{% if content is defined and content['order'] == "true" %},
                     "order": [[0, "desc"]]{% endif %}
                 });

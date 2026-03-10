@@ -233,9 +233,21 @@
         background: white;
         border-radius: 8px;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-        overflow: hidden;
         margin-bottom: 1.5rem;
         border: 1px solid #e0e0e0;
+    }
+
+
+    .sticky-header th {
+        position: sticky !important;
+        top: 60px;
+        z-index: 10;
+        background-color: #f8f9fa !important;
+        border-bottom: 2px solid #dee2e6;
+    }
+
+    #proxywebtable tbody td {
+        white-space: nowrap;
     }
 
     .table-header {
@@ -444,9 +456,9 @@
         </button>
     </div>
 
-    <div class="table-responsive">
+    <div>
         <table id="proxywebtable" class="table table-hover table-striped mb-0">
-            <thead>
+            <thead class="sticky-header">
                 <tr>
                     {% for column_name in content['column_names'] %}
                         <th>{{ column_name }}</th>
@@ -458,10 +470,15 @@
                     <tr>
                         {% for column in row %}
                             {% set col_name = content['column_names'][loop.index0] %}
-                            {% if col_name == 'digest_text' and column and column|string|length > 60 %}
-                                <td style="white-space:pre-wrap;word-break:break-word;max-width:400px;">
-                                    <span class="digest-short">{{ column|string|truncate(60, False, '') }}</span><span class="digest-full" style="display:none;">{{ column }}</span>
-                                    <a href="#" class="digest-toggle" style="font-size:0.8em;margin-left:4px;" onclick="toggleDigest(this);return false;">&#9654; more</a>
+                            {% if col_name == 'digest_text' and column %}
+                                {% set digest_val = column|string|trim %}
+                                <td style="white-space:normal;word-break:break-word;min-width:400px;max-width:700px;">
+                                    {% if digest_val|length > 100 %}
+                                        <span class="digest-short">{{ digest_val|truncate(100, False, '') }}</span><span class="digest-full" style="display:none;">{{ digest_val }}</span>
+                                        <a href="#" class="digest-toggle badge text-bg-secondary fw-normal ms-1" onclick="toggleDigest(this);return false;"><i class="fas fa-chevron-right fa-xs"></i> more</a>
+                                    {% else %}
+                                        {{ digest_val }}
+                                    {% endif %}
                                 </td>
                             {% else %}
                                 <td>{{ column }}</td>
@@ -472,6 +489,7 @@
             </tbody>
         </table>
     </div>
+
 </div>
 
 <script>
@@ -479,14 +497,17 @@ function toggleDigest(link) {
     const td = link.parentElement;
     const short = td.querySelector('.digest-short');
     const full = td.querySelector('.digest-full');
+    const icon = link.querySelector('i');
     if (full.style.display === 'none') {
         short.style.display = 'none';
         full.style.display = '';
-        link.textContent = '\u25bc less';
+        icon.classList.replace('fa-chevron-right', 'fa-chevron-down');
+        link.childNodes[link.childNodes.length - 1].textContent = ' less';
     } else {
         full.style.display = 'none';
         short.style.display = '';
-        link.textContent = '\u25ba more';
+        icon.classList.replace('fa-chevron-down', 'fa-chevron-right');
+        link.childNodes[link.childNodes.length - 1].textContent = ' more';
     }
 }
 

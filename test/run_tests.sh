@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run the full integration test suite against a fresh docker-compose stack.
-# The stack is torn down automatically afterwards (pass --keep to leave it up).
+# The stack is torn down automatically afterwards (pass --keep or --no-stop to leave it up).
 #
 # Service endpoints and credentials used by this stack:
 #
@@ -24,7 +24,7 @@ cd "$(dirname "$0")"
 
 KEEP=0
 for arg in "$@"; do
-    [[ "$arg" == "--keep" ]] && KEEP=1
+    [[ "$arg" == "--keep" || "$arg" == "--no-stop" ]] && KEEP=1
 done
 
 # ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ on_exit() {
         docker compose down --volumes --remove-orphans
     else
         echo ""
-        echo "==> Stack left running (--keep). Stop with: docker compose down -v --remove-orphans"
+        echo "==> Stack left running (--keep / --no-stop). Stop with: docker compose down -v --remove-orphans"
         echo ""
         echo "    ProxyWeb UI      http://localhost:5000   admin / admin42"
         echo "    ProxySQL 1 admin localhost:6032          radmin / radmin"

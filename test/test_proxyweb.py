@@ -1680,6 +1680,318 @@ class TestSettingsUIServer(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# digest_text display: truncation + toggle badge rendering
+# ---------------------------------------------------------------------------
+
+@unittest.skipUnless(HAS_PYMYSQL, "pymysql not installed — skipping digest_text display tests")
+class TestDigestTextDisplay(unittest.TestCase):
+    """stats_mysql_query_digest page renders long digest_text with truncation and FA icons.
+
+    Regression guard for the digest_text display fix in show_table_info.html:
+    - digest_text must be trimmed (no leading ProxySQL whitespace)
+    - truncated at 100 chars (not 60)
+    - <td> must use white-space:normal (not pre-wrap)
+    - toggle badge must use fa-chevron-right / fa-chevron-down (not raw Unicode arrows)
+
+    Setup: runs several long SELECT queries through the ProxySQL 1 MySQL frontend
+    so they appear in stats_mysql_query_digest with a digest_text > 100 chars.
+    """
+
+    # ProxySQL MySQL frontend (port 6033) — same as TestProxySQL1BackendSQL
+    HOST = os.environ.get("PROXYSQL1_HOST", "127.0.0.1")
+    PORT = int(os.environ.get("PROXYSQL1_PORT", "6033"))
+    USER = "proxyuser"
+    PASS = "proxypass"
+    DB   = "testdb"
+
+    # ProxyWeb path for the stats table
+    SERVER   = "proxysql"
+    DATABASE = "stats"
+    TABLE    = "stats_mysql_query_digest"
+
+    # Long queries whose normalized digest_text exceeds 100 chars.
+    # ProxySQL replaces literals with ? but keeps identifiers and structure.
+    LONG_QUERIES = [
+        # ~120 chars after normalization (IN list becomes ?,?,... ; LIMIT becomes ?)
+        (
+            "SELECT id, name, val FROM items "
+            "WHERE id IN (1,2,3,4,5,6,7,8,9,10) "
+            "AND name IS NOT NULL AND val IS NOT NULL "
+            "ORDER BY id DESC LIMIT 100"
+        ),
+        # ~115 chars after normalization
+        (
+            "SELECT id, name, val FROM items "
+            "WHERE name LIKE 'test%' AND val BETWEEN 1 AND 9999 "
+            "AND id > 0 AND id < 100000 "
+            "ORDER BY name ASC, val DESC"
+        ),
+    ]
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        # Run the long queries through ProxySQL so they appear in stats
+        conn = pymysql.connect(
+            host=self.HOST, port=self.PORT,
+            user=self.USER, password=self.PASS,
+            database=self.DB, autocommit=True,
+        )
+        try:
+            with conn.cursor() as cur:
+                for query in self.LONG_QUERIES:
+                    try:
+                        cur.execute(query)
+                        cur.fetchall()
+                    except Exception:
+                        pass  # query may return no rows — that's fine
+        finally:
+            conn.close()
+
+    def _page(self):
+        return self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+
+    def test_page_loads(self):
+        """stats_mysql_query_digest table page returns 200."""
+        resp = self._page()
+        self.assertEqual(resp.status_code, 200)
+
+    def test_truncation_elements_present(self):
+        """Long digest_text rows must render digest-short, digest-full, and digest-toggle."""
+        resp = self._page()
+        html = resp.text
+        self.assertIn('class="digest-short"', html,
+                      "digest-short span missing — long digest_text rows need truncation markup")
+        self.assertIn('class="digest-full"', html,
+                      "digest-full span missing — long digest_text rows need expand markup")
+        self.assertIn('digest-toggle', html,
+                      "digest-toggle link missing — long digest_text rows need a toggle")
+
+    def test_toggle_uses_fa_chevron_not_unicode_arrow(self):
+        """Toggle badge must use Font Awesome chevron, not raw Unicode arrow characters."""
+        resp = self._page()
+        html = resp.text
+        self.assertIn('fa-chevron-right', html,
+                      "fa-chevron-right icon missing from digest toggle badge")
+        self.assertNotIn('&#9654;', html,
+                         "Raw Unicode arrow &#9654; (▶) must not appear in digest toggle")
+        self.assertNotIn('\u25ba', html,
+                         "Raw Unicode arrow ▶ must not appear in digest toggle")
+
+    def test_no_leading_whitespace_in_short_span(self):
+        """digest-short span content must not start with whitespace (|trim must be applied)."""
+        resp = self._page()
+        # Match a digest-short span whose content begins with whitespace
+        bad = re.search(r'<span class="digest-short">\s+\S', resp.text)
+        self.assertIsNone(bad,
+                          "digest-short span has leading whitespace — |trim not applied in template")
+
+    def test_td_uses_white_space_normal_not_pre_wrap(self):
+        """digest_text <td> must use white-space:normal so newlines are not preserved."""
+        resp = self._page()
+        html = resp.text
+        self.assertIn('white-space:normal', html,
+                      "digest_text td must use white-space:normal")
+        self.assertNotIn('white-space:pre-wrap', html,
+                         "digest_text td must not use white-space:pre-wrap")
+
+    def test_short_span_truncated_at_100(self):
+        """digest-short span text must be at most 100 chars (not the old 60-char limit).
+
+        HTML entities (&gt;, &lt;, &amp;) are decoded before measuring length because
+        Jinja2 truncates the raw string at 100 chars then auto-escapes, which can inflate
+        the HTML representation beyond 100 bytes.
+        """
+        import html as html_mod
+        resp = self._page()
+        # Extract all digest-short span contents
+        spans = re.findall(r'<span class="digest-short">(.*?)</span>', resp.text)
+        self.assertTrue(len(spans) > 0, "No digest-short spans found on page")
+        for span_text in spans:
+            decoded = html_mod.unescape(span_text)
+            self.assertLessEqual(len(decoded), 100,
+                                 f"digest-short span is longer than 100 chars: {decoded!r}")
+
+
+@unittest.skipUnless(HAS_PYMYSQL, "pymysql not installed — skipping pagination tests")
+class TestZPagination(unittest.TestCase):
+    """stats_mysql_query_digest page serves > 100 rows so DataTables activates pagination.
+
+    Seeds ProxySQL with 1 050 structurally distinct queries via the MySQL frontend (port 6033)
+    so that stats_mysql_query_digest has more rows than DataTables' pageLength (100).
+
+    Queries use unique column aliases (col_1, col_2, …) so ProxySQL assigns a distinct digest
+    to each one — without this, all `SELECT ? AS n` queries collapse to a single digest row.
+
+    Pagination itself is rendered by DataTables in JavaScript after page load, so it is not
+    present in the server-rendered HTML.  We instead assert that the server returns > 100
+    <tr> rows in the table body, which guarantees DataTables will activate pagination on the
+    client.
+    """
+
+    HOST = os.environ.get("PROXYSQL1_HOST", "127.0.0.1")
+    PORT = int(os.environ.get("PROXYSQL1_PORT", "6033"))
+    USER = "proxyuser"
+    PASS = "proxypass"
+    DB   = "testdb"
+
+    SERVER   = "proxysql"
+    DATABASE = "stats"
+    TABLE    = "stats_mysql_query_digest"
+
+    QUERY_COUNT = 1050
+
+    @classmethod
+    def setUpClass(cls):
+        """Fire QUERY_COUNT structurally distinct queries through the ProxySQL MySQL frontend."""
+        conn = pymysql.connect(
+            host=cls.HOST, port=cls.PORT,
+            user=cls.USER, password=cls.PASS,
+            database=cls.DB, autocommit=True,
+        )
+        try:
+            with conn.cursor() as cur:
+                for i in range(1, cls.QUERY_COUNT + 1):
+                    # Unique column alias per query → unique digest in ProxySQL
+                    # (ProxySQL normalises literals to ? but keeps identifiers as-is)
+                    try:
+                        cur.execute(f"SELECT 1 AS col_{i}")
+                        cur.fetchall()
+                    except Exception:
+                        pass
+        finally:
+            conn.close()
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+
+    def _page(self):
+        return self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+
+    def test_page_loads(self):
+        """stats_mysql_query_digest page returns 200 after seeding > 1000 digests."""
+        resp = self._page()
+        self.assertEqual(resp.status_code, 200)
+
+    def test_pagination_row_count(self):
+        """Server must return > 100 tbody rows so DataTables activates client-side pagination.
+
+        DataTables pagination is rendered entirely in JavaScript and therefore not present
+        in resp.text.  The correct server-side signal is the number of <tr> elements inside
+        <tbody>: when that count exceeds DataTables' pageLength (100 in base.html), DataTables
+        will render Previous/Next controls after the page loads in a browser.
+        """
+        resp = self._page()
+        tbody_match = re.search(r'<tbody>(.*?)</tbody>', resp.text, re.DOTALL)
+        self.assertIsNotNone(tbody_match,
+                             "No <tbody> found on stats_mysql_query_digest page")
+        data_rows = tbody_match.group(1).count('<tr>')
+        self.assertGreater(data_rows, 100,
+                           f"Expected > 100 rows in tbody so DataTables paginates, "
+                           f"got {data_rows} after seeding {self.QUERY_COUNT} digests")
+
+
+# ---------------------------------------------------------------------------
+# Colored + numbered test runner
+# ---------------------------------------------------------------------------
+
+class _ColoredResult(unittest.TestResult):
+    """Prints a numbered, colored one-liner per test as it runs."""
+
+    _GREEN  = '\033[32m'
+    _RED    = '\033[31m'
+    _YELLOW = '\033[33m'
+    _CYAN   = '\033[36m'
+    _BOLD   = '\033[1m'
+    _RESET  = '\033[0m'
+
+    def __init__(self, stream, total):
+        super().__init__()
+        self.stream = stream
+        self.total  = total
+        self._n     = 0
+        self._t0    = None
+        self._width = len(str(total))
+
+    def startTest(self, test):
+        super().startTest(test)
+        self._n  += 1
+        self._t0  = time.monotonic()
+        counter   = f"{self._n:{self._width}}/{self.total}"
+        name      = f"{test.__class__.__name__}.{test._testMethodName}"
+        self.stream.write(f"  {self._CYAN}{counter}{self._RESET}  {name} ")
+        self.stream.flush()
+
+    def _elapsed(self):
+        return f"({time.monotonic() - self._t0:.2f}s)"
+
+    def addSuccess(self, test):
+        self.stream.write(f"{self._GREEN}✓ pass{self._RESET}  {self._elapsed()}\n")
+        self.stream.flush()
+
+    def addFailure(self, test, err):
+        super().addFailure(test, err)
+        self.stream.write(f"{self._RED}✗ FAIL{self._RESET}  {self._elapsed()}\n")
+        self.stream.flush()
+
+    def addError(self, test, err):
+        super().addError(test, err)
+        self.stream.write(f"{self._RED}✗ ERROR{self._RESET} {self._elapsed()}\n")
+        self.stream.flush()
+
+    def addSkip(self, test, reason):
+        super().addSkip(test, reason)
+        self.stream.write(f"{self._YELLOW}⊘ skip{self._RESET}  {self._elapsed()}  {reason}\n")
+        self.stream.flush()
+
+    def printErrors(self):
+        if not (self.failures or self.errors):
+            return
+        self.stream.write("\n")
+        for label, cases in [("FAIL", self.failures), ("ERROR", self.errors)]:
+            for test, tb in cases:
+                self.stream.write("=" * 70 + "\n")
+                self.stream.write(f"{self._RED}{label}: {test}{self._RESET}\n")
+                self.stream.write("-" * 70 + "\n")
+                self.stream.write(tb)
+                self.stream.write("\n")
+
+
+class _ColoredRunner:
+    _GREEN = '\033[32m'
+    _RED   = '\033[31m'
+    _BOLD  = '\033[1m'
+    _RESET = '\033[0m'
+
+    def run(self, suite):
+        total  = suite.countTestCases()
+        out    = sys.stderr
+        out.write(f"\n{self._BOLD}Running {total} tests...{self._RESET}\n\n")
+        out.flush()
+
+        result = _ColoredResult(out, total)
+        t0     = time.monotonic()
+        suite.run(result)
+        elapsed = time.monotonic() - t0
+
+        result.printErrors()
+
+        passed  = result.testsRun - len(result.failures) - len(result.errors) - len(result.skipped)
+        parts   = [f"{self._GREEN}{passed} passed{self._RESET}"]
+        if result.failures:
+            parts.append(f"{self._RED}{len(result.failures)} failed{self._RESET}")
+        if result.errors:
+            parts.append(f"{self._RED}{len(result.errors)} errors{self._RESET}")
+        if result.skipped:
+            parts.append(f"{len(result.skipped)} skipped")
+
+        out.write(f"\n{self._BOLD}Results:{self._RESET}  {', '.join(parts)}  ({elapsed:.1f}s)\n\n")
+        out.flush()
+        return result
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -1692,4 +2004,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     print("ProxyWeb is ready. Running tests.\n")
-    unittest.main(verbosity=2)
+    loader = unittest.TestLoader()
+    suite  = loader.loadTestsFromModule(sys.modules[__name__])
+    result = _ColoredRunner().run(suite)
+    sys.exit(0 if result.wasSuccessful() else 1)
