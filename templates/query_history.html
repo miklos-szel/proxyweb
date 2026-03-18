@@ -1,0 +1,162 @@
+{% extends 'list_dbs.html' %}
+
+{% block show_table_info %}
+<style>
+    .history-container {
+        background: white;
+        border-radius: var(--border-radius);
+        box-shadow: var(--box-shadow);
+        margin-bottom: 2rem;
+        overflow: hidden;
+    }
+
+    .history-header {
+        background: #f8f9fa;
+        padding: 1.25rem 1.5rem;
+        border-bottom: 1px solid #e0e0e0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .history-header h4 {
+        margin: 0;
+        font-weight: 600;
+        color: #333;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 1.1rem;
+    }
+
+    .history-table td {
+        vertical-align: middle;
+    }
+
+    .sql-cell {
+        font-family: 'Courier New', monospace;
+        font-size: 0.9rem;
+        white-space: nowrap;
+        max-width: 600px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .sql-cell.expanded {
+        white-space: normal;
+        word-break: break-word;
+    }
+
+    .timestamp-cell {
+        white-space: nowrap;
+        font-size: 0.875rem;
+        color: #666;
+    }
+
+    .copy-btn {
+        opacity: 0.6;
+        transition: opacity 0.2s;
+    }
+
+    .copy-btn:hover {
+        opacity: 1;
+    }
+</style>
+
+<div class="history-container">
+    <div class="history-header">
+        <h4>
+            <i class="fas fa-history"></i>
+            Query History &mdash; {{ server }}
+        </h4>
+        <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-secondary">{{ history|length }} queries</span>
+            {% if not session.get('read_only') and session.get('role') != 'readonly' and history|length > 0 %}
+                <button class="btn btn-outline-danger btn-sm" onclick="clearHistory()">
+                    <i class="fas fa-trash me-1"></i>Clear History
+                </button>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if history|length > 0 %}
+    <div class="p-3">
+        <table id="historyTable" class="table table-hover table-striped mb-0 history-table">
+            <thead>
+                <tr>
+                    <th style="width: 50px;">#</th>
+                    <th style="width: 180px;">Timestamp</th>
+                    <th style="width: 80px;">User</th>
+                    <th>SQL Query</th>
+                    <th style="width: 80px;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in history %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td class="timestamp-cell">{{ entry.timestamp[:19].replace('T', ' ') }}</td>
+                    <td>{{ entry.user }}</td>
+                    <td class="sql-cell" title="{{ entry.sql }}">{{ entry.sql }}</td>
+                    <td>
+                        <button class="btn btn-outline-secondary btn-sm copy-btn" onclick="copySQL(this)" data-sql="{{ entry.sql|e }}" title="Copy to clipboard">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="p-5 text-center text-muted">
+        <i class="fas fa-history fa-3x mb-3 d-block"></i>
+        <p>No query history for this server yet.</p>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+function copySQL(btn) {
+    const sql = btn.getAttribute('data-sql');
+    navigator.clipboard.writeText(sql).then(() => {
+        const icon = btn.querySelector('i');
+        icon.classList.replace('fa-copy', 'fa-check');
+        btn.classList.replace('btn-outline-secondary', 'btn-success');
+        setTimeout(() => {
+            icon.classList.replace('fa-check', 'fa-copy');
+            btn.classList.replace('btn-success', 'btn-outline-secondary');
+        }, 1500);
+    });
+}
+
+function clearHistory() {
+    const server = {{ server|tojson }};
+    if (!confirm('Clear all query history for ' + server + '?')) return;
+    fetch('/api/clear_query_history', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': getCsrfToken()
+        },
+        body: JSON.stringify({server: server})
+    }).then(r => r.json()).then(data => {
+        if (data.success) location.reload();
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    if (document.getElementById('historyTable')) {
+        $('#historyTable').DataTable({
+            order: [[0, 'asc']],
+            pageLength: 25,
+            lengthMenu: [10, 25, 50, 100],
+            language: {
+                search: '<i class="fas fa-search"></i>',
+                searchPlaceholder: 'Search queries...'
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

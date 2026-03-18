@@ -198,7 +198,6 @@ def render_list_dbs():
         flash('No servers configured. Please add one below.', 'warning')
         return redirect(url_for('render_settings', action='edit'))
     try:
-        session['history'] = []
         session['server'] = server
         session['dblist'] = mdb.get_all_dbs_and_tables(db, server)
         session['servers'] = mdb.get_servers()
@@ -206,6 +205,8 @@ def render_list_dbs():
         if session.get('role') == 'readonly':
             session['read_only'] = True
         session['misc'] = mdb.get_config(config)['misc']
+        recent = mdb.load_query_history(server, limit=10)
+        session['history'] = [e['sql'] for e in recent]
 
         return render_template("list_dbs.html", server=server)
     except Exception as e:
@@ -223,6 +224,8 @@ def render_show_table_content(server, database="main", table="global_variables")
 
         session['servers'] = mdb.get_servers()
         session['server'] = server
+        recent = mdb.load_query_history(server, limit=10)
+        session['history'] = [e['sql'] for e in recent]
         session['table'] = table
         session['database'] = database
         session['misc'] = mdb.get_config(config)['misc']
@@ -275,6 +278,7 @@ def render_change(server, database, table):
             message = "Success"
         if session['sql'].replace("\r\n","") not in session['history'] and not error:
             session['history'].append(session['sql'].replace("\r\n",""))
+            mdb.append_query_history(server, session['sql'].replace("\r\n",""), session.get('role', 'admin'))
 
         return render_template("show_table_info.html", content=content, error=error, message=message)
     except Exception as e:
@@ -755,6 +759,36 @@ def api_execute_proxysql_command():
     except Exception as e:
         logging.exception(f"API error in execute_proxysql_command: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/<server>/query_history/')
+@login_required
+def query_history(server):
+    session['server'] = server
+    session['servers'] = mdb.get_servers()
+    if server not in session.get('dblist', {}):
+        session['dblist'] = session.get('dblist', {})
+        session['dblist'].update(mdb.get_all_dbs_and_tables(db, server))
+    session['misc'] = mdb.get_config(config)['misc']
+    session['read_only'] = mdb.get_read_only(server)
+    if session.get('role') == 'readonly':
+        session['read_only'] = True
+    history = mdb.load_query_history(server)
+    history.reverse()
+    return render_template("query_history.html", server=server, history=history)
+
+
+@app.route('/api/clear_query_history', methods=['POST'])
+@login_required
+def api_clear_query_history():
+    server = request.json.get('server', session.get('server'))
+    if server not in mdb.get_servers():
+        return jsonify({'success': False, 'error': 'Invalid server'}), 400
+    if mdb.get_read_only(server) or session.get('role') == 'readonly':
+        abort(403)
+    mdb.clear_query_history(server)
+    session['history'] = []
+    return jsonify({'success': True})
 
 
 @app.errorhandler(Exception)

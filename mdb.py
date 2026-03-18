@@ -29,6 +29,54 @@ from datetime import datetime
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
+HISTORY_DIR = os.path.join(os.path.dirname(__file__), 'data', 'history')
+
+
+def _valid_history_server(server):
+    """Validate server name is safe for use in file paths."""
+    if not server or '/' in server or '\\' in server or '..' in server:
+        logging.warning(f"Invalid server name for history: {server}")
+        return False
+    return True
+
+
+def append_query_history(server, sql, user='admin'):
+    """Append a query to the per-server history file."""
+    if not _valid_history_server(server):
+        return
+    os.makedirs(HISTORY_DIR, exist_ok=True)
+    path = os.path.join(HISTORY_DIR, f'{server}.json')
+    entry = {"sql": sql, "timestamp": datetime.now().isoformat(), "user": user}
+    history = load_query_history(server)
+    history.append(entry)
+    tmp_path = path + '.tmp'
+    with open(tmp_path, 'w') as f:
+        json.dump(history, f, indent=2)
+    os.replace(tmp_path, path)
+
+
+def load_query_history(server, limit=None):
+    """Load query history for a server. Most recent last. Optional limit returns last N."""
+    if not _valid_history_server(server):
+        return []
+    path = os.path.join(HISTORY_DIR, f'{server}.json')
+    if not os.path.exists(path):
+        return []
+    with open(path, 'r') as f:
+        history = json.load(f)
+    if limit:
+        return history[-limit:]
+    return history
+
+
+def clear_query_history(server):
+    """Clear history for a server."""
+    if not _valid_history_server(server):
+        return
+    path = os.path.join(HISTORY_DIR, f'{server}.json')
+    if os.path.exists(path):
+        os.remove(path)
+
 
 def _quote_ident(name):
     """Backtick-quote a SQL identifier, doubling any embedded backticks."""

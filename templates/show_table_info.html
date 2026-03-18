@@ -351,20 +351,9 @@
                         </button>
                         <div class="dropdown">
                             <button class="btn btn-outline-primary btn-sm dropdown-toggle" type="button" id="quickQueriesBtn" data-bs-toggle="dropdown" data-bs-auto-close="true" aria-expanded="false">
-                                <i class="fas fa-history"></i> Quick Queries
+                                <i class="fas fa-bolt"></i> Quick Queries
                             </button>
                             <ul class="dropdown-menu" aria-labelledby="quickQueriesBtn">
-                                {% if session['history'] and session['history']|length > 0 %}
-                                    <li><h6 class="dropdown-header">Query History</h6></li>
-                                    {% for item in session['history'][:10]|reverse %}
-                                        <li>
-                                            <a class="dropdown-item" href="#" onclick="loadQuery(window['history_item_{{ loop.index }}']); return false;">
-                                                <i class="fas fa-clock me-2"></i>{{ loop.index }}. {{ item|truncate(60, True) }}
-                                            </a>
-                                        </li>
-                                    {% endfor %}
-                                    <li><hr class="dropdown-divider"></li>
-                                {% endif %}
                                 {% for item in session['misc']|sort %}
                                     <li class="dropdown-submenu">
                                         <a class="dropdown-item has-submenu" href="#" role="button" onclick="return false;">
@@ -381,6 +370,24 @@
                                         </ul>
                                     </li>
                                 {% endfor %}
+                            </ul>
+                        </div>
+                        <div class="dropdown">
+                            <button class="btn btn-outline-primary btn-sm dropdown-toggle" type="button" id="historyBtn" data-bs-toggle="dropdown" data-bs-auto-close="true" aria-expanded="false">
+                                <i class="fas fa-clock"></i> Query History
+                            </button>
+                            <ul class="dropdown-menu" aria-labelledby="historyBtn">
+                                {% if session['history'] and session['history']|length > 0 %}
+                                    {% for item in session['history'][-10:]|reverse %}
+                                        <li>
+                                            <a class="dropdown-item" href="#" onclick="loadQuery(window['history_item_{{ loop.index }}']); return false;">
+                                                <i class="fas fa-clock me-2"></i>{{ loop.index }}. {{ item|truncate(60, True) }}
+                                            </a>
+                                        </li>
+                                    {% endfor %}
+                                {% else %}
+                                    <li><span class="dropdown-item text-muted">No queries yet</span></li>
+                                {% endif %}
                             </ul>
                         </div>
                     </div>
@@ -563,14 +570,14 @@ function loadQuery(sql) {
         t.classList.remove('active');
     });
 
-    // Close the main dropdown
-    const dropdownButton = document.getElementById('quickQueriesBtn');
-    if (dropdownButton) {
-        const bsDropdown = bootstrap.Dropdown.getInstance(dropdownButton);
-        if (bsDropdown) {
-            bsDropdown.hide();
+    // Close any open dropdown
+    ['historyBtn', 'quickQueriesBtn'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) {
+            const dd = bootstrap.Dropdown.getInstance(btn);
+            if (dd) dd.hide();
         }
-    }
+    });
 
     // Handle if sql is undefined or null
     if (!sql) {

@@ -2210,6 +2210,249 @@ class _ColoredRunner:
         return result
 
 
+class TestQueryHistory(unittest.TestCase):
+    """Verify per-server persistent query history across two servers.
+
+    Runs 26 unique queries per server (different templates and LIMIT values),
+    checks that:
+    - the Query History dropdown shows only the last 10 for each server
+    - the Full Query History page shows all queries for each server
+    - histories are isolated: server1 queries don't leak into server2
+    - clear works per server without affecting the other
+    """
+
+    S1 = SERVER            # "proxysql"
+    S2 = "proxysql2"
+    TOTAL_PER_SERVER = 26
+
+    # Server 1: each query selects different columns + different LIMIT
+    S1_TEMPLATES = [
+        "SELECT variable_name FROM global_variables LIMIT {n}",
+        "SELECT variable_value FROM global_variables LIMIT {n}",
+        "SELECT variable_name, variable_value FROM global_variables LIMIT {n}",
+        "SELECT variable_name FROM global_variables WHERE variable_name LIKE 'mysql%%' LIMIT {n}",
+        "SELECT variable_value FROM global_variables WHERE variable_name LIKE 'mysql%%' LIMIT {n}",
+        "SELECT variable_name, variable_value FROM global_variables WHERE variable_name LIKE 'admin%%' LIMIT {n}",
+        "SELECT variable_name FROM global_variables ORDER BY variable_name LIMIT {n}",
+        "SELECT variable_value FROM global_variables ORDER BY variable_name LIMIT {n}",
+        "SELECT variable_name, variable_value FROM global_variables ORDER BY variable_name LIMIT {n}",
+        "SELECT variable_name FROM global_variables ORDER BY variable_name DESC LIMIT {n}",
+        "SELECT variable_value FROM global_variables ORDER BY variable_name DESC LIMIT {n}",
+        "SELECT variable_name, variable_value FROM global_variables ORDER BY variable_name DESC LIMIT {n}",
+        "SELECT variable_name FROM global_variables ORDER BY variable_value LIMIT {n}",
+        "SELECT variable_value FROM global_variables ORDER BY variable_value LIMIT {n}",
+        "SELECT variable_name, variable_value FROM global_variables ORDER BY variable_value LIMIT {n}",
+        "SELECT variable_name FROM global_variables ORDER BY variable_value DESC LIMIT {n}",
+        "SELECT variable_value FROM global_variables ORDER BY variable_value DESC LIMIT {n}",
+        "SELECT variable_name, variable_value FROM global_variables ORDER BY variable_value DESC LIMIT {n}",
+        "SELECT COUNT(*) FROM global_variables WHERE variable_name LIKE 'mysql%%' LIMIT {n}",
+        "SELECT COUNT(*) FROM global_variables WHERE variable_name LIKE 'admin%%' LIMIT {n}",
+        "SELECT COUNT(*) FROM global_variables LIMIT {n}",
+        "SELECT variable_name FROM global_variables WHERE variable_value != '' LIMIT {n}",
+        "SELECT variable_value FROM global_variables WHERE variable_value != '' LIMIT {n}",
+        "SELECT variable_name FROM global_variables WHERE variable_name LIKE 'admin%%' ORDER BY variable_name LIMIT {n}",
+        "SELECT variable_value FROM global_variables WHERE variable_name LIKE 'admin%%' ORDER BY variable_name LIMIT {n}",
+        "SELECT variable_name, variable_value FROM global_variables WHERE variable_value != '' ORDER BY variable_name LIMIT {n}",
+    ]
+
+    # Server 2: connection-pool-style queries, each different
+    S2_TEMPLATES = [
+        "SELECT ConnUsed FROM stats_mysql_connection_pool LIMIT {n}",
+        "SELECT ConnFree FROM stats_mysql_connection_pool LIMIT {n}",
+        "SELECT ConnOK FROM stats_mysql_connection_pool LIMIT {n}",
+        "SELECT ConnERR FROM stats_mysql_connection_pool LIMIT {n}",
+        "SELECT MaxConnUsed FROM stats_mysql_connection_pool LIMIT {n}",
+        "SELECT Queries FROM stats_mysql_connection_pool LIMIT {n}",
+        "SELECT Bytes_data_sent FROM stats_mysql_connection_pool LIMIT {n}",
+        "SELECT ConnUsed, ConnFree FROM stats_mysql_connection_pool LIMIT {n}",
+        "SELECT ConnOK, ConnERR FROM stats_mysql_connection_pool LIMIT {n}",
+        "SELECT MaxConnUsed, Queries FROM stats_mysql_connection_pool LIMIT {n}",
+        "SELECT ConnUsed, ConnFree, ConnOK FROM stats_mysql_connection_pool LIMIT {n}",
+        "SELECT ConnERR, MaxConnUsed, Queries FROM stats_mysql_connection_pool LIMIT {n}",
+        "SELECT Bytes_data_sent, ConnUsed FROM stats_mysql_connection_pool LIMIT {n}",
+        "SELECT ConnUsed FROM stats_mysql_connection_pool ORDER BY ConnUsed LIMIT {n}",
+        "SELECT ConnFree FROM stats_mysql_connection_pool ORDER BY ConnFree LIMIT {n}",
+        "SELECT ConnOK FROM stats_mysql_connection_pool ORDER BY ConnOK LIMIT {n}",
+        "SELECT ConnERR FROM stats_mysql_connection_pool ORDER BY ConnERR LIMIT {n}",
+        "SELECT MaxConnUsed FROM stats_mysql_connection_pool ORDER BY MaxConnUsed LIMIT {n}",
+        "SELECT Queries FROM stats_mysql_connection_pool ORDER BY Queries LIMIT {n}",
+        "SELECT Bytes_data_sent FROM stats_mysql_connection_pool ORDER BY Bytes_data_sent LIMIT {n}",
+        "SELECT ConnUsed, ConnFree FROM stats_mysql_connection_pool ORDER BY ConnUsed DESC LIMIT {n}",
+        "SELECT ConnOK, ConnERR FROM stats_mysql_connection_pool ORDER BY ConnOK DESC LIMIT {n}",
+        "SELECT MaxConnUsed, Queries FROM stats_mysql_connection_pool ORDER BY Queries DESC LIMIT {n}",
+        "SELECT Bytes_data_sent FROM stats_mysql_connection_pool ORDER BY Bytes_data_sent DESC LIMIT {n}",
+        "SELECT ConnUsed, ConnFree, ConnOK, ConnERR FROM stats_mysql_connection_pool LIMIT {n}",
+        "SELECT ConnUsed, ConnFree, ConnOK, ConnERR, MaxConnUsed, Queries, Bytes_data_sent FROM stats_mysql_connection_pool LIMIT {n}",
+    ]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.pw = ProxyWebSession()
+        cls.pw.login()
+        # clear any pre-existing history on both servers
+        cls.pw.post_json("/api/clear_query_history", {"server": cls.S1})
+        cls.pw.post_json("/api/clear_query_history", {"server": cls.S2})
+
+    def _execute_query(self, server, sql):
+        """Submit a SELECT through the SQL form on the given server."""
+        return self.pw.post_form(
+            f"/{server}/{DATABASE}/global_variables/sql/",
+            data={"sql": sql},
+        )
+
+    def _get_dropdown_section(self, html):
+        """Extract the Query History dropdown HTML from a table page."""
+        return html.split('id="historyBtn"')[1].split('</ul>')[0]
+
+    def _get_history_table_section(self, html):
+        """Extract the history table body from the full query history page."""
+        if 'id="historyTable"' not in html:
+            return ""
+        return html.split('id="historyTable"')[1].split('</table>')[0]
+
+    def _count_dropdown_items(self, html):
+        """Count history_item links in the page."""
+        return len(re.findall(
+            r'onclick="loadQuery\(window\[\'history_item_\d+\'\]\)',
+            html,
+        ))
+
+    def _get_history_js_vars(self, html):
+        """Extract the full SQL strings from history_item JS variables."""
+        return re.findall(
+            r"window\['history_item_\d+'\]\s*=\s*\"(.*?)\"",
+            html,
+        )
+
+    def _get_history_limits(self, js_vars):
+        """Extract the LIMIT N numbers from history JS variable strings."""
+        limits = []
+        for sql in js_vars:
+            m = re.search(r'LIMIT (\d+)$', sql)
+            if m:
+                limits.append(int(m.group(1)))
+        return limits
+
+    def test_query_history_both_servers(self):
+        """Execute 26 distinct queries on each server, verify dropdown
+        and full history page per server, then clear and verify isolation."""
+
+        # --- execute 26 distinct queries on server 1 ----------------------
+        for n in range(1, self.TOTAL_PER_SERVER + 1):
+            sql = self.S1_TEMPLATES[n - 1].format(n=n)
+            resp = self._execute_query(self.S1, sql)
+            self.assertEqual(resp.status_code, 200,
+                             f"S1 query {n} HTTP failed: {resp.status_code}")
+            self.assertNotIn("Query Error", resp.text,
+                             f"S1 query {n} returned an error")
+
+        # --- execute 26 distinct queries on server 2 ----------------------
+        for n in range(1, self.TOTAL_PER_SERVER + 1):
+            sql = self.S2_TEMPLATES[n - 1].format(n=n)
+            resp = self._execute_query(self.S2, sql)
+            self.assertEqual(resp.status_code, 200,
+                             f"S2 query {n} HTTP failed: {resp.status_code}")
+            self.assertNotIn("Query Error", resp.text,
+                             f"S2 query {n} returned an error")
+
+        # === Server 1 checks =============================================
+
+        # -- dropdown: should show last 10 of 26 (queries 17..26) ----------
+        resp = self.pw.get(f"/{self.S1}/{DATABASE}/global_variables/")
+        s1_html = resp.text
+        self.assertEqual(self._count_dropdown_items(s1_html), 10,
+                         "S1 dropdown should have exactly 10 items")
+
+        # Check full SQL via JS variables (dropdown display is truncated)
+        s1_js_vars = self._get_history_js_vars(s1_html)
+        s1_limits = self._get_history_limits(s1_js_vars)
+        # last 10 should be present (LIMIT 17 through LIMIT 26)
+        for n in range(self.TOTAL_PER_SERVER - 9, self.TOTAL_PER_SERVER + 1):
+            self.assertIn(n, s1_limits,
+                          f"S1 dropdown missing LIMIT {n}")
+        # oldest 16 should NOT be in dropdown
+        for n in range(1, self.TOTAL_PER_SERVER - 9):
+            self.assertNotIn(n, s1_limits,
+                             f"S1 dropdown should not contain LIMIT {n}")
+
+        # -- S1 dropdown must NOT contain S2-specific text -----------------
+        s1_js_text = "\n".join(s1_js_vars)
+        self.assertNotIn("stats_mysql_connection_pool", s1_js_text,
+                         "S1 dropdown leaks S2 queries")
+
+        # -- full history page: all 26 ------------------------------------
+        resp = self.pw.get(f"/{self.S1}/query_history/")
+        s1_full = resp.text
+        s1_table = self._get_history_table_section(s1_full)
+        self.assertIn("26 queries", s1_full,
+                       "S1 full history should show '26 queries'")
+        for n in range(1, self.TOTAL_PER_SERVER + 1):
+            self.assertRegex(s1_table, rf'LIMIT {n}\b',
+                             f"S1 full history missing LIMIT {n}")
+        # S2 queries must not appear on S1 full history table
+        self.assertNotIn("stats_mysql_connection_pool", s1_table,
+                         "S1 full history leaks S2 queries")
+
+        # === Server 2 checks =============================================
+
+        # -- dropdown: should show last 10 of 26 (queries 17..26) ----------
+        resp = self.pw.get(f"/{self.S2}/{DATABASE}/global_variables/")
+        s2_html = resp.text
+        self.assertEqual(self._count_dropdown_items(s2_html), 10,
+                         "S2 dropdown should have exactly 10 items")
+
+        s2_js_vars = self._get_history_js_vars(s2_html)
+        s2_limits = self._get_history_limits(s2_js_vars)
+        for n in range(self.TOTAL_PER_SERVER - 9, self.TOTAL_PER_SERVER + 1):
+            self.assertIn(n, s2_limits,
+                          f"S2 dropdown missing LIMIT {n}")
+        for n in range(1, self.TOTAL_PER_SERVER - 9):
+            self.assertNotIn(n, s2_limits,
+                             f"S2 dropdown should not contain LIMIT {n}")
+
+        # -- S2 dropdown must NOT contain S1-specific text -----------------
+        s2_js_text = "\n".join(s2_js_vars)
+        self.assertNotIn("global_variables", s2_js_text,
+                         "S2 dropdown leaks S1 queries")
+
+        # -- full history page: all 26 ------------------------------------
+        resp = self.pw.get(f"/{self.S2}/query_history/")
+        s2_full = resp.text
+        s2_table = self._get_history_table_section(s2_full)
+        self.assertIn("26 queries", s2_full,
+                       "S2 full history should show '26 queries'")
+        for n in range(1, self.TOTAL_PER_SERVER + 1):
+            self.assertRegex(s2_table, rf'LIMIT {n}\b',
+                             f"S2 full history missing LIMIT {n}")
+        self.assertNotIn("global_variables", s2_table,
+                         "S2 full history leaks S1 queries")
+
+        # === Clear server 1, verify server 2 is untouched ================
+        clear_resp = self.pw.post_json(
+            "/api/clear_query_history", {"server": self.S1}
+        )
+        self.assertTrue(clear_resp.json().get("success"))
+
+        # S1 should be empty
+        resp = self.pw.get(f"/{self.S1}/query_history/")
+        self.assertIn("No query history", resp.text)
+        self.assertIn("0 queries", resp.text)
+
+        resp = self.pw.get(f"/{self.S1}/{DATABASE}/global_variables/")
+        s1_dropdown = self._get_dropdown_section(resp.text)
+        self.assertIn("No queries yet", s1_dropdown)
+
+        # S2 should still have all its queries
+        resp = self.pw.get(f"/{self.S2}/query_history/")
+        self.assertIn("26 queries", resp.text,
+                       "S2 history should survive S1 clear")
+
+        # === Clean up: clear server 2 too ================================
+        self.pw.post_json("/api/clear_query_history", {"server": self.S2})
+        resp = self.pw.get(f"/{self.S2}/query_history/")
+        self.assertIn("No query history", resp.text)
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------

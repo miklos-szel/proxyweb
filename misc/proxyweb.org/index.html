@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ProxyWeb – Web Interface for ProxySQL Management and Monitoring</title>
+  <meta name="description" content="ProxyWeb is a lightweight, open-source web UI for managing and monitoring ProxySQL. Browse tables, edit inline, run SQL, compare configs, and manage multiple servers." />
+  <meta name="keywords" content="ProxyWeb, ProxySQL UI, ProxySQL web interface, manage ProxySQL, MySQL load balancer, ProxySQL admin tool, ProxySQL dashboard" />
+  <meta name="author" content="Miklós Szel" />
+  <link rel="canonical" href="https://proxyweb.org" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #fafbfc;
+      --surface: #ffffff;
+      --text: #1a1e2c;
+      --text-secondary: #5a6178;
+      --accent: #2563eb;
+      --accent-soft: #eff4ff;
+      --border: #e2e5ed;
+      --border-light: #f0f2f5;
+      --code-bg: #f4f5f8;
+      --mono: 'IBM Plex Mono', monospace;
+      --sans: 'Manrope', system-ui, sans-serif;
+      --radius: 10px;
+      --max-w: 1080px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--sans);
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ---- NAV ---- */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(250, 251, 252, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .nav-inner {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 0 2rem;
+      height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .nav-logo {
+      font-weight: 800;
+      font-size: 1.15rem;
+      color: var(--text);
+      text-decoration: none;
+      letter-spacing: -0.02em;
+    }
+
+    .nav-logo span { color: var(--accent); }
+
+    .nav-links { display: flex; gap: 1.75rem; align-items: center; }
+
+    .nav-links a {
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+
+    .nav-links a:hover { color: var(--text); }
+
+    .nav-links .btn-nav {
+      background: var(--text);
+      color: #fff;
+      padding: 0.45rem 1.1rem;
+      border-radius: 6px;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      transition: opacity 0.15s;
+    }
+
+    .nav-links .btn-nav:hover { opacity: 0.85; color: #fff; }
+
+    /* ---- HERO ---- */
+    .hero {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 5rem 2rem 3rem;
+      text-align: center;
+    }
+
+    .hero-badge {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 0.3rem 0.85rem;
+      border-radius: 20px;
+      margin-bottom: 1.5rem;
+      letter-spacing: 0.01em;
+    }
+
+    .hero h1 {
+      font-size: clamp(2.25rem, 5vw, 3.25rem);
+      font-weight: 800;
+      letter-spacing: -0.035em;
+      line-height: 1.15;
+      margin-bottom: 1.25rem;
+      color: var(--text);
+    }
+
+    .hero p {
+      font-size: 1.125rem;
+      color: var(--text-secondary);
+      max-width: 620px;
+      margin: 0 auto 2.5rem;
+      line-height: 1.7;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 0.75rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 3.5rem;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-family: var(--sans);
+      font-size: 0.9rem;
+      font-weight: 600;
+      padding: 0.7rem 1.5rem;
+      border-radius: 8px;
+      text-decoration: none;
+      transition: all 0.15s;
+      border: none;
+      cursor: pointer;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .btn-primary:hover { background: #1d4ed8; }
+
+    .btn-secondary {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover { border-color: #c8cdd8; background: var(--bg); }
+
+    .install-cmd {
+      font-family: var(--mono);
+      font-size: 0.8125rem;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.6rem 1.25rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: var(--text);
+      margin-bottom: 0.75rem;
+    }
+
+    .install-cmd .prompt {
+      user-select: none;
+      color: var(--text-secondary);
+      font-weight: 700;
+    }
+
+    .install-cmd .copy-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 0.2rem;
+      margin-left: 0.25rem;
+      color: var(--text-secondary);
+      border-radius: 4px;
+      display: inline-flex;
+      align-items: center;
+      transition: color 0.15s, background 0.15s;
+    }
+
+    .install-cmd .copy-btn:hover {
+      color: var(--text);
+      background: var(--border-light);
+    }
+
+    .install-cmd .copy-btn svg { display: block; }
+
+    .install-hint {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      margin-bottom: 3.5rem;
+    }
+
+    /* ---- HERO IMAGE ---- */
+    .hero-image {
+      max-width: 100%;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow:
+        0 1px 3px rgba(0,0,0,0.04),
+        0 8px 32px rgba(0,0,0,0.06);
+      overflow: hidden;
+    }
+
+    .hero-image img {
+      width: 100%;
+      display: block;
+    }
+
+    /* ---- FEATURES ---- */
+    .features {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 5rem 2rem;
+    }
+
+    .features-header {
+      text-align: center;
+      margin-bottom: 3.5rem;
+    }
+
+    .features-header h2 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      margin-bottom: 0.75rem;
+    }
+
+    .features-header p {
+      color: var(--text-secondary);
+      max-width: 480px;
+      margin: 0 auto;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.25rem;
+    }
+
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius);
+      padding: 1.75rem;
+      transition: border-color 0.2s;
+    }
+
+    .feature-card:hover { border-color: var(--border); }
+
+    .feature-label {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--accent);
+      margin-bottom: 0.6rem;
+    }
+
+    .feature-card h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      letter-spacing: -0.01em;
+    }
+
+    .feature-card p {
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    /* ---- SCREENSHOTS ---- */
+    .screenshots {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 2rem 2rem 5rem;
+    }
+
+    .screenshots-header {
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+
+    .screenshots-header h2 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      margin-bottom: 0.75rem;
+    }
+
+    .screenshots-header p {
+      color: var(--text-secondary);
+      max-width: 480px;
+      margin: 0 auto;
+    }
+
+    .screenshots-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+
+    .screenshot-item {
+      background: var(--surface);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius);
+      overflow: hidden;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .screenshot-item:hover {
+      border-color: var(--border);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.05);
+    }
+
+    .screenshot-item img {
+      width: 100%;
+      display: block;
+    }
+
+    .screenshot-caption {
+      padding: 1rem 1.25rem;
+      border-top: 1px solid var(--border-light);
+    }
+
+    .screenshot-caption h4 {
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+    }
+
+    .screenshot-caption p {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    /* ---- QUICKSTART ---- */
+    .quickstart {
+      background: var(--surface);
+      border-top: 1px solid var(--border-light);
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .quickstart-inner {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 5rem 2rem;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4rem;
+      align-items: start;
+    }
+
+    .quickstart h2 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      margin-bottom: 0.75rem;
+    }
+
+    .quickstart > div > p {
+      color: var(--text-secondary);
+      margin-bottom: 1.5rem;
+      line-height: 1.7;
+    }
+
+    .cred-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+      margin-top: 1.5rem;
+    }
+
+    .cred-table th {
+      text-align: left;
+      font-weight: 600;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 2px solid var(--border);
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-secondary);
+    }
+
+    .cred-table td {
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .cred-table code {
+      font-family: var(--mono);
+      font-size: 0.8125rem;
+      background: var(--code-bg);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+    }
+
+    .code-block {
+      background: #1a1e2c;
+      color: #d4d8e8;
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      font-family: var(--mono);
+      font-size: 0.8125rem;
+      line-height: 1.8;
+      overflow-x: auto;
+    }
+
+    .code-block .comment { color: #636a82; }
+    .code-block .cmd { color: #93c5fd; }
+    .code-block .flag { color: #86efac; }
+    .code-block .string { color: #fcd34d; }
+
+    /* ---- ENV VARS ---- */
+    .envvars {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 5rem 2rem;
+    }
+
+    .envvars-header {
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+
+    .envvars-header h2 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      margin-bottom: 0.75rem;
+    }
+
+    .envvars-header p {
+      color: var(--text-secondary);
+      max-width: 520px;
+      margin: 0 auto;
+    }
+
+    .env-columns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+
+    .env-group {
+      background: var(--surface);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius);
+      padding: 1.75rem;
+    }
+
+    .env-group h3 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+      letter-spacing: -0.01em;
+    }
+
+    .env-group table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8125rem;
+    }
+
+    .env-group th {
+      text-align: left;
+      font-weight: 600;
+      padding: 0.4rem 0;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-secondary);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .env-group td {
+      padding: 0.45rem 0;
+      border-bottom: 1px solid var(--border-light);
+      vertical-align: top;
+    }
+
+    .env-group td code {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      background: var(--code-bg);
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+      word-break: break-all;
+    }
+
+    .env-note {
+      margin-top: 1.5rem;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      background: var(--code-bg);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      line-height: 1.6;
+      text-align: center;
+    }
+
+    .env-note code {
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      background: var(--surface);
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+    }
+
+    /* ---- FOOTER ---- */
+    footer {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 3rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.825rem;
+      color: var(--text-secondary);
+      border-top: 1px solid var(--border-light);
+    }
+
+    footer a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+
+    footer a:hover { color: var(--text); }
+
+    .footer-links { display: flex; gap: 1.5rem; }
+
+    /* ---- RESPONSIVE ---- */
+    @media (max-width: 768px) {
+      .features-grid { grid-template-columns: 1fr; }
+      .screenshots-grid { grid-template-columns: 1fr; }
+      .quickstart-inner { grid-template-columns: 1fr; gap: 2.5rem; }
+      .env-columns { grid-template-columns: 1fr; }
+      .hero { padding: 3rem 1.5rem 2rem; }
+      .nav-links a:not(.btn-nav) { display: none; }
+      footer { flex-direction: column; gap: 1rem; text-align: center; }
+    }
+
+    /* ---- FADE IN ---- */
+    .fade-up {
+      opacity: 0;
+      transform: translateY(16px);
+      animation: fadeUp 0.5s ease forwards;
+    }
+
+    @keyframes fadeUp {
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .fade-up:nth-child(2) { animation-delay: 0.05s; }
+    .fade-up:nth-child(3) { animation-delay: 0.1s; }
+    .fade-up:nth-child(4) { animation-delay: 0.15s; }
+    .fade-up:nth-child(5) { animation-delay: 0.2s; }
+    .fade-up:nth-child(6) { animation-delay: 0.25s; }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <div class="nav-inner">
+      <a href="/" class="nav-logo">Proxy<span>Web</span></a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#quickstart">Setup</a>
+        <a href="#config">Config</a>
+        <a href="https://github.com/miklos-szel/proxyweb" target="_blank" rel="noopener noreferrer" class="btn-nav">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-badge">Open Source &middot; GPL-3.0</div>
+    <h1>A web interface for<br>ProxySQL management</h1>
+    <p>
+      Browse tables, edit rows inline, run SQL queries, compare Disk/Memory/Runtime configs, and manage multiple ProxySQL instances &mdash; all from your browser.
+    </p>
+
+    <div class="hero-actions">
+      <a href="https://github.com/miklos-szel/proxyweb" target="_blank" rel="noopener noreferrer" class="btn btn-primary">View on GitHub</a>
+      <a href="#quickstart" class="btn btn-secondary">Quick Start</a>
+    </div>
+
+    <div class="install-cmd">
+      <span class="prompt">$</span>
+      <span class="cmd-text">docker run -h proxyweb --name proxyweb -p 5000:5000 -d proxyweb/proxyweb:latest</span>
+      <button class="copy-btn" onclick="copyCmd(this)" title="Copy to clipboard">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/>
+          <path d="M10.5 5.5V3.5a1.5 1.5 0 0 0-1.5-1.5H3.5A1.5 1.5 0 0 0 2 3.5V9a1.5 1.5 0 0 0 1.5 1.5h2"/>
+        </svg>
+      </button>
+    </div>
+    <div class="install-hint">Then open http://&lt;your-ip&gt;:5000 in your browser</div>
+
+    <div class="hero-image">
+      <img
+        src="https://raw.githubusercontent.com/miklos-szel/proxyweb/main/misc/images/table_browser.png"
+        alt="ProxyWeb table browser with pagination, search, and database navigation"
+        loading="lazy"
+      />
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section class="features" id="features">
+    <div class="features-header">
+      <h2>Everything you need to manage ProxySQL</h2>
+      <p>Full control over servers, users, query rules, and variables through one interface.</p>
+    </div>
+
+    <div class="features-grid">
+      <div class="feature-card fade-up">
+        <div class="feature-label">Core</div>
+        <h3>Multi-server management</h3>
+        <p>Switch between ProxySQL instances from the nav bar. Each server maintains its own connection and configuration.</p>
+      </div>
+
+      <div class="feature-card fade-up">
+        <div class="feature-label">Core</div>
+        <h3>Table browser</h3>
+        <p>View, search, sort, and paginate any ProxySQL table. Insert, update, and delete rows directly with inline editing.</p>
+      </div>
+
+      <div class="feature-card fade-up">
+        <div class="feature-label">Core</div>
+        <h3>SQL query editor</h3>
+        <p>Run ad-hoc queries with a built-in editor. Quick-query menu provides shortcuts for common operations like adding servers or users.</p>
+      </div>
+
+      <div class="feature-card fade-up">
+        <div class="feature-label">Operations</div>
+        <h3>Config diff</h3>
+        <p>Compare Disk, Memory, and Runtime layers side by side. Spot configuration drift across all ProxySQL tables at a glance.</p>
+      </div>
+
+      <div class="feature-card fade-up">
+        <div class="feature-label">Security</div>
+        <h3>Role-based access</h3>
+        <p>Separate admin and read-only users. Read-only users can browse and query but cannot modify data or access settings.</p>
+      </div>
+
+      <div class="feature-card fade-up">
+        <div class="feature-label">Operations</div>
+        <h3>Environment overrides</h3>
+        <p>Inject credentials and DSN settings via environment variables. No need to bake secrets into config files.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- SCREENSHOTS -->
+  <section class="screenshots">
+    <div class="screenshots-header">
+      <h2>See it in action</h2>
+      <p>Purpose-built views for the tasks you do most.</p>
+    </div>
+
+    <div class="screenshots-grid">
+      <div class="screenshot-item">
+        <img
+          src="https://raw.githubusercontent.com/miklos-szel/proxyweb/main/misc/images/config_diff.png"
+          alt="ProxyWeb config diff — comparing Disk, Memory, and Runtime layers"
+          loading="lazy"
+        />
+        <div class="screenshot-caption">
+          <h4>Config diff</h4>
+          <p>Compare all three ProxySQL config layers. Differences are highlighted per-table with sync status and one-click load/save actions.</p>
+        </div>
+      </div>
+
+      <div class="screenshot-item">
+        <img
+          src="https://raw.githubusercontent.com/miklos-szel/proxyweb/main/misc/images/sql_editor.png"
+          alt="ProxyWeb SQL editor with quick query shortcuts"
+          loading="lazy"
+        />
+        <div class="screenshot-caption">
+          <h4>SQL editor with quick queries</h4>
+          <p>Run any SQL against ProxySQL's admin interface. The quick-query menu provides categorized shortcuts for common insert and update operations.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- QUICKSTART -->
+  <section class="quickstart" id="quickstart">
+    <div class="quickstart-inner">
+      <div>
+        <h2>Get started in seconds</h2>
+        <p>
+          Run the Docker image, open your browser, and connect to ProxySQL.
+          Also available as a systemd service for bare-metal installs.
+        </p>
+
+        <table class="cred-table">
+          <thead>
+            <tr><th>Role</th><th>Username</th><th>Password</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Admin</td><td><code>admin</code></td><td><code>admin42</code></td></tr>
+            <tr><td>Read-only</td><td><code>readonly</code></td><td><code>readonly42</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div>
+        <div class="code-block">
+          <span class="comment"># Docker — same host as ProxySQL</span><br>
+          <span class="cmd">docker run</span> <span class="flag">-h</span> proxyweb <span class="flag">--name</span> proxyweb \<br>
+          &nbsp;&nbsp;<span class="flag">--network=</span><span class="string">"host"</span> <span class="flag">-d</span> proxyweb/proxyweb:latest<br>
+          <br>
+          <span class="comment"># Docker — remote ProxySQL</span><br>
+          <span class="cmd">docker run</span> <span class="flag">-h</span> proxyweb <span class="flag">--name</span> proxyweb \<br>
+          &nbsp;&nbsp;<span class="flag">-p</span> 5000:5000 <span class="flag">-d</span> proxyweb/proxyweb:latest<br>
+          <br>
+          <span class="comment"># Systemd (Ubuntu)</span><br>
+          <span class="cmd">git clone</span> https://github.com/miklos-szel/proxyweb<br>
+          <span class="cmd">cd</span> proxyweb && <span class="cmd">make</span> install
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ENV VARS -->
+  <section class="envvars" id="config">
+    <div class="envvars-header">
+      <h2>Configuration</h2>
+      <p>Override any sensitive value via environment variables — no file editing required.</p>
+    </div>
+
+    <div class="env-columns">
+      <div class="env-group">
+        <h3>Web UI credentials</h3>
+        <table>
+          <thead><tr><th>Variable</th><th>Overrides</th></tr></thead>
+          <tbody>
+            <tr><td><code>PROXYWEB_ADMIN_USER</code></td><td><code>auth.admin_user</code></td></tr>
+            <tr><td><code>PROXYWEB_ADMIN_PASSWORD</code></td><td><code>auth.admin_password</code></td></tr>
+            <tr><td><code>PROXYWEB_READONLY_USER</code></td><td><code>auth.readonly_user</code></td></tr>
+            <tr><td><code>PROXYWEB_READONLY_PASSWORD</code></td><td><code>auth.readonly_password</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="env-group">
+        <h3>Per-server DSN</h3>
+        <table>
+          <thead><tr><th>Variable pattern</th><th>Overrides</th></tr></thead>
+          <tbody>
+            <tr><td><code>PROXYWEB_SERVER_&lt;NAME&gt;_USER</code></td><td><code>dsn.user</code></td></tr>
+            <tr><td><code>PROXYWEB_SERVER_&lt;NAME&gt;_PASSWORD</code></td><td><code>dsn.passwd</code></td></tr>
+            <tr><td><code>PROXYWEB_SERVER_&lt;NAME&gt;_HOST</code></td><td><code>dsn.host</code></td></tr>
+            <tr><td><code>PROXYWEB_SERVER_&lt;NAME&gt;_PORT</code></td><td><code>dsn.port</code></td></tr>
+            <tr><td><code>PROXYWEB_SERVER_&lt;NAME&gt;_DATABASE</code></td><td><code>dsn.db</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="env-note">
+      In Docker, place variables in <code>/app/.env</code> or set <code>PROXYWEB_ENV_FILE</code> to a custom path.
+      The entrypoint loads it automatically.
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <span>ProxyWeb &middot; Open-source ProxySQL management</span>
+    <div class="footer-links">
+      <a href="https://github.com/miklos-szel/proxyweb" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href="https://github.com/miklos-szel/proxyweb/issues" target="_blank" rel="noopener noreferrer">Issues</a>
+      <a href="mailto:contact@miklos-szel.com">Contact</a>
+    </div>
+  </footer>
+
+  <script>
+    function copyCmd(btn) {
+      var text = btn.parentElement.querySelector('.cmd-text').textContent;
+      var svg = btn.innerHTML;
+      navigator.clipboard.writeText(text).then(function() {
+        btn.innerHTML = '<span style="font-size:0.75rem;font-weight:500">Copied!</span>';
+        setTimeout(function() { btn.innerHTML = svg; }, 1500);
+      }).catch(function() {
+        btn.innerHTML = '<span style="font-size:0.75rem;font-weight:500">Failed</span>';
+        setTimeout(function() { btn.innerHTML = svg; }, 1500);
+      });
+    }
+  </script>
+</body>
+</html>
