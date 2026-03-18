@@ -2525,6 +2525,39 @@ class TestQueryHistory(unittest.TestCase):
         resp = self.pw.get(f"/{self.S2}/query_history/")
         self.assertIn("No query history", resp.text)
 
+    def test_clear_query_history_malformed_json(self):
+        """Sending an empty or malformed JSON body to clear_query_history
+        should return a controlled error, not a 500."""
+        # Empty body with JSON content type
+        resp = self.pw.session.post(
+            f"{BASE_URL}/api/clear_query_history",
+            data="",
+            headers={
+                "Content-Type": "application/json",
+                "X-CSRF-Token": self.pw.csrf_token,
+            },
+            timeout=10,
+        )
+        self.assertNotEqual(resp.status_code, 500,
+                            "Empty body should not cause a 500")
+        self.assertIn(resp.status_code, (400, 403),
+                      "Expected 400 or 403 for empty body")
+
+        # Malformed JSON
+        resp = self.pw.session.post(
+            f"{BASE_URL}/api/clear_query_history",
+            data="{bad json",
+            headers={
+                "Content-Type": "application/json",
+                "X-CSRF-Token": self.pw.csrf_token,
+            },
+            timeout=10,
+        )
+        self.assertNotEqual(resp.status_code, 500,
+                            "Malformed JSON should not cause a 500")
+        self.assertIn(resp.status_code, (400, 403),
+                      "Expected 400 or 403 for malformed JSON")
+
 
 # ---------------------------------------------------------------------------
 # Entry point
