@@ -827,7 +827,8 @@ def api_clear_query_history():
     Returns:
     	JSON object indicating success or error. On success: {'success': True}. On invalid server: {'success': False, 'error': 'Invalid server'} with HTTP 400. If the caller or server is read-only: aborts with HTTP 403.
     """
-    server = request.json.get('server', session.get('server'))
+    data = request.get_json(silent=True) or {}
+    server = data.get('server', session.get('server'))
     if server not in mdb.get_servers():
         return jsonify({'success': False, 'error': 'Invalid server'}), 400
     if mdb.get_read_only(server) or session.get('role') == 'readonly':
