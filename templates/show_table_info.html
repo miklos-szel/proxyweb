@@ -672,7 +672,7 @@ window['{{ item }}_info_{{ loop.index }}'] = {{ subitem['info']|tojson }};
 
 // Define history query variables
 {% if session['history'] and session['history']|length > 0 %}
-{% for item in session['history'][:10]|reverse %}
+{% for item in session['history'][-10:]|reverse %}
 window['history_item_{{ loop.index }}'] = {{ item|tojson }};
 {% endfor %}
 {% endif %}

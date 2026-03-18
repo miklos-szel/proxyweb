@@ -781,7 +781,8 @@ def query_history(server):
 @app.route('/api/clear_query_history', methods=['POST'])
 @login_required
 def api_clear_query_history():
-    server = request.json.get('server', session.get('server'))
+    data = request.get_json(silent=True) or {}
+    server = data.get('server', session.get('server'))
     if server not in mdb.get_servers():
         return jsonify({'success': False, 'error': 'Invalid server'}), 400
     if mdb.get_read_only(server) or session.get('role') == 'readonly':
