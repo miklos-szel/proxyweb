@@ -89,8 +89,12 @@ def load_query_history(server, limit=None):
     path = os.path.join(HISTORY_DIR, f'{server}.json')
     if not os.path.exists(path):
         return []
-    with open(path, 'r') as f:
-        history = json.load(f)
+    try:
+        with open(path, 'r') as f:
+            history = json.load(f)
+    except (json.JSONDecodeError, ValueError):
+        logging.warning(f"Corrupted history file for server '{server}', resetting")
+        return []
     if limit:
         return history[-limit:]
     return history
