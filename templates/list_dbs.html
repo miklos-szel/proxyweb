@@ -185,6 +185,11 @@
                                 <i class="fas fa-chart-line me-2"></i>ProxySQL Report
                             </a>
                         </li>
+                        <li>
+                            <a class="dropdown-item" href="/{{ session['server'] }}/query_history/">
+                                <i class="fas fa-history me-2"></i>Full Query History
+                            </a>
+                        </li>
                         {% if session.get('role') != 'readonly' %}
                         <li><hr class="dropdown-divider"></li>
                         <li>

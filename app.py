@@ -190,6 +190,17 @@ def logout():
 @app.route('/')
 @login_required
 def render_list_dbs():
+    """
+    Render the main database/table listing page and populate session state with server and UI metadata.
+    
+    Attempts to load the default ProxySQL server; if none is configured and the current session role is 'readonly' returns an error page with HTTP 503, otherwise flashes a warning and redirects to the settings edit page. On success, updates session keys: 'server' (selected server), 'dblist' (databases and tables), 'servers' (available servers), 'read_only' (boolean), 'misc' (misc config), and 'history' (list of up to 10 recent SQL statements), then renders the 'list_dbs.html' template for the selected server.
+    
+    Returns:
+        A Flask response — either the rendered list_dbs page, a redirect to the settings edit view, or the error page with status 503.
+    
+    Raises:
+        ValueError: Re-raises unexpected exceptions wrapped as ValueError.
+    """
     try:
         server = mdb.get_default_server()
     except ValueError:
@@ -198,7 +209,6 @@ def render_list_dbs():
         flash('No servers configured. Please add one below.', 'warning')
         return redirect(url_for('render_settings', action='edit'))
     try:
-        session['history'] = []
         session['server'] = server
         session['dblist'] = mdb.get_all_dbs_and_tables(db, server)
         session['servers'] = mdb.get_servers()
@@ -206,6 +216,8 @@ def render_list_dbs():
         if session.get('role') == 'readonly':
             session['read_only'] = True
         session['misc'] = mdb.get_config(config)['misc']
+        recent = mdb.load_query_history(server, limit=10)
+        session['history'] = [e['sql'] for e in recent]
 
         return render_template("list_dbs.html", server=server)
     except Exception as e:
@@ -215,6 +227,22 @@ def render_list_dbs():
 @app.route('/<server>/<database>/<table>/')
 @login_required
 def render_show_table_content(server, database="main", table="global_variables"):
+    """
+    Render the table view for a given server/database/table and update session context.
+    
+    Updates session state (servers, server, dblist, history, table, database, misc, read_only) and loads the requested table's content, then renders the "show_table_info.html" template populated with that content.
+    
+    Parameters:
+        server (str): Identifier of the ProxySQL server to use.
+        database (str): Database name to display; defaults to "main".
+        table (str): Table name to display; defaults to "global_variables".
+    
+    Returns:
+        str: Rendered HTML of the table view.
+    
+    Raises:
+        ValueError: If any underlying operation (data loading, processing, or rendering) fails.
+    """
     try:
         # refresh the tablelist if changing to a new server
 
@@ -223,6 +251,8 @@ def render_show_table_content(server, database="main", table="global_variables")
 
         session['servers'] = mdb.get_servers()
         session['server'] = server
+        recent = mdb.load_query_history(server, limit=10)
+        session['history'] = [e['sql'] for e in recent]
         session['table'] = table
         session['database'] = database
         session['misc'] = mdb.get_config(config)['misc']
@@ -239,15 +269,15 @@ def render_show_table_content(server, database="main", table="global_variables")
 @login_required
 def render_change(server, database, table):
     """
-    Handle ad-hoc SQL submitted from the table view: execute SELECT queries or data-changing statements, update request history, and render the table view with results.
+    Process an ad-hoc SQL statement submitted from the table view and render the table view with results.
     
-    Executes the SQL from the submitted form. If the statement is a SELECT, runs it as an adhoc query and returns its result; otherwise executes the change and refreshes the table content. Updates session history with non-duplicate successful statements and sets an error or success message for rendering.
+    Executes the submitted SQL: runs SELECT statements as queries and executes non-SELECT statements as changes. Updates session['sql']; when a non-SELECT statement succeeds and is not already present, appends it to the per-server query history stored in session and persists the entry. Read-only users are prevented from executing non-SELECT statements; in that case the current table content is rendered with an error message.
     
     Returns:
-        Rendered HTML for "show_table_info.html" containing `content`, `error`, and `message`.
+        Rendered HTML for the table view (`show_table_info.html`) with `content`, `error`, and `message` provided to the template.
     
     Raises:
-        ValueError: If any unexpected exception occurs during processing.
+        ValueError: If an unexpected exception occurs during processing.
     """
     try:
         error = ""
@@ -275,6 +305,7 @@ def render_change(server, database, table):
             message = "Success"
         if session['sql'].replace("\r\n","") not in session['history'] and not error:
             session['history'].append(session['sql'].replace("\r\n",""))
+            mdb.append_query_history(server, session['sql'].replace("\r\n",""), session.get('role', 'admin'))
 
         return render_template("show_table_info.html", content=content, error=error, message=message)
     except Exception as e:
@@ -757,16 +788,68 @@ def api_execute_proxysql_command():
         return jsonify({'success': False, 'error': str(e)})
 
 
+@app.route('/<server>/query_history/')
+@login_required
+def query_history(server):
+    """
+    Render the query history page for the specified ProxySQL server.
+    
+    Loads server context (servers list, databases/tables, misc config, and read-only flag), retrieves recent query history for the server, and renders the query_history.html template with that history.
+    
+    Parameters:
+        server (str): Identifier of the ProxySQL server whose query history to display.
+    
+    Returns:
+        A Flask response rendering the `query_history.html` template with the server and its reversed history list.
+    """
+    session['server'] = server
+    session['servers'] = mdb.get_servers()
+    if server not in session.get('dblist', {}):
+        session['dblist'] = session.get('dblist', {})
+        session['dblist'].update(mdb.get_all_dbs_and_tables(db, server))
+    session['misc'] = mdb.get_config(config)['misc']
+    session['read_only'] = mdb.get_read_only(server)
+    if session.get('role') == 'readonly':
+        session['read_only'] = True
+    history = mdb.load_query_history(server)
+    history.reverse()
+    return render_template("query_history.html", server=server, history=history)
+
+
+@app.route('/api/clear_query_history', methods=['POST'])
+@login_required
+def api_clear_query_history():
+    """
+    Clear the saved query history for a ProxySQL server and reset the in-session history.
+    
+    Validates the provided server (from JSON 'server' field or session) and enforces that the server exists and the caller is not read-only. On success, clears the server's persisted query history via mdb.clear_query_history and sets session['history'] to an empty list.
+    
+    Returns:
+    	JSON object indicating success or error. On success: {'success': True}. On invalid server: {'success': False, 'error': 'Invalid server'} with HTTP 400. If the caller or server is read-only: aborts with HTTP 403.
+    """
+    data = request.get_json(silent=True) or {}
+    server = data.get('server', session.get('server'))
+    if server not in mdb.get_servers():
+        return jsonify({'success': False, 'error': 'Invalid server'}), 400
+    if mdb.get_read_only(server) or session.get('role') == 'readonly':
+        abort(403)
+    mdb.clear_query_history(server)
+    session['history'] = []
+    return jsonify({'success': True})
+
+
 @app.errorhandler(Exception)
 def handle_exception(e):
     """
     Render an error page for an exception.
-
+    
+    If the exception is an instance of werkzeug.exceptions.HTTPException, return its HTTP response directly; otherwise log the exception and render "error.html" with the exception passed as `error`, returning an HTTP 500 status.
+    
     Parameters:
-        e (Exception): The exception to display on the error page; passed to the template as `error`.
-
+        e (Exception): The exception to handle and display in the error template.
+    
     Returns:
-        tuple: A rendered error page response and the HTTP status code 500.
+        tuple or Response: The rendered error page and HTTP status code 500, or the HTTPException's response object.
     """
     from werkzeug.exceptions import HTTPException
     if isinstance(e, HTTPException):

@@ -131,6 +131,7 @@ All templates extend `base.html`. Key templates:
 - `show_adhoc_report.html` — results from SELECT queries and predefined adhoc reports
 - `settings.html` — raw YAML editor and structured UI editor for `config.yml`
 - `config_diff.html` — shows differences between ProxySQL Disk/Memory/Runtime configs
+- `query_history.html` — full query history page per server with DataTables, copy, and clear
 
 ### Integration Test Stack (`test/`)
 
@@ -178,3 +179,4 @@ Rules:
 | readonly user must not modify data, access settings, execute LOAD/SAVE, or run non-SELECT SQL; can browse tables, view config diff, use SQL editor for SELECTs | `TestReadOnlyUser` |
 | login page should show default credentials hint when passwords are at defaults; hint disappears after changing passwords | `TestDefaultCredentialsHint` |
 | `render_list_dbs` crashes with ValueError when `servers:` is empty; admin should be redirected to settings, readonly gets error page | `TestNoServersRedirect` |
+| persistent per-server query history: isolation between servers, dropdown shows last 10, full page shows all, clear per server | `TestQueryHistory` |

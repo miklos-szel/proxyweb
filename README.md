@@ -14,6 +14,7 @@ ProxyWeb gives you full control over ProxySQL through a clean web interface — 
 - **Table browser** — view, search, sort, and paginate any ProxySQL table
 - **Inline editing** — insert, update, and delete rows directly in the browser
 - **SQL query editor** — run ad-hoc queries with quick-query shortcuts for common operations
+- **Query history** — persistent per-server history with dropdown recall and full history page
 - **Config diff** — compare Disk / Memory / Runtime layers side by side, spot drift instantly
 - **Role-based access** — admin and read-only users with separate credentials
 - **Environment variable overrides** — inject credentials and DSN settings without editing files
@@ -29,11 +30,14 @@ ProxyWeb gives you full control over ProxySQL through a clean web interface — 
 ## Quick Start
 
 ```bash
-docker run -h proxyweb --name proxyweb --network="host" -d proxyweb/proxyweb:latest
+docker run -h proxyweb --name proxyweb -p 5000:5000 -d proxyweb/proxyweb:latest
 ```
 
 Then open `http://<host>:5000` and log in with the default credentials (`admin` / `admin42`).
 
+> [!IMPORTANT]
+> ProxySQL's admin port (default **6032**) must be reachable from the ProxyWeb container. Configure the connection in Settings after first login.
+>
 > [!NOTE]
 > The login page shows a hint when default credentials are still in use.
 > Change them in Settings or via environment variables after first login.
@@ -45,17 +49,16 @@ Then open `http://<host>:5000` and log in with the default credentials (`admin` 
 - Docker (or Python 3 + pip for bare-metal)
 - A running ProxySQL instance with admin interface enabled
 
-### Docker (alongside ProxySQL)
+### Docker
 
 ```bash
-# Same host as ProxySQL (uses host networking)
-docker run -h proxyweb --name proxyweb --network="host" -d proxyweb/proxyweb:latest
-
-# Remote ProxySQL (expose port 5000)
 docker run -h proxyweb --name proxyweb -p 5000:5000 -d proxyweb/proxyweb:latest
 ```
 
 After starting, visit `/settings/edit/` to configure your ProxySQL server connection.
+
+> [!NOTE]
+> If ProxyWeb runs on the same host as ProxySQL you can use `--network="host"` instead of `-p 5000:5000`.
 
 ### Building from source
 
