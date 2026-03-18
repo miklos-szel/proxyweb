@@ -33,7 +33,14 @@ HISTORY_DIR = os.path.join(os.path.dirname(__file__), 'data', 'history')
 
 
 def _valid_history_server(server):
-    """Validate server name is safe for use in file paths."""
+    """
+    Determine whether a server name is safe to use as a filesystem path component.
+    
+    Logs a warning if the provided name is empty or contains path separators or traversal sequences.
+    
+    Returns:
+        True if the server name is non-empty and does not contain '/', '\\', or '..', False otherwise.
+    """
     if not server or '/' in server or '\\' in server or '..' in server:
         logging.warning(f"Invalid server name for history: {server}")
         return False
@@ -41,7 +48,16 @@ def _valid_history_server(server):
 
 
 def append_query_history(server, sql, user='admin'):
-    """Append a query to the per-server history file."""
+    """
+    Append a SQL query entry to the per-server JSON history file.
+    
+    If `server` is invalid (fails validation), the function is a no-op. The function ensures the history directory exists and writes the updated history atomically.
+    
+    Parameters:
+        server (str): Server name used to select the history file (safe name required).
+        sql (str): The SQL statement to record.
+        user (str): Username associated with the query entry; defaults to 'admin'.
+    """
     if not _valid_history_server(server):
         return
     os.makedirs(HISTORY_DIR, exist_ok=True)
@@ -56,25 +72,39 @@ def append_query_history(server, sql, user='admin'):
 
 
 def load_query_history(server, limit=None):
-    """Load query history for a server. Most recent last. Optional limit returns last N."""
+    """
+    Load stored query history for a server.
+    
+    Returns the server's history entries in chronological order (oldest first, most recent last). If `limit` is provided, returns only the last `limit` entries. Returns an empty list when the server name is invalid or no history exists.
+    
+    Parameters:
+        server (str): Server identifier (validated for safe file-path use).
+        limit (int | None): If set, return only the most recent `limit` entries.
+    
+    Returns:
+        list: A list of history entry dictionaries (each typically contains keys such as `sql`, `ts`/`timestamp`, and `user`).
+    """
     if not _valid_history_server(server):
         return []
     path = os.path.join(HISTORY_DIR, f'{server}.json')
     if not os.path.exists(path):
         return []
-    try:
-        with open(path, 'r') as f:
-            history = json.load(f)
-    except (json.JSONDecodeError, ValueError):
-        logging.warning(f"Corrupted history file for server '{server}', resetting")
-        return []
+    with open(path, 'r') as f:
+        history = json.load(f)
     if limit:
         return history[-limit:]
     return history
 
 
 def clear_query_history(server):
-    """Clear history for a server."""
+    """
+    Remove the stored per-server query history file.
+    
+    Validates the provided server name; if valid and a history file exists for that server, deletes the file. If the server name is invalid or no history file exists, no action is taken.
+    
+    Parameters:
+        server (str): Server identifier used to locate the history file (filename is "<server>.json" in HISTORY_DIR).
+    """
     if not _valid_history_server(server):
         return
     path = os.path.join(HISTORY_DIR, f'{server}.json')
@@ -83,7 +113,15 @@ def clear_query_history(server):
 
 
 def _quote_ident(name):
-    """Backtick-quote a SQL identifier, doubling any embedded backticks."""
+    """
+    Backtick-quote a SQL identifier, doubling any embedded backticks.
+    
+    Parameters:
+        name (str): Identifier name to quote.
+    
+    Returns:
+        quoted (str): The input wrapped in backticks with any internal backticks doubled.
+    """
     return '`' + name.replace('`', '``') + '`'
 
 

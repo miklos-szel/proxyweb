@@ -31,7 +31,15 @@ import mdb
 # ---------------------------------------------------------------------------
 
 def _patch_history_dir(tmp_dir):
-    """Return a context manager that redirects mdb.HISTORY_DIR to tmp_dir."""
+    """
+    Create a context manager that temporarily sets mdb.HISTORY_DIR to the provided directory.
+    
+    Parameters:
+        tmp_dir (str | pathlib.Path): Path to use as the temporary history directory while the context manager is active.
+    
+    Returns:
+        context_manager: A context manager which, when entered, sets mdb.HISTORY_DIR to `tmp_dir` and restores the original value on exit.
+    """
     return patch.object(mdb, "HISTORY_DIR", tmp_dir)
 
 
@@ -85,9 +93,19 @@ class TestQueryHistoryFunctions(unittest.TestCase):
     """File-level tests for the three public history functions in mdb.py."""
 
     def setUp(self):
+        """
+        Create a temporary directory for the test and store its path on self.tmp.
+        
+        This directory is intended for use by individual tests as an isolated HISTORY_DIR replacement.
+        """
         self.tmp = tempfile.mkdtemp()
 
     def tearDown(self):
+        """
+        Remove the temporary directory created for the test.
+        
+        Deletes the directory referenced by self.tmp and all its contents; any errors during removal are ignored.
+        """
         import shutil
         shutil.rmtree(self.tmp, ignore_errors=True)
 

@@ -2184,6 +2184,15 @@ class _ColoredRunner:
     _RESET = '\033[0m'
 
     def run(self, suite):
+        """
+        Run the given unittest test suite and print a colored progress header and summary to standard error.
+        
+        Parameters:
+            suite (unittest.TestSuite | unittest.TestCase): The test suite or case to execute.
+        
+        Returns:
+            result (unittest.result.TestResult): The test run result containing counts and lists of failures, errors, and skipped tests.
+        """
         total  = suite.countTestCases()
         out    = sys.stderr
         out.write(f"\n{self._BOLD}Running {total} tests...{self._RESET}\n\n")
@@ -2287,6 +2296,11 @@ class TestQueryHistory(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        """
+        Prepare class-level test state by creating an authenticated ProxyWebSession and clearing query history on both test servers.
+        
+        Initializes cls.pw with a logged-in ProxyWebSession and removes any existing per-server query history for cls.S1 and cls.S2 so tests start with empty histories.
+        """
         cls.pw = ProxyWebSession()
         cls.pw.login()
         # clear any pre-existing history on both servers
@@ -2294,38 +2308,90 @@ class TestQueryHistory(unittest.TestCase):
         cls.pw.post_json("/api/clear_query_history", {"server": cls.S2})
 
     def _execute_query(self, server, sql):
-        """Submit a SELECT through the SQL form on the given server."""
+        """
+        Execute a SELECT statement via the web UI SQL form for the specified ProxySQL server.
+        
+        Parameters:
+            server (str): Name of the ProxySQL server as used in the URL path (e.g., "proxysql").
+            sql (str): The SELECT SQL statement to submit (may include leading whitespace).
+        
+        Returns:
+            response (requests.Response): HTTP response returned by the form submission.
+        """
         return self.pw.post_form(
             f"/{server}/{DATABASE}/global_variables/sql/",
             data={"sql": sql},
         )
 
     def _get_dropdown_section(self, html):
-        """Extract the Query History dropdown HTML from a table page."""
+        """
+        Extracts the HTML fragment for the Query History dropdown from a table page.
+        
+        Parameters:
+            html (str): Full page HTML containing the history dropdown.
+        
+        Returns:
+            str: The HTML fragment starting at the `id="historyBtn"` marker and ending before the closing `</ul>` tag.
+        
+        Raises:
+            IndexError: If the history dropdown marker is not found in `html`.
+        """
         return html.split('id="historyBtn"')[1].split('</ul>')[0]
 
     def _get_history_table_section(self, html):
-        """Extract the history table body from the full query history page."""
+        """
+        Return the HTML fragment corresponding to the query history table section from a full history page.
+        
+        Parameters:
+            html (str): Full HTML of the query history page.
+        
+        Returns:
+            str: The HTML fragment for the history table (portion from the table's start attributes up to but not including the closing `</table>`), or an empty string if the history table is not present.
+        """
         if 'id="historyTable"' not in html:
             return ""
         return html.split('id="historyTable"')[1].split('</table>')[0]
 
     def _count_dropdown_items(self, html):
-        """Count history_item links in the page."""
+        """
+        Count query history dropdown items in the given HTML page.
+        
+        Parameters:
+            html (str): HTML content of the page to search for history dropdown entries.
+        
+        Returns:
+            int: Number of history item links found.
+        """
         return len(re.findall(
             r'onclick="loadQuery\(window\[\'history_item_\d+\'\]\)',
             html,
         ))
 
     def _get_history_js_vars(self, html):
-        """Extract the full SQL strings from history_item JS variables."""
+        """
+        Extract SQL strings stored in history_item JavaScript variables from the provided HTML.
+        
+        Parameters:
+            html (str): HTML content to search for `window['history_item_<n>']` assignments.
+        
+        Returns:
+            list[str]: SQL statements extracted from matching history_item variables, in the order found.
+        """
         return re.findall(
             r"window\['history_item_\d+'\]\s*=\s*\"(.*?)\"",
             html,
         )
 
     def _get_history_limits(self, js_vars):
-        """Extract the LIMIT N numbers from history JS variable strings."""
+        """
+        Extract trailing LIMIT values from a sequence of SQL strings.
+        
+        Parameters:
+            js_vars (Iterable[str]): Iterable of SQL statement strings (typically from JS variables).
+        
+        Returns:
+            list[int]: List of integers parsed from trailing `LIMIT N` clauses in the same order as inputs; entries without a trailing `LIMIT` are omitted.
+        """
         limits = []
         for sql in js_vars:
             m = re.search(r'LIMIT (\d+)$', sql)
@@ -2334,8 +2400,15 @@ class TestQueryHistory(unittest.TestCase):
         return limits
 
     def test_query_history_both_servers(self):
-        """Execute 26 distinct queries on each server, verify dropdown
-        and full history page per server, then clear and verify isolation."""
+        """
+        Verify per-server query history isolation and UI behavior after executing multiple queries.
+        
+        Executes 26 distinct queries on each of two servers, then verifies for each server that:
+        - the query dropdown shows the most recent 10 entries,
+        - the full history page lists all 26 queries,
+        - no queries from the other server appear in either the dropdown or full history.
+        Finally clears the first server's history and asserts it is emptied while the second server's history remains intact, then clears the second server.
+        """
 
         # --- execute 26 distinct queries on server 1 ----------------------
         for n in range(1, self.TOTAL_PER_SERVER + 1):
