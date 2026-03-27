@@ -567,7 +567,8 @@ def db_connect(db, server, autocommit=False, buffered=False, dictionary=True):
         try:
             db['cnf']['servers'][server]['conn'].autocommit = autocommit
         except mysql.connector.Error as err:
-            if "autocommit" in str(err).lower():
+            msg = str(err).lower()
+            if "unknown global variable" in msg and "@@session.autocommit" in msg:
                 # ProxySQL 3.x admin interface does not support
                 # SET @@session.autocommit, which mysql-connector-python
                 # sends internally when setting the autocommit property.
