@@ -564,8 +564,14 @@ def db_connect(db, server, autocommit=False, buffered=False, dictionary=True):
                 config['user'],
                 config['db']))
 
-        db['cnf']['servers'][server]['conn'] .autocommit = autocommit
-        db['cnf']['servers'][server]['conn'] .get_warnings = True
+        try:
+            db['cnf']['servers'][server]['conn'].autocommit = autocommit
+        except mysql.connector.Error:
+            # ProxySQL 3.x admin interface does not support
+            # SET @@session.autocommit, which mysql-connector-python
+            # sends internally when setting the autocommit property.
+            pass
+        db['cnf']['servers'][server]['conn'].get_warnings = True
 
         db['cnf']['servers'][server]['cur'] = db['cnf']['servers'][server]['conn'].cursor(buffered=buffered,
                                                                                             dictionary=dictionary)
