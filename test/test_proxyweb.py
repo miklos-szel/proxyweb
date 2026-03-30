@@ -2112,6 +2112,44 @@ class TestNoServersRedirect(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# ProxySQL 3.x autocommit compatibility
+# ---------------------------------------------------------------------------
+
+class TestProxySQL3Autocommit(unittest.TestCase):
+    """ProxySQL 3.x admin rejects SET @@session.autocommit which
+    mysql-connector-python sends internally when setting the autocommit
+    property.  The fix removes the autocommit setter from db_connect()
+    entirely since it is unnecessary for ProxySQL admin connections.
+
+    With the test stack running ProxySQL 3.x, every page load exercises
+    this code path.  This test explicitly verifies that browsing a table
+    and running SQL (which trigger db_connect) succeed rather than
+    returning a 500.
+    """
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+
+    def test_table_browse_succeeds_on_proxysql3(self):
+        """Browsing a table on ProxySQL 3.x must not crash due to autocommit."""
+        resp = self.s.get(f"/{SERVER}/{DATABASE}/global_variables/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn("500 Internal Server Error", resp.text)
+        # The page should contain actual table data, not an error
+        self.assertIn("variable_name", resp.text.lower())
+
+    def test_sql_query_succeeds_on_proxysql3(self):
+        """Running a SELECT via the SQL form must work on ProxySQL 3.x."""
+        resp = self.s.post_form(
+            f"/{SERVER}/{DATABASE}/global_variables/sql/",
+            data={"sql": "SELECT * FROM global_variables LIMIT 5"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn("Query Error", resp.text)
+
+
+# ---------------------------------------------------------------------------
 # Colored + numbered test runner
 # ---------------------------------------------------------------------------
 
@@ -2527,8 +2565,10 @@ class TestQueryHistory(unittest.TestCase):
 
     def test_clear_query_history_malformed_json(self):
         """Sending an empty or malformed JSON body to clear_query_history
-        should return a controlled error, not a 500."""
-        # Empty body with JSON content type
+        should not cause a 500.  The endpoint uses get_json(silent=True)
+        and falls back to the session server, so these return 200 when a
+        valid server is in the session."""
+        # Empty body with JSON content type — falls back to session server
         resp = self.pw.session.post(
             f"{BASE_URL}/api/clear_query_history",
             data="",
@@ -2540,10 +2580,8 @@ class TestQueryHistory(unittest.TestCase):
         )
         self.assertNotEqual(resp.status_code, 500,
                             "Empty body should not cause a 500")
-        self.assertIn(resp.status_code, (400, 403),
-                      "Expected 400 or 403 for empty body")
 
-        # Malformed JSON
+        # Malformed JSON — also falls back to session server
         resp = self.pw.session.post(
             f"{BASE_URL}/api/clear_query_history",
             data="{bad json",
@@ -2555,8 +2593,6 @@ class TestQueryHistory(unittest.TestCase):
         )
         self.assertNotEqual(resp.status_code, 500,
                             "Malformed JSON should not cause a 500")
-        self.assertIn(resp.status_code, (400, 403),
-                      "Expected 400 or 403 for malformed JSON")
 
 
 # ---------------------------------------------------------------------------

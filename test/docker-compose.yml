@@ -38,7 +38,7 @@ services:
       - proxyweb-test
 
   proxysql:
-    image: proxysql/proxysql:2.7.1
+    image: proxysql/proxysql:3.0.6
     volumes:
       - ./proxysql/proxysql.cnf:/etc/proxysql.cnf
     depends_on:
@@ -105,7 +105,7 @@ services:
     restart: "no"
 
   proxysql2:
-    image: proxysql/proxysql:2.7.1
+    image: proxysql/proxysql:3.0.6
     volumes:
       - ./proxysql/proxysql2.cnf:/etc/proxysql.cnf
     depends_on:

@@ -537,17 +537,16 @@ def form_data_to_yaml(form_data):
     return header + yaml_content
 
 
-def db_connect(db, server, autocommit=False, buffered=False, dictionary=True):
+def db_connect(db, server, buffered=False, dictionary=True):
     """
     Establishes a MySQL connection for the given server and stores the loaded configuration, connection, and cursor in the provided `db` dictionary.
-    
+
     Parameters:
         db (dict): Mutable mapping where configuration (`'cnf'`), connection (`'conn'`) and cursor (`'cur'`) will be stored.
         server (str): Key identifying the server entry inside the loaded configuration's `servers` section.
-        autocommit (bool): If True, enable autocommit on the created connection.
         buffered (bool): If True, create a buffered cursor.
         dictionary (bool): If True, create a cursor that returns rows as dictionaries.
-    
+
     Raises:
         ValueError: If a MySQL connector error or warning occurs while connecting or creating the cursor.
     """
@@ -556,20 +555,34 @@ def db_connect(db, server, autocommit=False, buffered=False, dictionary=True):
 
         config = db['cnf']['servers'][server]['dsn'][0]
         logging.debug(db['cnf']['servers'][server]['dsn'][0])
-        db['cnf']['servers'][server]['conn'] = mysql.connector.connect(**config,raise_on_warnings=True, get_warnings=True, connection_timeout=3, )
+        conn = mysql.connector.MySQLConnection()
+        try:
+            conn.connect(**config, raise_on_warnings=True, get_warnings=True, connection_timeout=3)
+        except mysql.connector.Error as err:
+            # mysql-connector-python internally sends SET @@session.autocommit
+            # during _post_connection().  ProxySQL 3.x admin rejects this.
+            # The TCP connection and auth succeed before the error, so if the
+            # socket is still up the connection is usable.
+            msg = str(err).lower()
+            if "unknown global variable" in msg and "@@session.autocommit" in msg:
+                logging.warning("Server %s does not support SET @@session.autocommit, skipping: %s", server, err)
+                if not conn.is_connected():
+                    raise
+            else:
+                raise
+        db['cnf']['servers'][server]['conn'] = conn
 
-        if  db['cnf']['servers'][server]['conn'].is_connected():
+        if conn.is_connected():
             logging.debug("Connected successfully to %s as %s db=%s" % (
                 config['host'],
                 config['user'],
                 config['db']))
 
-        db['cnf']['servers'][server]['conn'] .autocommit = autocommit
-        db['cnf']['servers'][server]['conn'] .get_warnings = True
+        conn.get_warnings = True
 
-        db['cnf']['servers'][server]['cur'] = db['cnf']['servers'][server]['conn'].cursor(buffered=buffered,
-                                                                                            dictionary=dictionary)
-        logging.debug("buffered: %s, dictionary: %s, autocommit: %s" % (buffered, dictionary, autocommit))
+        db['cnf']['servers'][server]['cur'] = conn.cursor(buffered=buffered,
+                                                          dictionary=dictionary)
+        logging.debug("buffered: %s, dictionary: %s" % (buffered, dictionary))
 
     except (mysql.connector.Error, mysql.connector.Warning) as e:
         raise ValueError(e)
