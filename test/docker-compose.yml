@@ -1,21 +1,5 @@
 services:
 
-  mysql:
-    image: mysql:8.0
-    command: --default-authentication-plugin=mysql_native_password
-    environment:
-      MYSQL_ROOT_PASSWORD: rootpass
-      MYSQL_DATABASE: testdb
-    volumes:
-      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-prootpass"]
-      interval: 5s
-      timeout: 5s
-      retries: 15
-    networks:
-      - proxyweb-test
-
   mysql2:
     image: mysql:8.0
     command: >
@@ -36,37 +20,6 @@ services:
       retries: 15
     networks:
       - proxyweb-test
-
-  proxysql:
-    image: proxysql/proxysql:3.0.6
-    volumes:
-      - ./proxysql/proxysql.cnf:/etc/proxysql.cnf
-    depends_on:
-      mysql:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "mysql -h 127.0.0.1 -P 6032 -u radmin -pradmin -e 'SELECT 1' 2>/dev/null"]
-      interval: 5s
-      timeout: 5s
-      retries: 15
-    ports:
-      - "6032:6032"   # admin interface (useful for manual inspection)
-      - "6033:6033"   # mysql frontend
-    networks:
-      - proxyweb-test
-
-  proxysql-init:
-    image: mysql:8.0
-    command: >
-      bash -c "mysql -h proxysql -P 6032 -u radmin -pradmin < /init.sql"
-    volumes:
-      - ./proxysql/init.sql:/init.sql
-    depends_on:
-      proxysql:
-        condition: service_healthy
-    networks:
-      - proxyweb-test
-    restart: "no"
 
   mysql3:
     image: mysql:8.0
@@ -104,6 +57,46 @@ services:
       - proxyweb-test
     restart: "no"
 
+  postgres:
+    image: postgres:16
+    command: >
+      postgres
+      -c wal_level=logical
+      -c max_replication_slots=4
+      -c max_wal_senders=4
+    environment:
+      POSTGRES_USER: pguser
+      POSTGRES_PASSWORD: pgpass
+      POSTGRES_DB: testdb_pg
+    volumes:
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pguser -d testdb_pg"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    networks:
+      - proxyweb-test
+
+  postgres2:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: pguser2
+      POSTGRES_PASSWORD: pgpass2
+      POSTGRES_DB: testdb_pg2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./postgres/init2.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pguser2 -d testdb_pg2"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    networks:
+      - proxyweb-test
+
   proxysql2:
     image: proxysql/proxysql:3.0.6
     volumes:
@@ -119,8 +112,8 @@ services:
       timeout: 5s
       retries: 15
     ports:
-      - "6034:6032"   # admin interface for proxysql2
-      - "6035:6033"   # mysql frontend for proxysql2
+      - "6032:6032"   # admin interface
+      - "6033:6033"   # mysql frontend
     networks:
       - proxyweb-test
 
@@ -139,6 +132,39 @@ services:
       - proxyweb-test
     restart: "no"
 
+  proxysql3:
+    image: proxysql/proxysql:3.0.6
+    volumes:
+      - ./proxysql/proxysql3.cnf:/etc/proxysql.cnf
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres2:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "mysql -h 127.0.0.1 -P 6032 -u radmin -pradmin -e 'SELECT 1' 2>/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    ports:
+      - "6034:6032"   # admin interface for proxysql3
+      - "6090:6090"   # postgres frontend
+    networks:
+      - proxyweb-test
+
+  proxysql3-init:
+    image: mysql:8.0
+    command: >
+      bash -c "mysql -h proxysql3 -P 6032 -u radmin -pradmin < /init_pg.sql"
+    volumes:
+      - ./proxysql/init_pg.sql:/init_pg.sql
+    depends_on:
+      proxysql3:
+        condition: service_healthy
+    networks:
+      - proxyweb-test
+    restart: "no"
+
   proxyweb:
     build:
       context: ..
@@ -146,9 +172,9 @@ services:
     volumes:
       - ./config/config.yml:/app/config/config.yml
     depends_on:
-      proxysql-init:
-        condition: service_completed_successfully
       proxysql2-init:
+        condition: service_completed_successfully
+      proxysql3-init:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python3", "-c",

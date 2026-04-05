@@ -139,14 +139,19 @@ The `test/` directory contains a Docker Compose stack and a Python test suite (`
 
 | Service | Image | Role |
 |---|---|---|
-| `mysql` | mysql:8.0 | Backend for proxysql (db: testdb) |
-| `mysql2` | mysql:8.0 | Backend for proxysql2 (db: testdb2) |
-| `proxysql` | proxysql/proxysql:2.7.1 | Admin :6032, SQL :6033 |
-| `proxysql2` | proxysql/proxysql:2.7.1 | Admin :6034, SQL :6035; hg1=writer, hg2=reader with read/write split rules |
-| `proxysql-init` / `proxysql2-init` | mysql:8.0 (one-shot) | Register backends, users, and query rules via admin SQL |
+| `mysql2` | mysql:8.0 | MySQL writer backend (db: testdb2) |
+| `mysql3` | mysql:8.0 | MySQL reader backend (db: testdb2, read-only replica) |
+| `mysql-replication-init` | mysql:8.0 (one-shot) | Sets up MySQL replication from mysql2→mysql3 |
+| `postgres` | postgres:16 | PostgreSQL publisher backend (db: testdb_pg) |
+| `postgres2` | postgres:16 | PostgreSQL subscriber backend (db: testdb_pg2, logical replication) |
+| `proxysql2` | proxysql/proxysql:3.0.6 | MySQL ProxySQL — Admin :6032, MySQL :6033; hg1=writer, hg2=reader |
+| `proxysql3` | proxysql/proxysql:3.0.6 | PostgreSQL ProxySQL — Admin :6034, PgSQL :6090 |
+| `proxysql2-init` / `proxysql3-init` | mysql:8.0 (one-shot) | Register backends, users, and query rules via admin SQL |
 | `proxyweb` | built from repo root | App under test on :5000 |
 
-Test failures are logged to `test/log/failure_YYYYMMDD_HHMMSS.log` (only created on failure) with full unittest tracebacks and filtered service logs. Passing runs produce no log file.
+Config names the servers `proxysql_mysql` and `proxysql_postgres`.
+
+Test failures are logged to `test/log/last_run.log` with full unittest tracebacks and filtered service logs.
 
 ### Docker Environment Variables
 

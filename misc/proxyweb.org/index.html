@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ProxyWeb – Web Interface for ProxySQL Management and Monitoring</title>
-  <meta name="description" content="ProxyWeb is a lightweight, open-source web UI for managing and monitoring ProxySQL. Browse tables, edit inline, run SQL, compare configs, and manage multiple servers." />
-  <meta name="keywords" content="ProxyWeb, ProxySQL UI, ProxySQL web interface, manage ProxySQL, MySQL load balancer, ProxySQL admin tool, ProxySQL dashboard" />
+  <title>ProxyWeb – Web Interface for ProxySQL Management – MySQL &amp; PostgreSQL</title>
+  <meta name="description" content="ProxyWeb is a lightweight, open-source web UI for managing and monitoring ProxySQL. Supports both MySQL and PostgreSQL backends. Browse tables, edit inline, run SQL, compare configs, and manage multiple servers." />
+  <meta name="keywords" content="ProxyWeb, ProxySQL UI, ProxySQL web interface, manage ProxySQL, MySQL load balancer, PostgreSQL proxy, ProxySQL admin tool, ProxySQL dashboard, ProxySQL PostgreSQL" />
   <meta name="author" content="Miklós Szel" />
   <link rel="canonical" href="https://proxyweb.org" />
 
@@ -606,10 +606,10 @@
 
   <!-- HERO -->
   <section class="hero">
-    <div class="hero-badge">Open Source &middot; GPL-3.0</div>
+    <div class="hero-badge">Open Source &middot; GPL-3.0 &middot; MySQL &amp; PostgreSQL</div>
     <h1>A web interface for<br>ProxySQL management</h1>
     <p>
-      Browse tables, edit rows inline, run SQL queries, compare Disk/Memory/Runtime configs, and manage multiple ProxySQL instances &mdash; all from your browser.
+      Manage ProxySQL for <strong>MySQL and PostgreSQL</strong> backends. Browse tables, edit rows inline, run SQL queries, compare Disk/Memory/Runtime configs, and manage multiple instances &mdash; all from your browser.
     </p>
 
     <div class="hero-actions">
@@ -642,10 +642,16 @@
   <section class="features" id="features">
     <div class="features-header">
       <h2>Everything you need to manage ProxySQL</h2>
-      <p>Full control over servers, users, query rules, and variables through one interface.</p>
+      <p>Full control over MySQL and PostgreSQL servers, users, query rules, and variables through one interface.</p>
     </div>
 
     <div class="features-grid">
+      <div class="feature-card fade-up">
+        <div class="feature-label">Core</div>
+        <h3>MySQL &amp; PostgreSQL</h3>
+        <p>Full support for both MySQL and PostgreSQL backends via ProxySQL 3.x. Manage pgsql_servers, pgsql_users, query rules, and all PostgreSQL-specific tables alongside MySQL.</p>
+      </div>
+
       <div class="feature-card fade-up">
         <div class="feature-label">Core</div>
         <h3>Multi-server management</h3>
@@ -719,6 +725,18 @@
         <div class="screenshot-caption">
           <h4>SQL editor with quick queries</h4>
           <p>Run any SQL against ProxySQL's admin interface. The quick-query menu provides categorized shortcuts for common insert and update operations.</p>
+        </div>
+      </div>
+
+      <div class="screenshot-item">
+        <img
+          src="https://raw.githubusercontent.com/miklos-szel/proxyweb/refs/heads/main/misc/images/proxyweb_postgres.jpg"
+          alt="ProxyWeb managing PostgreSQL backends via ProxySQL"
+          loading="lazy"
+        />
+        <div class="screenshot-caption">
+          <h4>PostgreSQL backend management</h4>
+          <p>Browse and manage PostgreSQL servers, users, and query rules through ProxySQL 3.x's native PostgreSQL support.</p>
         </div>
       </div>
     </div>
@@ -807,7 +825,7 @@
 
   <!-- FOOTER -->
   <footer>
-    <span>ProxyWeb &middot; Open-source ProxySQL management</span>
+    <span>ProxyWeb &middot; Open-source ProxySQL management &middot; MySQL &amp; PostgreSQL</span>
     <div class="footer-links">
       <a href="https://github.com/miklos-szel/proxyweb" target="_blank" rel="noopener noreferrer">GitHub</a>
       <a href="https://github.com/miklos-szel/proxyweb/issues" target="_blank" rel="noopener noreferrer">Issues</a>
