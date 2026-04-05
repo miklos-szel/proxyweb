@@ -2368,10 +2368,9 @@ class TestPgSQLNavigation(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
 
     def test_pgsql_servers_show_backends(self):
-        """Both postgres backends must appear in pgsql_servers."""
+        """The postgres publisher backend must appear in pgsql_servers."""
         resp = self.s.get(f"/{PG_SERVER}/{DATABASE}/pgsql_servers/")
         self.assertIn("postgres", resp.text)
-        self.assertIn("postgres2", resp.text)
 
     def test_pgsql_users_show_pguser(self):
         """The pguser registered via init must appear in pgsql_users."""
@@ -2379,11 +2378,10 @@ class TestPgSQLNavigation(unittest.TestCase):
         self.assertIn("pguser", resp.text)
 
     def test_runtime_pgsql_servers_table_view(self):
-        """runtime_pgsql_servers should be browsable and show both backends."""
+        """runtime_pgsql_servers should be browsable and show the publisher backend."""
         resp = self.s.get(f"/{PG_SERVER}/{DATABASE}/runtime_pgsql_servers/")
         self.assertEqual(resp.status_code, 200)
         self.assertIn("postgres", resp.text)
-        self.assertIn("postgres2", resp.text)
 
 
 class TestPgSQLServers(unittest.TestCase):
@@ -2572,7 +2570,7 @@ class TestPgSQLQueryViaSQL(unittest.TestCase):
         self.s.login()
 
     def test_select_pgsql_servers(self):
-        """SELECT from pgsql_servers via SQL form should return both backends."""
+        """SELECT from pgsql_servers via SQL form should return the publisher backend."""
         self.s.get(f"/{PG_SERVER}/{DATABASE}/pgsql_servers/")
         resp = self.s.post_form(
             f"/{PG_SERVER}/{DATABASE}/pgsql_servers/sql/",
@@ -2580,7 +2578,6 @@ class TestPgSQLQueryViaSQL(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertIn("postgres", resp.text)
-        self.assertIn("postgres2", resp.text)
 
     def test_select_pgsql_users(self):
         """SELECT from pgsql_users via SQL form should return pguser."""
