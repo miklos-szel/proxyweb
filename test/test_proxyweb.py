@@ -2714,7 +2714,7 @@ class TestPgSQLReplication(unittest.TestCase):
                 time.sleep(0.5)
 
             self.assertTrue(updated,
-                            f"Updated value did not replicate to subscriber within 5 seconds")
+                            "Updated value did not replicate to subscriber within 5 seconds")
         finally:
             self._psql("postgres", "testdb_pg", "pguser",
                        f"DELETE FROM items_pg WHERE name = '{tag}'")
