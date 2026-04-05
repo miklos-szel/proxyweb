@@ -6,13 +6,15 @@
 #
 #   ProxyWeb UI        http://localhost:5000   admin / admin42
 #
-#   ProxySQL 1 admin   localhost:6032          radmin / radmin
-#   ProxySQL 1 MySQL   localhost:6033          proxyuser / proxypass
-#   MySQL 1 backend    (internal only)         root / rootpass  (db: testdb)
+#   ProxySQL MySQL admin  localhost:6032          radmin / radmin
+#   ProxySQL MySQL        localhost:6033          proxyuser2 / proxypass2
+#   MySQL 2 (writer)      (internal only)         root / rootpass  (db: testdb2)
+#   MySQL 3 (reader)      (internal only)         root / rootpass  (db: testdb2)
 #
-#   ProxySQL 2 admin   localhost:6034          radmin / radmin
-#   ProxySQL 2 MySQL   localhost:6035          proxyuser2 / proxypass2
-#   MySQL 2 backend    (internal only)         root / rootpass  (db: testdb2)
+#   ProxySQL PgSQL admin  localhost:6034          radmin / radmin
+#   ProxySQL PgSQL        localhost:6090          pguser / pgpass
+#   PostgreSQL 1          (internal only)         pguser / pgpass   (db: testdb_pg)
+#   PostgreSQL 2          (internal only)         pguser2 / pgpass2 (db: testdb_pg2)
 #
 # Environment overrides (exported before calling this script):
 #   PROXYWEB_URL   default: http://localhost:5000
@@ -57,10 +59,12 @@ on_exit() {
         echo "==> Stack left running (--keep / --no-stop). Stop with: docker compose down -v --remove-orphans"
         echo ""
         echo "    ProxyWeb UI      http://localhost:5000   admin / admin42"
-        echo "    ProxySQL 1 admin localhost:6032          radmin / radmin"
-        echo "    ProxySQL 1 MySQL localhost:6033          proxyuser / proxypass"
-        echo "    ProxySQL 2 admin localhost:6034          radmin / radmin"
-        echo "    ProxySQL 2 MySQL localhost:6035          proxyuser2 / proxypass2"
+        echo "    ProxySQL MySQL admin localhost:6032      radmin / radmin"
+        echo "    ProxySQL MySQL       localhost:6033      proxyuser2 / proxypass2"
+        echo "    ProxySQL PgSQL admin localhost:6034      radmin / radmin"
+        echo "    ProxySQL PgSQL       localhost:6090      pguser / pgpass"
+        echo "    PostgreSQL 1         (internal)          pguser / pgpass   (db: testdb_pg)"
+        echo "    PostgreSQL 2         (internal)          pguser2 / pgpass2 (db: testdb_pg2)"
     fi
 }
 trap on_exit EXIT
@@ -114,7 +118,7 @@ if [[ $TEST_EXIT -ne 0 ]]; then
 
         echo ""
         echo "=== SERVICE LOGS ==="
-        for svc in proxyweb proxysql proxysql2 mysql mysql2 proxysql-init proxysql2-init; do
+        for svc in proxyweb proxysql2 proxysql3 mysql2 mysql3 postgres postgres2 proxysql2-init proxysql3-init mysql-replication-init; do
             local_logs=$(docker compose logs --no-color --tail=200 "$svc" 2>&1 || true)
             # Only include a service's logs if they contain an error indicator.
             if echo "$local_logs" | grep -qiE 'error|exception|traceback|fatal|critical'; then

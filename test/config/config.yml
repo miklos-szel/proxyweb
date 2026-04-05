@@ -1,5 +1,5 @@
 global:
-  default_server: proxysql
+  default_server: proxysql_mysql
   read_only: false
   hide_tables:
     - ".*aurora.*"
@@ -10,20 +10,25 @@ global:
   config_diff_skip_variable: []
 
 servers:
-  proxysql:
-    dsn:
-      - host: proxysql
-        user: radmin
-        passwd: radmin
-        port: 6032
-        db: main
-  proxysql2:
+  proxysql_mysql:
     dsn:
       - host: proxysql2
         user: radmin
         passwd: radmin
         port: 6032
         db: main
+  proxysql_postgres:
+    dsn:
+      - host: proxysql3
+        user: radmin
+        passwd: radmin
+        port: 6032
+        db: main
+    hide_tables:
+      - ".*aurora.*"
+      - ".*galera.*"
+      - ".*mysql.*"
+      - mysql_collations
 
 auth:
   admin_user: admin

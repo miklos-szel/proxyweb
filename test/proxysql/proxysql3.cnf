@@ -12,35 +12,32 @@ mysql_variables=
 {
     threads=4
     max_connections=2048
-    default_query_delay=0
-    default_query_timeout=36000000
-    have_compress=true
-    poll_timeout=2000
     interfaces="0.0.0.0:6033"
     default_schema="information_schema"
     stacksize=1048576
     server_version="8.0.0"
-    connect_timeout_server=3000
-    monitor_username="monitor"
-    monitor_password="monitor"
-    monitor_history=600000
-    monitor_connect_interval=60000
-    monitor_ping_interval=10000
-    monitor_read_only_interval=1500
-    monitor_read_only_timeout=500
-    ping_interval_server_msec=120000
-    ping_timeout_server=500
-    commands_stats=true
-    sessions_sort=true
-    connect_retries_on_failure=10
 }
 
-mysql_servers=
+pgsql_variables=
+{
+    threads=4
+    max_connections=2048
+    interfaces="0.0.0.0:6090"
+    default_schema="testdb_pg"
+    stacksize=1048576
+    server_version="16.0"
+    connect_timeout_server=3000
+    monitor_enabled=false
+    ping_interval_server_msec=120000
+    ping_timeout_server=500
+}
+
+pgsql_servers=
 (
     {
-        address="mysql"
-        port=3306
-        hostgroup=1
+        address="postgres"
+        port=5432
+        hostgroup=10
         status="ONLINE"
         weight=1
         compression=0
@@ -48,25 +45,23 @@ mysql_servers=
     }
 )
 
-mysql_users=
+pgsql_users=
 (
     {
-        username="proxyuser"
-        password="proxypass"
-        default_hostgroup=1
+        username="pguser"
+        password="pgpass"
+        default_hostgroup=10
         max_connections=200
-        default_schema="testdb"
         active=1
     }
 )
 
-mysql_replication_hostgroups=
+mysql_servers=
 (
-    {
-        writer_hostgroup=1
-        reader_hostgroup=2
-        comment="read/write split"
-    }
+)
+
+mysql_users=
+(
 )
 
 mysql_query_rules=

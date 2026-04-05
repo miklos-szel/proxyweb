@@ -10,10 +10,8 @@ Environment variables:
   PROXYWEB_URL     Base URL of proxyweb (default: http://localhost:5000)
   PROXYWEB_USER    Admin username       (default: admin)
   PROXYWEB_PASS    Admin password       (default: admin42)
-  PROXYSQL1_HOST   ProxySQL 1 MySQL frontend host (default: 127.0.0.1)
-  PROXYSQL1_PORT   ProxySQL 1 MySQL frontend port (default: 6033)
-  PROXYSQL2_HOST   ProxySQL 2 MySQL frontend host (default: 127.0.0.1)
-  PROXYSQL2_PORT   ProxySQL 2 MySQL frontend port (default: 6035)
+  PROXYSQL_MYSQL_HOST   ProxySQL MySQL frontend host (default: 127.0.0.1)
+  PROXYSQL_MYSQL_PORT   ProxySQL MySQL frontend port (default: 6033)
 """
 
 import os
@@ -21,6 +19,7 @@ import re
 import sys
 import time
 import json
+import subprocess
 import unittest
 
 import requests
@@ -35,8 +34,9 @@ BASE_URL = os.environ.get("PROXYWEB_URL", "http://localhost:5000").rstrip("/")
 USERNAME = os.environ.get("PROXYWEB_USER", "admin")
 PASSWORD = os.environ.get("PROXYWEB_PASS", "admin42")
 
-SERVER   = "proxysql"
-DATABASE = "main"
+SERVER    = "proxysql_mysql"
+PG_SERVER = "proxysql_postgres"
+DATABASE  = "main"
 
 
 # ---------------------------------------------------------------------------
@@ -298,7 +298,7 @@ class TestNavigation(unittest.TestCase):
         self.assertIn("global", resp.text)  # YAML content
 
     def test_config_diff_page(self):
-        resp = self.s.get("/proxysql/config_diff/")
+        resp = self.s.get(f"/{SERVER}/config_diff/")
         self.assertEqual(resp.status_code, 200)
 
 
@@ -338,7 +338,7 @@ class TestSQLExecution(unittest.TestCase):
 class TestAPIRowOperations(unittest.TestCase):
     """API endpoints: insert, update, delete a row in mysql_servers."""
 
-    SERVER   = "proxysql"
+    SERVER   = SERVER
     DATABASE = "main"
     TABLE    = "mysql_servers"
 
@@ -507,10 +507,10 @@ class TestAPIConfigDiff(unittest.TestCase):
         """
         self.s = ProxyWebSession()
         self.s.login()
-        self.s.get("/proxysql/config_diff/")
+        self.s.get(f"/{SERVER}/config_diff/")
 
     def test_get_config_diff_returns_success(self):
-        resp = self.s.post_json("/proxysql/config_diff/get", {})
+        resp = self.s.post_json(f"/{SERVER}/config_diff/get", {})
         body = resp.json()
         self.assertTrue(body.get("success"), f"config diff failed: {body.get('error')}")
         self.assertIn("tables", body.get("diff", {}))
@@ -529,7 +529,7 @@ class TestAPIConfigDiff(unittest.TestCase):
 class TestMySQLServers(unittest.TestCase):
     """CRUD operations on mysql_servers via ProxyWeb API."""
 
-    SERVER   = "proxysql"
+    SERVER   = SERVER
     DATABASE = "main"
     TABLE    = "mysql_servers"
 
@@ -633,7 +633,7 @@ class TestMySQLServers(unittest.TestCase):
 class TestQueryRules(unittest.TestCase):
     """CRUD operations on mysql_query_rules via ProxyWeb API."""
 
-    SERVER   = "proxysql"
+    SERVER   = SERVER
     DATABASE = "main"
     TABLE    = "mysql_query_rules"
 
@@ -767,129 +767,16 @@ class TestQueryRules(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 @unittest.skipUnless(HAS_PYMYSQL, "pymysql not installed — skipping backend SQL tests")
-class TestProxySQL1BackendSQL(unittest.TestCase):
-    """SELECT / INSERT / UPDATE / DELETE through ProxySQL 1 (port 6033).
-
-    Connects as proxyuser/proxypass which is registered in ProxySQL 1's
-    runtime_mysql_users and granted on the mysql backend's testdb.
-    Table under test: testdb.items (id INT PK, name VARCHAR, val INT).
-    """
-
-    HOST = os.environ.get("PROXYSQL1_HOST", "127.0.0.1")
-    PORT = int(os.environ.get("PROXYSQL1_PORT", "6033"))
-    USER = "proxyuser"
-    PASS = "proxypass"
-    DB   = "testdb"
-
-    def _conn(self):
-        """
-        Create a new PyMySQL connection configured for the test backend.
-        
-        Returns:
-            pymysql.connections.Connection: A connected PyMySQL connection to the configured host/port/database with autocommit enabled.
-        """
-        return pymysql.connect(
-            host=self.HOST, port=self.PORT,
-            user=self.USER, password=self.PASS,
-            database=self.DB, autocommit=True,
-        )
-
-    def test_select_returns_rows(self):
-        """
-        Verify that selecting id, name, and val from the backend `items` table returns at least one row and that one of the returned rows has the name "alpha".
-        """
-        with self._conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT id, name, val FROM items ORDER BY id")
-                rows = cur.fetchall()
-        self.assertGreater(len(rows), 0, "Expected seed rows in testdb.items")
-        names = [r[1] for r in rows]
-        self.assertIn("alpha", names)
-
-    def test_insert_row(self):
-        """
-        Inserts a row into the test `items` table, verifies the inserted row persists with the expected values, and removes it.
-        
-        Asserts that the returned insert ID is greater than zero, that a subsequent select returns the inserted row with name `"ps1-test-insert"` and value `42`, and cleans up by deleting the inserted row.
-        """
-        with self._conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO items (name, val) VALUES (%s, %s)",
-                    ("ps1-test-insert", 42),
-                )
-                inserted_id = conn.insert_id()
-        self.assertGreater(inserted_id, 0)
-        # Verify it persisted
-        with self._conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT name, val FROM items WHERE id = %s", (inserted_id,))
-                row = cur.fetchone()
-        self.assertIsNotNone(row)
-        self.assertEqual(row[0], "ps1-test-insert")
-        self.assertEqual(row[1], 42)
-        # Cleanup
-        with self._conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM items WHERE id = %s", (inserted_id,))
-
-    def test_update_row(self):
-        # Insert a row to update
-        with self._conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO items (name, val) VALUES (%s, %s)",
-                    ("ps1-test-update", 1),
-                )
-                row_id = conn.insert_id()
-        try:
-            with self._conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "UPDATE items SET val = %s WHERE id = %s",
-                        (99, row_id),
-                    )
-                    self.assertEqual(conn.affected_rows(), 1)
-            # Verify
-            with self._conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT val FROM items WHERE id = %s", (row_id,))
-                    self.assertEqual(cur.fetchone()[0], 99)
-        finally:
-            with self._conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("DELETE FROM items WHERE id = %s", (row_id,))
-
-    def test_delete_row(self):
-        with self._conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO items (name, val) VALUES (%s, %s)",
-                    ("ps1-test-delete", 7),
-                )
-                row_id = conn.insert_id()
-        with self._conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM items WHERE id = %s", (row_id,))
-                self.assertEqual(conn.affected_rows(), 1)
-        # Confirm gone
-        with self._conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT id FROM items WHERE id = %s", (row_id,))
-                self.assertIsNone(cur.fetchone())
-
-
-@unittest.skipUnless(HAS_PYMYSQL, "pymysql not installed — skipping backend SQL tests")
 class TestProxySQL2BackendSQL(unittest.TestCase):
-    """SELECT / INSERT / UPDATE / DELETE through ProxySQL 2 (port 6035).
+    """SELECT / INSERT / UPDATE / DELETE through ProxySQL MySQL (port 6033).
 
-    Connects as proxyuser2/proxypass2 which is registered in ProxySQL 2's
+    Connects as proxyuser2/proxypass2 which is registered in proxysql_mysql's
     runtime_mysql_users and granted on the mysql2 backend's testdb2.
     Table under test: testdb2.products (id INT PK, name VARCHAR, price DECIMAL).
     """
 
-    HOST = os.environ.get("PROXYSQL2_HOST", "127.0.0.1")
-    PORT = int(os.environ.get("PROXYSQL2_PORT", "6035"))
+    HOST = os.environ.get("PROXYSQL_MYSQL_HOST", "127.0.0.1")
+    PORT = int(os.environ.get("PROXYSQL_MYSQL_PORT", "6033"))
     USER = "proxyuser2"
     PASS = "proxypass2"
     DB   = "testdb2"
@@ -992,36 +879,6 @@ class TestProxySQL2BackendSQL(unittest.TestCase):
                 cur.execute("SELECT id FROM products WHERE id = %s FOR UPDATE", (row_id,))
                 self.assertIsNone(cur.fetchone())
 
-    def test_proxysql2_data_isolated_from_proxysql1(self):
-        """Data written through ProxySQL 2 must not appear through ProxySQL 1."""
-        # Insert through ProxySQL 2
-        with self._conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO products (name, price) VALUES (%s, %s)",
-                    ("isolation-check", "0.99"),
-                )
-                row_id = conn.insert_id()
-        try:
-            # ProxySQL 1 routes to testdb on mysql — the products table does not
-            # exist there, so any attempt to query it must raise an error.
-            ps1 = pymysql.connect(
-                host=os.environ.get("PROXYSQL1_HOST", "127.0.0.1"),
-                port=int(os.environ.get("PROXYSQL1_PORT", "6033")),
-                user="proxyuser", password="proxypass",
-                database="testdb", autocommit=True,
-            )
-            try:
-                with ps1.cursor() as cur:
-                    with self.assertRaises(pymysql.err.ProgrammingError):
-                        cur.execute("SELECT id FROM products WHERE id = %s", (row_id,))
-                        cur.fetchall()
-            finally:
-                ps1.close()
-        finally:
-            with self._conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("DELETE FROM products WHERE id = %s", (row_id,))
 
 
 # ---------------------------------------------------------------------------
@@ -1035,7 +892,7 @@ class TestConfigDiffMemoryRuntime(unittest.TestCase):
     appearing in the diff output.
     """
 
-    SERVER = "proxysql"
+    SERVER = SERVER
     DB     = "main"
     TABLE  = "mysql_users"
     TEST_USER = "difftest-user"
@@ -1126,22 +983,16 @@ class TestConfigDiffMemoryRuntime(unittest.TestCase):
 class TestMultiServer(unittest.TestCase):
     """Tests that verify proxyweb can manage two independent ProxySQL instances.
 
-    proxysql  → mysql  (testdb,  user proxyuser/proxypass)
-    proxysql2 → mysql2 (testdb2, user proxyuser2/proxypass2)
-    proxysql2 ships with pre-seeded query rules (rule_id 1 and 2).
+    proxysql_mysql    → mysql2/mysql3 (testdb2, user proxyuser2/proxypass2)
+    proxysql_postgres → postgres/postgres2 (testdb_pg, user pguser/pgpass)
+    proxysql_mysql ships with pre-seeded query rules (rule_id 1 and 2).
     """
 
-    S1 = "proxysql"
-    S2 = "proxysql2"
+    S1 = SERVER
+    S2 = PG_SERVER
     DB = "main"
 
-    # PK for a test query rule we CRUD on proxysql2
-    TEST_RULE_ID = 800
-
     def setUp(self):
-        """
-        Prepare an authenticated ProxyWebSession and store it as self.s for use by the test methods.
-        """
         self.s = ProxyWebSession()
         self.s.login()
 
@@ -1155,183 +1006,55 @@ class TestMultiServer(unittest.TestCase):
         self.assertIn(self.S1, resp.text)
         self.assertIn(self.S2, resp.text)
 
-    def test_server1_table_view_accessible(self):
-        """
-        Verify server1's mysql_servers table view is accessible.
-        
-        Asserts the response status is 200 and the page contains the string "hostname".
-        """
+    def test_mysql_server_table_view_accessible(self):
+        """proxysql_mysql's mysql_servers table view is accessible."""
         resp = self.s.get(f"/{self.S1}/{self.DB}/mysql_servers/")
         self.assertEqual(resp.status_code, 200)
         self.assertIn("hostname", resp.text)
 
-    def test_server2_table_view_accessible(self):
-        resp = self.s.get(f"/{self.S2}/{self.DB}/mysql_servers/")
+    def test_pg_server_table_view_accessible(self):
+        """proxysql_postgres's pgsql_servers table view is accessible."""
+        resp = self.s.get(f"/{self.S2}/{self.DB}/pgsql_servers/")
         self.assertEqual(resp.status_code, 200)
         self.assertIn("hostname", resp.text)
 
     # ------------------------------------------------------------------
-    # Backend server isolation — each ProxySQL points to a different MySQL
+    # Backend server isolation
     # ------------------------------------------------------------------
 
-    def test_server1_has_mysql_backend(self):
-        """
-        Assert that server1's mysql_servers page contains the backend host "mysql".
-        """
+    def test_mysql_server_has_mysql_backends(self):
+        """proxysql_mysql should list mysql2 as its backend."""
         resp = self.s.get(f"/{self.S1}/{self.DB}/mysql_servers/")
-        self.assertIn("mysql", resp.text)
-
-    def test_server2_has_mysql2_backend(self):
-        """proxysql2 should list 'mysql2' as its backend."""
-        resp = self.s.get(f"/{self.S2}/{self.DB}/mysql_servers/")
         self.assertIn("mysql2", resp.text)
 
-    def test_server2_backend_is_not_server1_backend(self):
-        """The mysql_servers table on proxysql2 must not contain the server1 host."""
-        resp = self.s.get(f"/{self.S2}/{self.DB}/mysql_servers/")
-        # proxysql2 knows about mysql2 but should have no row for plain 'mysql'
-        # We look for the cell value being exactly "mysql" (surrounded by <td> tags)
-        cells = re.findall(r'<td[^>]*>\s*(mysql)\s*</td>', resp.text)
-        self.assertEqual(cells, [], "proxysql2 mysql_servers unexpectedly contains 'mysql' host")
+    def test_pg_server_has_postgres_backends(self):
+        """proxysql_postgres should list postgres backends."""
+        resp = self.s.get(f"/{self.S2}/{self.DB}/pgsql_servers/")
+        self.assertIn("postgres", resp.text)
 
     # ------------------------------------------------------------------
-    # Query rules: proxysql2 pre-seeded with 2 rules; proxysql has none
+    # Query rules: proxysql_mysql pre-seeded with 2 rules
     # ------------------------------------------------------------------
 
-    def test_server1_has_no_preseeded_query_rules(self):
-        """proxysql was initialised without query rules."""
+    def test_mysql_server_has_preseeded_query_rules(self):
+        """proxysql_mysql was initialised with rule_id 1 and 2."""
         resp = self.s.get(f"/{self.S1}/{self.DB}/mysql_query_rules/")
-        self.assertEqual(resp.status_code, 200)
-        # Table should exist but have no data rows with rule_id 1 or 2
-        self.assertNotIn(">1<", resp.text)
-
-    def test_server2_has_preseeded_query_rules(self):
-        """proxysql2 was initialised with rule_id 1 and 2."""
-        resp = self.s.get(f"/{self.S2}/{self.DB}/mysql_query_rules/")
         self.assertEqual(resp.status_code, 200)
         self.assertIn("rule_id", resp.text)
         self.assertIn(">1<", resp.text)
         self.assertIn(">2<", resp.text)
 
     # ------------------------------------------------------------------
-    # CRUD on proxysql2 query rules
-    # ------------------------------------------------------------------
-
-    def _s2_pk(self):
-        """
-        Return the primary-key mapping for the server2 test query rule.
-        
-        Returns:
-            dict: A mapping with key `"rule_id"` and the rule id as a string.
-        """
-        return {"rule_id": str(self.TEST_RULE_ID)}
-
-    def _col_names(self):
-        """
-        Ordered list of column names used for full-row updates of the mysql_query_rules table.
-        
-        Returns:
-            list: Ordered list of column name strings in the exact sequence required for full updates via the API.
-        """
-        return [
-            "rule_id", "active", "username", "schemaname", "flagIN",
-            "client_addr", "proxy_addr", "proxy_port", "digest",
-            "match_digest", "match_pattern", "negate_match_pattern",
-            "re_flags", "flagOUT", "replace_pattern",
-            "destination_hostgroup", "cache_ttl", "cache_empty_result",
-            "cache_timeout", "reconnect", "timeout", "retries", "delay",
-            "next_query_flagIN", "mirror_flagOUT", "mirror_hostgroup",
-            "error_msg", "OK_msg", "sticky_conn", "multiplex",
-            "gtid_from_hostgroup", "log", "apply", "attributes", "comment",
-        ]
-
-    def _insert_s2_rule(self):
-        """
-        Insert a query rule on server S2's `mysql_query_rules` table and return the API response.
-        
-        The inserted rule uses `self.TEST_RULE_ID` for `rule_id` and sets `active=1`, `match_digest="^DELETE"`,
-        `destination_hostgroup=0`, and `apply=1`.
-        
-        Returns:
-            dict: Parsed JSON response returned by the `/api/insert_row` endpoint.
-        """
-        self.s.get(f"/{self.S2}/{self.DB}/mysql_query_rules/")
-        return self.s.post_json("/api/insert_row", {
-            "server":      self.S2,
-            "database":    self.DB,
-            "table":       "mysql_query_rules",
-            "columnNames": ["rule_id", "active", "match_digest",
-                            "destination_hostgroup", "apply"],
-            "data": {
-                "rule_id":               str(self.TEST_RULE_ID),
-                "active":                "1",
-                "match_digest":          "^DELETE",
-                "destination_hostgroup": "0",
-                "apply":                 "1",
-            },
-        }).json()
-
-    def _delete_s2_rule(self):
-        """
-        Delete the test query rule on the second server using its primary key.
-        
-        Returns:
-            dict: JSON response from the /api/delete_row endpoint containing the result of the delete operation.
-        """
-        self.s.get(f"/{self.S2}/{self.DB}/mysql_query_rules/")
-        return self.s.post_json("/api/delete_row", {
-            "server":   self.S2,
-            "database": self.DB,
-            "table":    "mysql_query_rules",
-            "pkValues": self._s2_pk(),
-        }).json()
-
-    def test_insert_query_rule_on_server2(self):
-        result = self._insert_s2_rule()
-        self.assertTrue(result.get("success"), result.get("error"))
-        self._delete_s2_rule()
-
-    def test_update_query_rule_on_server2(self):
-        self._insert_s2_rule()
-        try:
-            self.s.get(f"/{self.S2}/{self.DB}/mysql_query_rules/")
-            result = self.s.post_json("/api/update_row", {
-                "server":      self.S2,
-                "database":    self.DB,
-                "table":       "mysql_query_rules",
-                "pkValues":    self._s2_pk(),
-                "columnNames": self._col_names(),
-                "data":        {"match_digest": "^DELETE.*", "comment": "s2-test"},
-            }).json()
-            self.assertTrue(result.get("success"), result.get("error"))
-        finally:
-            self._delete_s2_rule()
-
-    def test_delete_query_rule_on_server2(self):
-        self._insert_s2_rule()
-        result = self._delete_s2_rule()
-        self.assertTrue(result.get("success"), result.get("error"))
-
-    def test_server2_rule_does_not_appear_on_server1(self):
-        """A rule inserted on proxysql2 must not be visible on proxysql."""
-        self._insert_s2_rule()
-        try:
-            resp = self.s.get(f"/{self.S1}/{self.DB}/mysql_query_rules/")
-            self.assertNotIn(str(self.TEST_RULE_ID), resp.text)
-        finally:
-            self._delete_s2_rule()
-
-    # ------------------------------------------------------------------
     # Config diff works independently per server
     # ------------------------------------------------------------------
 
-    def test_config_diff_server1(self):
+    def test_config_diff_mysql_server(self):
         self.s.get(f"/{self.S1}/config_diff/")
         resp = self.s.post_json(f"/{self.S1}/config_diff/get", {})
         body = resp.json()
         self.assertTrue(body.get("success"), body.get("error"))
 
-    def test_config_diff_server2(self):
+    def test_config_diff_pg_server(self):
         self.s.get(f"/{self.S2}/config_diff/")
         resp = self.s.post_json(f"/{self.S2}/config_diff/get", {})
         body = resp.json()
@@ -1489,7 +1212,7 @@ class TestDefaultServerFallback(unittest.TestCase):
         """
         # Point default_server at a name that does not exist in servers
         modified = self._original_yaml.replace(
-            "default_server: proxysql",
+            "default_server: proxysql_mysql",
             "default_server: nonexistent_server",
             1,
         )
@@ -1697,15 +1420,15 @@ class TestDigestTextDisplay(unittest.TestCase):
     so they appear in stats_mysql_query_digest with a digest_text > 100 chars.
     """
 
-    # ProxySQL MySQL frontend (port 6033) — same as TestProxySQL1BackendSQL
-    HOST = os.environ.get("PROXYSQL1_HOST", "127.0.0.1")
-    PORT = int(os.environ.get("PROXYSQL1_PORT", "6033"))
-    USER = "proxyuser"
-    PASS = "proxypass"
-    DB   = "testdb"
+    # ProxySQL MySQL frontend (port 6033)
+    HOST = os.environ.get("PROXYSQL_MYSQL_HOST", "127.0.0.1")
+    PORT = int(os.environ.get("PROXYSQL_MYSQL_PORT", "6033"))
+    USER = "proxyuser2"
+    PASS = "proxypass2"
+    DB   = "testdb2"
 
     # ProxyWeb path for the stats table
-    SERVER   = "proxysql"
+    SERVER   = SERVER
     DATABASE = "stats"
     TABLE    = "stats_mysql_query_digest"
 
@@ -1714,17 +1437,17 @@ class TestDigestTextDisplay(unittest.TestCase):
     LONG_QUERIES = [
         # ~120 chars after normalization (IN list becomes ?,?,... ; LIMIT becomes ?)
         (
-            "SELECT id, name, val FROM items "
+            "SELECT id, name, price FROM products "
             "WHERE id IN (1,2,3,4,5,6,7,8,9,10) "
-            "AND name IS NOT NULL AND val IS NOT NULL "
+            "AND name IS NOT NULL AND price IS NOT NULL "
             "ORDER BY id DESC LIMIT 100"
         ),
         # ~115 chars after normalization
         (
-            "SELECT id, name, val FROM items "
-            "WHERE name LIKE 'test%' AND val BETWEEN 1 AND 9999 "
+            "SELECT id, name, price FROM products "
+            "WHERE name LIKE 'test%' AND price BETWEEN 1 AND 9999 "
             "AND id > 0 AND id < 100000 "
-            "ORDER BY name ASC, val DESC"
+            "ORDER BY name ASC, price DESC"
         ),
     ]
 
@@ -1829,13 +1552,13 @@ class TestZPagination(unittest.TestCase):
     client.
     """
 
-    HOST = os.environ.get("PROXYSQL1_HOST", "127.0.0.1")
-    PORT = int(os.environ.get("PROXYSQL1_PORT", "6033"))
-    USER = "proxyuser"
-    PASS = "proxypass"
-    DB   = "testdb"
+    HOST = os.environ.get("PROXYSQL_MYSQL_HOST", "127.0.0.1")
+    PORT = int(os.environ.get("PROXYSQL_MYSQL_PORT", "6033"))
+    USER = "proxyuser2"
+    PASS = "proxypass2"
+    DB   = "testdb2"
 
-    SERVER   = "proxysql"
+    SERVER   = SERVER
     DATABASE = "stats"
     TABLE    = "stats_mysql_query_digest"
 
@@ -2268,8 +1991,8 @@ class TestQueryHistory(unittest.TestCase):
     - clear works per server without affecting the other
     """
 
-    S1 = SERVER            # "proxysql"
-    S2 = "proxysql2"
+    S1 = SERVER             # "proxysql_mysql"
+    S2 = PG_SERVER          # "proxysql_postgres"
     TOTAL_PER_SERVER = 26
 
     # Server 1: each query selects different columns + different LIMIT
@@ -2593,6 +2316,408 @@ class TestQueryHistory(unittest.TestCase):
         )
         self.assertNotEqual(resp.status_code, 500,
                             "Malformed JSON should not cause a 500")
+
+
+# ---------------------------------------------------------------------------
+# PostgreSQL backend tests
+# ---------------------------------------------------------------------------
+
+class TestPgSQLNavigation(unittest.TestCase):
+    """Verify that pgsql tables are visible on proxysql3 and hidden on proxysql."""
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+
+    def test_pgsql_tables_hidden_on_mysql_server(self):
+        """pgsql tables should be hidden on the MySQL-only proxysql server."""
+        resp = self.s.get(f"/{SERVER}/{DATABASE}/mysql_servers/")
+        self.assertNotIn("/main/pgsql_servers/", resp.text)
+
+    def test_mysql_tables_hidden_on_pg_server(self):
+        """mysql tables should be hidden on the PostgreSQL-only proxysql3 server."""
+        resp = self.s.get(f"/{PG_SERVER}/{DATABASE}/pgsql_servers/")
+        self.assertNotIn("/main/mysql_servers/", resp.text)
+
+    def test_pgsql_servers_in_nav(self):
+        """pgsql_servers should appear in the sidebar when browsing proxysql3."""
+        resp = self.s.get(f"/{PG_SERVER}/{DATABASE}/pgsql_servers/")
+        self.assertIn("pgsql_servers", resp.text)
+
+    def test_pgsql_users_in_nav(self):
+        """pgsql_users should appear in the sidebar when browsing proxysql3."""
+        resp = self.s.get(f"/{PG_SERVER}/{DATABASE}/pgsql_users/")
+        self.assertIn("pgsql_users", resp.text)
+
+    def test_pgsql_servers_table_view(self):
+        """Browsing pgsql_servers should return 200 and show column headers."""
+        resp = self.s.get(f"/{PG_SERVER}/{DATABASE}/pgsql_servers/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("hostname", resp.text)
+        self.assertIn("hostgroup_id", resp.text)
+
+    def test_pgsql_users_table_view(self):
+        """Browsing pgsql_users should return 200 and show column headers."""
+        resp = self.s.get(f"/{PG_SERVER}/{DATABASE}/pgsql_users/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("username", resp.text)
+
+    def test_pgsql_query_rules_table_view(self):
+        """Browsing pgsql_query_rules should return 200."""
+        resp = self.s.get(f"/{PG_SERVER}/{DATABASE}/pgsql_query_rules/")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_pgsql_servers_show_backends(self):
+        """The postgres publisher backend must appear in pgsql_servers."""
+        resp = self.s.get(f"/{PG_SERVER}/{DATABASE}/pgsql_servers/")
+        self.assertIn("postgres", resp.text)
+
+    def test_pgsql_users_show_pguser(self):
+        """The pguser registered via init must appear in pgsql_users."""
+        resp = self.s.get(f"/{PG_SERVER}/{DATABASE}/pgsql_users/")
+        self.assertIn("pguser", resp.text)
+
+    def test_runtime_pgsql_servers_table_view(self):
+        """runtime_pgsql_servers should be browsable and show the publisher backend."""
+        resp = self.s.get(f"/{PG_SERVER}/{DATABASE}/runtime_pgsql_servers/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("postgres", resp.text)
+
+
+class TestPgSQLServers(unittest.TestCase):
+    """CRUD operations on pgsql_servers via ProxyWeb API."""
+
+    SERVER   = PG_SERVER
+    DATABASE = "main"
+    TABLE    = "pgsql_servers"
+
+    TEST_HOST = "test-pg-server-host"
+    TEST_HG   = 99
+    TEST_PORT = 5433
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+
+    def _pk(self):
+        return {
+            "hostgroup_id": str(self.TEST_HG),
+            "hostname":     self.TEST_HOST,
+            "port":         str(self.TEST_PORT),
+        }
+
+    def _insert(self):
+        return self.s.post_json("/api/insert_row", {
+            "server":      self.SERVER,
+            "database":    self.DATABASE,
+            "table":       self.TABLE,
+            "columnNames": ["hostgroup_id", "hostname", "port"],
+            "data": {
+                "hostgroup_id": str(self.TEST_HG),
+                "hostname":     self.TEST_HOST,
+                "port":         str(self.TEST_PORT),
+            },
+        }).json()
+
+    def _delete(self):
+        return self.s.post_json("/api/delete_row", {
+            "server":   self.SERVER,
+            "database": self.DATABASE,
+            "table":    self.TABLE,
+            "pkValues": self._pk(),
+        }).json()
+
+    def test_insert_pgsql_server(self):
+        """Insert a row into pgsql_servers and verify success."""
+        result = self._insert()
+        self.assertTrue(result.get("success"), result.get("error"))
+        self._delete()
+
+    def test_update_pgsql_server_weight(self):
+        """Update the weight column of a pgsql_servers row."""
+        self._insert()
+        try:
+            result = self.s.post_json("/api/update_row", {
+                "server":      self.SERVER,
+                "database":    self.DATABASE,
+                "table":       self.TABLE,
+                "pkValues":    self._pk(),
+                "columnNames": ["hostgroup_id", "hostname", "port", "weight",
+                                "status", "compression", "max_connections",
+                                "max_replication_lag", "use_ssl",
+                                "max_latency_ms", "comment"],
+                "data": {"weight": "10"},
+            }).json()
+            self.assertTrue(result.get("success"), result.get("error"))
+        finally:
+            self._delete()
+
+    def test_delete_pgsql_server(self):
+        """Delete a row from pgsql_servers and verify success."""
+        self._insert()
+        result = self._delete()
+        self.assertTrue(result.get("success"), result.get("error"))
+
+    def test_table_view_shows_postgres_backends(self):
+        """The postgres backends registered by init must appear."""
+        resp = self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+        self.assertIn("postgres", resp.text)
+
+
+class TestPgSQLUsers(unittest.TestCase):
+    """CRUD operations on pgsql_users via ProxyWeb API."""
+
+    SERVER   = PG_SERVER
+    DATABASE = "main"
+    TABLE    = "pgsql_users"
+
+    TEST_USER = "test_pg_crud_user"
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+
+    def _pk(self):
+        return {
+            "username": self.TEST_USER,
+            "backend":  "1",
+        }
+
+    def _insert(self):
+        return self.s.post_json("/api/insert_row", {
+            "server":      self.SERVER,
+            "database":    self.DATABASE,
+            "table":       self.TABLE,
+            "columnNames": ["username", "password", "default_hostgroup"],
+            "data": {
+                "username":          self.TEST_USER,
+                "password":          "testpass",
+                "default_hostgroup": "10",
+            },
+        }).json()
+
+    def _delete(self):
+        return self.s.post_json("/api/delete_row", {
+            "server":   self.SERVER,
+            "database": self.DATABASE,
+            "table":    self.TABLE,
+            "pkValues": self._pk(),
+        }).json()
+
+    def test_insert_pgsql_user(self):
+        """Insert a row into pgsql_users and verify success."""
+        result = self._insert()
+        self.assertTrue(result.get("success"), result.get("error"))
+        self._delete()
+
+    def test_delete_pgsql_user(self):
+        """Delete a row from pgsql_users and verify success."""
+        self._insert()
+        result = self._delete()
+        self.assertTrue(result.get("success"), result.get("error"))
+
+    def test_table_view_shows_pguser(self):
+        """The pguser registered by init must appear."""
+        resp = self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+        self.assertIn("pguser", resp.text)
+
+
+class TestPgSQLLoadSave(unittest.TestCase):
+    """Test LOAD/SAVE commands for PostgreSQL config in ProxySQL."""
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        # Navigate to proxysql3 to set session server
+        self.s.get(f"/{PG_SERVER}/{DATABASE}/pgsql_servers/")
+
+    def test_load_pgsql_servers_to_runtime(self):
+        """LOAD PGSQL SERVERS TO RUNTIME should succeed."""
+        result = self.s.post_form("/api/execute_proxysql_command", {
+            "sql": "LOAD PGSQL SERVERS TO RUNTIME",
+        }).json()
+        self.assertTrue(result.get("success"), result.get("error"))
+
+    def test_save_pgsql_servers_to_disk(self):
+        """SAVE PGSQL SERVERS TO DISK should succeed."""
+        result = self.s.post_form("/api/execute_proxysql_command", {
+            "sql": "SAVE PGSQL SERVERS TO DISK",
+        }).json()
+        self.assertTrue(result.get("success"), result.get("error"))
+
+    def test_load_pgsql_users_to_runtime(self):
+        """LOAD PGSQL USERS TO RUNTIME should succeed."""
+        result = self.s.post_form("/api/execute_proxysql_command", {
+            "sql": "LOAD PGSQL USERS TO RUNTIME",
+        }).json()
+        self.assertTrue(result.get("success"), result.get("error"))
+
+    def test_save_pgsql_users_to_disk(self):
+        """SAVE PGSQL USERS TO DISK should succeed."""
+        result = self.s.post_form("/api/execute_proxysql_command", {
+            "sql": "SAVE PGSQL USERS TO DISK",
+        }).json()
+        self.assertTrue(result.get("success"), result.get("error"))
+
+
+class TestPgSQLQueryViaSQL(unittest.TestCase):
+    """Query pgsql tables via the SQL form in ProxyWeb."""
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+
+    def test_select_pgsql_servers(self):
+        """SELECT from pgsql_servers via SQL form should return the publisher backend."""
+        self.s.get(f"/{PG_SERVER}/{DATABASE}/pgsql_servers/")
+        resp = self.s.post_form(
+            f"/{PG_SERVER}/{DATABASE}/pgsql_servers/sql/",
+            {"sql": "SELECT * FROM pgsql_servers"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("postgres", resp.text)
+
+    def test_select_pgsql_users(self):
+        """SELECT from pgsql_users via SQL form should return pguser."""
+        self.s.get(f"/{PG_SERVER}/{DATABASE}/pgsql_users/")
+        resp = self.s.post_form(
+            f"/{PG_SERVER}/{DATABASE}/pgsql_users/sql/",
+            {"sql": "SELECT * FROM pgsql_users"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("pguser", resp.text)
+
+    def test_select_runtime_pgsql_servers(self):
+        """SELECT from runtime_pgsql_servers should show ONLINE backends."""
+        self.s.get(f"/{PG_SERVER}/{DATABASE}/runtime_pgsql_servers/")
+        resp = self.s.post_form(
+            f"/{PG_SERVER}/{DATABASE}/runtime_pgsql_servers/sql/",
+            {"sql": "SELECT * FROM runtime_pgsql_servers"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("ONLINE", resp.text)
+
+
+class TestPgSQLReplication(unittest.TestCase):
+    """Verify PostgreSQL logical replication between postgres (publisher) and postgres2 (subscriber).
+
+    Writes a row to the publisher's items_pg table and verifies it appears
+    on the subscriber via logical replication. Uses docker compose exec + psql
+    since no Python PostgreSQL driver is required by the test suite.
+    """
+
+    @staticmethod
+    def _psql(service, db, user, sql):
+        """Run a psql command inside a docker compose service and return stdout."""
+        result = subprocess.run(
+            ["docker", "compose", "exec", "-T", service,
+             "psql", "-U", user, "-d", db, "-t", "-A", "-c", sql],
+            capture_output=True, text=True, timeout=15,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"psql on {service} failed (rc={result.returncode}): {result.stderr.strip()}"
+            )
+        return result.stdout.strip()
+
+    def test_replicated_seed_data(self):
+        """Seed data inserted on the publisher must appear on the subscriber."""
+        rows = self._psql("postgres2", "testdb_pg2", "pguser2",
+                          "SELECT count(*) FROM items_pg")
+        self.assertGreaterEqual(int(rows), 3,
+                                "Subscriber should have replicated seed rows from publisher")
+
+    def test_insert_replicates_to_subscriber(self):
+        """A row inserted on the publisher must replicate to the subscriber."""
+        tag = f"repl-test-{int(time.time())}"
+        try:
+            # Insert on publisher
+            self._psql("postgres", "testdb_pg", "pguser",
+                       f"INSERT INTO items_pg (name, val) VALUES ('{tag}', 42)")
+
+            # Wait for replication (logical replication is near-instant but not synchronous)
+            found = False
+            for _ in range(10):
+                out = self._psql("postgres2", "testdb_pg2", "pguser2",
+                                 f"SELECT name FROM items_pg WHERE name = '{tag}'")
+                if tag in out:
+                    found = True
+                    break
+                time.sleep(0.5)
+
+            self.assertTrue(found,
+                            f"Row '{tag}' did not replicate to subscriber within 5 seconds")
+        finally:
+            # Cleanup on publisher — DELETE also replicates
+            self._psql("postgres", "testdb_pg", "pguser",
+                       f"DELETE FROM items_pg WHERE name = '{tag}'")
+
+    def test_delete_replicates_to_subscriber(self):
+        """A row deleted on the publisher must be removed from the subscriber."""
+        tag = f"repl-del-{int(time.time())}"
+        # Insert and wait for replication
+        self._psql("postgres", "testdb_pg", "pguser",
+                   f"INSERT INTO items_pg (name, val) VALUES ('{tag}', 99)")
+        for _ in range(10):
+            out = self._psql("postgres2", "testdb_pg2", "pguser2",
+                             f"SELECT name FROM items_pg WHERE name = '{tag}'")
+            if tag in out:
+                break
+            time.sleep(0.5)
+
+        # Delete on publisher
+        self._psql("postgres", "testdb_pg", "pguser",
+                   f"DELETE FROM items_pg WHERE name = '{tag}'")
+
+        # Wait for delete to replicate
+        gone = False
+        for _ in range(10):
+            out = self._psql("postgres2", "testdb_pg2", "pguser2",
+                             f"SELECT name FROM items_pg WHERE name = '{tag}'")
+            if tag not in out or out == "":
+                gone = True
+                break
+            time.sleep(0.5)
+
+        self.assertTrue(gone,
+                        f"Deleted row '{tag}' still present on subscriber after 5 seconds")
+
+    def test_update_replicates_to_subscriber(self):
+        """A row updated on the publisher must reflect on the subscriber."""
+        tag = f"repl-upd-{int(time.time())}"
+        try:
+            self._psql("postgres", "testdb_pg", "pguser",
+                       f"INSERT INTO items_pg (name, val) VALUES ('{tag}', 1)")
+            # Wait for insert to replicate
+            for _ in range(10):
+                out = self._psql("postgres2", "testdb_pg2", "pguser2",
+                                 f"SELECT val FROM items_pg WHERE name = '{tag}'")
+                if "1" in out:
+                    break
+                time.sleep(0.5)
+
+            # Update on publisher
+            self._psql("postgres", "testdb_pg", "pguser",
+                       f"UPDATE items_pg SET val = 999 WHERE name = '{tag}'")
+
+            # Wait for update to replicate
+            updated = False
+            for _ in range(10):
+                out = self._psql("postgres2", "testdb_pg2", "pguser2",
+                                 f"SELECT val FROM items_pg WHERE name = '{tag}'")
+                if "999" in out:
+                    updated = True
+                    break
+                time.sleep(0.5)
+
+            self.assertTrue(updated,
+                            "Updated value did not replicate to subscriber within 5 seconds")
+        finally:
+            self._psql("postgres", "testdb_pg", "pguser",
+                       f"DELETE FROM items_pg WHERE name = '{tag}'")
 
 
 # ---------------------------------------------------------------------------

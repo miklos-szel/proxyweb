@@ -1,6 +1,6 @@
 # ProxyWeb
 
-A modern, open-source web UI for managing [ProxySQL](https://proxysql.com/) servers.
+A modern, open-source web UI for managing [ProxySQL](https://proxysql.com/) servers — **MySQL and PostgreSQL**.
 
 ![ProxyWeb — table browser with pagination and search](misc/images/table_browser.png)
 
@@ -8,8 +8,11 @@ A modern, open-source web UI for managing [ProxySQL](https://proxysql.com/) serv
 
 ProxyWeb gives you full control over ProxySQL through a clean web interface — browse tables, edit rows inline, run SQL queries, compare configurations across layers, and manage multiple ProxySQL instances from a single dashboard.
 
+**Works with both MySQL and PostgreSQL backends.** ProxySQL 3.x added native PostgreSQL support, and ProxyWeb fully supports managing `pgsql_servers`, `pgsql_users`, `pgsql_query_rules`, and all other PostgreSQL-related ProxySQL tables. You can run dedicated MySQL and PostgreSQL ProxySQL instances side by side and manage them all from one ProxyWeb dashboard.
+
 ## Features
 
+- **MySQL + PostgreSQL** — manage both MySQL and PostgreSQL backends via ProxySQL 3.x
 - **Multi-server management** — switch between ProxySQL instances from the nav bar
 - **Table browser** — view, search, sort, and paginate any ProxySQL table
 - **Inline editing** — insert, update, and delete rows directly in the browser
@@ -134,6 +137,59 @@ export PROXYWEB_SERVER_PROXYSQL_PASSWORD=mypassword
 ```
 
 When running in Docker, place variables in a `.env` file mounted at `/app/.env` (or set `PROXYWEB_ENV_FILE` to a custom path). The entrypoint loads it automatically before startup.
+
+## Test Environment
+
+The `test/` directory contains a full Docker Compose stack for integration testing, including MySQL and PostgreSQL backends with replication.
+
+### Services
+
+| Service | Role | Exposed ports |
+|---|---|---|
+| `proxysql2` | ProxySQL for MySQL backends (read/write split) | 6032 (admin), 6033 (MySQL) |
+| `proxysql3` | ProxySQL for PostgreSQL backends | 6034 (admin), 6090 (PostgreSQL) |
+| `mysql2` / `mysql3` | MySQL writer/reader pair with replication | - |
+| `postgres` | PostgreSQL publisher (logical replication) | - |
+| `postgres2` | PostgreSQL subscriber | - |
+| `proxyweb` | App under test | 5000 |
+
+### Running tests
+
+```bash
+cd test
+bash run_tests.sh          # build stack, run all tests, tear down
+bash run_tests.sh --keep   # same but leave the stack running
+```
+
+With `--keep`, you can interact with all services:
+
+```bash
+# Browse ProxyWeb
+open http://localhost:5000    # admin / admin42
+
+# MySQL via ProxySQL
+mysql -h 127.0.0.1 -P 6033 -u proxyuser2 -pproxypass2 testdb2
+
+# PostgreSQL via ProxySQL 3 (password: pgpass)
+PGPASSWORD=pgpass psql -h 127.0.0.1 -p 6090 -U pguser testdb_pg
+
+# ProxySQL admin (MySQL instance)
+mysql -h 127.0.0.1 -P 6032 -u radmin -pradmin
+
+# ProxySQL admin (PostgreSQL instance)
+mysql -h 127.0.0.1 -P 6034 -u radmin -pradmin
+```
+
+### PostgreSQL replication
+
+The test stack sets up logical replication between `postgres` (publisher) and `postgres2` (subscriber) on the `items_pg` table. Inserts, updates, and deletes on the publisher replicate automatically to the subscriber. The test suite verifies this end-to-end.
+
+### Tear down
+
+```bash
+cd test
+docker compose down -v --remove-orphans
+```
 
 ## Credits
 
