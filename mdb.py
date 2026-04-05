@@ -686,7 +686,13 @@ def get_config_diff(server=None):
         config = get_config()
         if server is None:
             server = get_default_server()
-        hide_tables = config.get('global', {}).get('hide_tables', [])
+        # Use per-server hide_tables if defined, otherwise fall back to global
+        # (matches the logic in get_all_dbs_and_tables)
+        server_config = config.get('servers', {}).get(server, {})
+        if 'hide_tables' in server_config:
+            hide_tables = server_config['hide_tables']
+        else:
+            hide_tables = config.get('global', {}).get('hide_tables', [])
         skip_variables = config.get('global', {}).get('config_diff_skip_variable', [])
 
         diff_result = {
@@ -728,7 +734,7 @@ def get_config_diff(server=None):
                 continue
 
             # Only include ProxySQL configuration tables
-            if any(table.startswith(prefix) for prefix in ['mysql_', 'admin_', 'global_', 'scheduler', 'restapi']):
+            if any(table.startswith(prefix) for prefix in ['mysql_', 'pgsql_', 'admin_', 'global_', 'scheduler', 'restapi']):
                 tables_to_diff.append(table)
 
         query_db['cnf']['servers'][server]['conn'].close()
