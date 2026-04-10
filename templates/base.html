@@ -40,7 +40,7 @@
         $(document).ready(function () {
             // Initialize DataTables
             if ($('#proxywebtable').length) {
-                $('#proxywebtable').DataTable({
+                var dtConfig = {
                     "lengthMenu": [[25, 50, 100, -1], [25, 50, 100, "All"]],
                     "pageLength": 100,
                     "responsive": false,
@@ -53,12 +53,66 @@
                         "search": "",
                         "searchPlaceholder": "Search...",
                         "lengthMenu": "Show _MENU_ entries"
-                    }{% if content is defined and content['order'] == "true" %},
-                    "order": [[0, "desc"]]{% endif %}
-                });
+                    }
+                };
 
-                // Enable inline editing after DataTable is initialized
-                enableInlineEditing();
+                {% if content is defined and content['order'] == "true" %}
+                dtConfig.order = [[0, "desc"]];
+                {% endif %}
+
+                if (typeof serverSideMode !== 'undefined' && serverSideMode) {
+                    dtConfig.serverSide = true;
+                    dtConfig.processing = true;
+                    dtConfig.ajax = {
+                        url: '/api/table_data',
+                        data: function(d) {
+                            d.server = tableServer;
+                            d.database = tableDatabase;
+                            d.table = tableName;
+                        }
+                    };
+                    dtConfig.lengthMenu = [[25, 50, 100, 500], [25, 50, 100, 500]];
+
+                    // digest_text column: replicate Jinja truncation logic in JS
+                    if (typeof tableColumnNames !== 'undefined') {
+                        var digestIdx = tableColumnNames.indexOf('digest_text');
+                        if (digestIdx !== -1) {
+                            dtConfig.columnDefs = [{
+                                targets: digestIdx,
+                                render: function(data, type, row, meta) {
+                                    if (type !== 'display' || !data) return data;
+                                    var val = String(data).trim();
+                                    if (val.length > 100) {
+                                        var short = $('<span>').text(val.substring(0, 100)).html();
+                                        var full = $('<span>').text(val).html();
+                                        return '<span class="digest-short">' + short + '</span>'
+                                             + '<span class="digest-full" style="display:none;">' + full + '</span>'
+                                             + ' <a href="#" class="digest-toggle badge text-bg-secondary fw-normal ms-1" onclick="toggleDigest(this);return false;">'
+                                             + '<i class="fas fa-chevron-right fa-xs"></i> more</a>';
+                                    }
+                                    return $('<span>').text(val).html();
+                                },
+                                createdCell: function(td) {
+                                    td.style.whiteSpace = 'normal';
+                                    td.style.wordBreak = 'break-word';
+                                    td.style.minWidth = '400px';
+                                    td.style.maxWidth = '700px';
+                                }
+                            }];
+                        }
+                    }
+
+                    dtConfig.drawCallback = function() {
+                        enableInlineEditing();
+                        initializeTooltips();
+                    };
+                }
+
+                $('#proxywebtable').DataTable(dtConfig);
+
+                if (typeof serverSideMode === 'undefined' || !serverSideMode) {
+                    enableInlineEditing();
+                }
 
                 // Initialize tooltips after table is ready
                 initializeTooltips();
