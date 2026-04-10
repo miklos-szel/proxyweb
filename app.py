@@ -289,14 +289,14 @@ def render_change(server, database, table):
         select = re.search(r'^\s*SELECT\b.*\bFROM\b', session['sql'], re.I | re.S)
         if not select and session.get('role') == 'readonly':
             error = "Read-only user cannot execute non-SELECT statements"
-            content = mdb.get_table_content(db, server, database, table)
+            content = mdb.get_table_metadata(db, server, database, table)
             return render_template("show_table_info.html", content=content, error=error, message="")
         if select:
             content = mdb.execute_adhoc_query(db, server, session['sql'])
             content['order'] = 'true'
         else:
             ret = mdb.execute_change(db, server, session['sql'])
-            content = mdb.get_table_content(db, server, database, table)
+            content = mdb.get_table_metadata(db, server, database, table)
 
         if "ERROR" in ret:
             error = ret
@@ -763,8 +763,11 @@ def api_table_data():
                             'recordsFiltered': 0, 'data': [],
                             'error': 'Missing or invalid server/table parameter'})
 
+        # Use a request-local db container to avoid cursor state mutation
+        # on the module-level db dict between concurrent requests.
+        req_db = defaultdict(lambda: defaultdict(dict))
         result = mdb.get_table_content_paginated(
-            db, server, database, table,
+            req_db, server, database, table,
             start=start, length=length,
             search_value=search_value,
             order_column=order_col, order_dir=order_dir,

@@ -1039,14 +1039,16 @@ class TestMultiServer(unittest.TestCase):
     def test_mysql_server_has_mysql_backends(self):
         """proxysql_mysql should list mysql2 as its backend."""
         self.s.get(f"/{self.S1}/{self.DB}/mysql_servers/")
-        data = self.s.get_table_data(self.S1, self.DB, "mysql_servers")
+        data = self.s.get_table_data(self.S1, self.DB, "mysql_servers",
+                                      **{"search[value]": "mysql2"})
         flat = str(data["data"])
         self.assertIn("mysql2", flat)
 
     def test_pg_server_has_postgres_backends(self):
         """proxysql_postgres should list postgres backends."""
         self.s.get(f"/{self.S2}/{self.DB}/pgsql_servers/")
-        data = self.s.get_table_data(self.S2, self.DB, "pgsql_servers")
+        data = self.s.get_table_data(self.S2, self.DB, "pgsql_servers",
+                                      **{"search[value]": "postgres"})
         flat = str(data["data"])
         self.assertIn("postgres", flat)
 
@@ -1680,18 +1682,24 @@ class TestServerSidePagination(unittest.TestCase):
         self.assertLessEqual(len(body["data"]), 1000)
 
     def test_search_filters(self):
-        """Searching for a known value should reduce recordsFiltered."""
-        full = self._api().json()
-        # Use a non-existent search term — recordsFiltered should be 0 or less than total
+        """Searching for a nonexistent term must return zero matches."""
         filtered = self._api(**{"search[value]": "ZZZZNONEXISTENT99999"}).json()
-        self.assertLessEqual(filtered["recordsFiltered"], full["recordsTotal"])
+        self.assertEqual(filtered["recordsFiltered"], 0,
+                         "Nonexistent search term should yield 0 filtered records")
+        self.assertEqual(len(filtered["data"]), 0,
+                         "Nonexistent search term should return no rows")
 
     def test_sort_direction(self):
-        """Sort direction parameter must be respected (asc vs desc)."""
-        asc = self._api(**{"order[0][dir]": "asc"}).json()
-        desc = self._api(**{"order[0][dir]": "desc"}).json()
-        # Both should succeed and return data
+        """Sort direction parameter must produce opposite row ordering."""
+        asc = self._api(**{"order[0][dir]": "asc", "order[0][column]": "0"}).json()
+        desc = self._api(**{"order[0][dir]": "desc", "order[0][column]": "0"}).json()
         self.assertEqual(asc["recordsTotal"], desc["recordsTotal"])
+        if len(asc["data"]) > 1 and len(desc["data"]) > 1:
+            # First column values should be in opposite order
+            asc_vals = [row[0] for row in asc["data"]]
+            desc_vals = [row[0] for row in desc["data"]]
+            self.assertEqual(asc_vals, list(reversed(desc_vals)),
+                             "asc and desc should produce reversed row order")
 
     def test_missing_server_returns_error(self):
         """Missing server parameter should return an error response."""
@@ -1739,8 +1747,7 @@ class TestServerSidePagination(unittest.TestCase):
                                 "Page 1 and page 2 should contain different rows")
 
     def test_search_known_value(self):
-        """Searching for a value present in the table should return it."""
-        # mysql_servers has known hostgroups; search for hostgroup_id column value
+        """Searching for a value present in the table should return matching rows."""
         full = self._api().json()
         if full["recordsTotal"] > 0:
             # Pick a value from the first row to search for
@@ -1749,6 +1756,11 @@ class TestServerSidePagination(unittest.TestCase):
             filtered = self._api(**{"search[value]": search_val}).json()
             self.assertGreater(filtered["recordsFiltered"], 0,
                                f"Searching for '{search_val}' should find at least one row")
+            # Verify returned rows actually contain the search value
+            for row in filtered["data"]:
+                row_str = " ".join(str(c) for c in row)
+                self.assertIn(search_val, row_str,
+                              f"Row {row} should contain search term '{search_val}'")
 
     def test_non_numeric_draw_returns_error(self):
         """Non-numeric draw parameter should return gracefully."""
@@ -2518,7 +2530,8 @@ class TestPgSQLNavigation(unittest.TestCase):
     def test_pgsql_users_show_pguser(self):
         """The pguser registered via init must appear in pgsql_users."""
         self.s.get(f"/{PG_SERVER}/{DATABASE}/pgsql_users/")
-        data = self.s.get_table_data(PG_SERVER, DATABASE, "pgsql_users")
+        data = self.s.get_table_data(PG_SERVER, DATABASE, "pgsql_users",
+                                      **{"search[value]": "pguser"})
         flat = str(data["data"])
         self.assertIn("pguser", flat)
 
@@ -2666,7 +2679,8 @@ class TestPgSQLUsers(unittest.TestCase):
     def test_table_view_shows_pguser(self):
         """The pguser registered by init must appear."""
         self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
-        data = self.s.get_table_data(self.SERVER, self.DATABASE, self.TABLE)
+        data = self.s.get_table_data(self.SERVER, self.DATABASE, self.TABLE,
+                                      **{"search[value]": "pguser"})
         flat = str(data["data"])
         self.assertIn("pguser", flat)
 
