@@ -451,7 +451,7 @@
             </div>
             <div class="stat-item">
                 <i class="fas fa-rows"></i>
-                <span><strong>Rows:</strong> {{ content['rows']|length }}</span>
+                <span><strong>Rows:</strong> {{ content.get('row_count', content['rows']|length) }}</span>
             </div>
         </div>
     </div>
@@ -463,6 +463,14 @@
         </button>
     </div>
 
+    <script>
+        var tableColumnNames = {{ content['column_names'] | tojson }};
+        var serverSideMode = {{ content.get('server_side', False) | tojson }};
+        var tableServer = {{ session['server'] | tojson }};
+        var tableDatabase = {{ session.get('database', 'main') | tojson }};
+        var tableName = {{ session.get('table', '') | tojson }};
+    </script>
+
     <div>
         <table id="proxywebtable" class="table table-hover table-striped mb-0">
             <thead class="sticky-header">
@@ -473,6 +481,7 @@
                 </tr>
             </thead>
             <tbody>
+                {% if not content.get('server_side') %}
                 {% for row in content['rows'] %}
                     <tr>
                         {% for column in row %}
@@ -493,6 +502,7 @@
                         {% endfor %}
                     </tr>
                 {% endfor %}
+                {% endif %}
             </tbody>
         </table>
     </div>

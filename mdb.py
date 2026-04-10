@@ -918,6 +918,109 @@ def get_table_content(db, server, database, table):
         db['cnf']['servers'][server]['conn'].close()
         raise ValueError(e)
 
+
+def get_table_metadata(db, server, database, table):
+    """Return column names, row count, and misc config without fetching row data."""
+    try:
+        db_connect(db, server=server, dictionary=False)
+        cur = db['cnf']['servers'][server]['cur']
+        try:
+            cur.execute(f"SELECT * FROM {_quote_ident(database)}.{_quote_ident(table)} LIMIT 0")
+            column_names = [i[0] for i in cur.description]
+            cur.fetchall()  # consume empty result set before next query
+            cur.execute(f"SELECT COUNT(*) FROM {_quote_ident(database)}.{_quote_ident(table)}")
+            row_count = cur.fetchone()[0]
+            return {
+                'rows': [],
+                'column_names': column_names,
+                'row_count': row_count,
+                'misc': get_config()['misc'],
+                'server_side': True,
+            }
+        finally:
+            cur.close()
+    except (mysql.connector.Error, mysql.connector.Warning) as e:
+        conn = db['cnf']['servers'][server].get('conn')
+        if conn:
+            conn.close()
+        raise ValueError(e)
+
+
+def get_table_content_paginated(db, server, database, table,
+                                start=0, length=100,
+                                search_value='',
+                                order_column=0, order_dir='asc'):
+    """Return a page of rows for DataTables server-side processing."""
+    MAX_LENGTH = 1000
+    length = min(max(int(length), 1), MAX_LENGTH)
+    start = max(int(start), 0)
+    if order_dir not in ('asc', 'desc'):
+        order_dir = 'asc'
+
+    try:
+        db_connect(db, server=server, dictionary=False)
+        cur = db['cnf']['servers'][server]['cur']
+        try:
+            # Get column names
+            cur.execute(f"SELECT * FROM {_quote_ident(database)}.{_quote_ident(table)} LIMIT 0")
+            column_names = [i[0] for i in cur.description]
+            cur.fetchall()  # consume empty result set before next query
+
+            # Clamp order column
+            order_column = max(0, min(int(order_column), len(column_names) - 1))
+            order_col_name = _quote_ident(column_names[order_column])
+
+            qualified_table = f"{_quote_ident(database)}.{_quote_ident(table)}"
+
+            # Total count (unfiltered)
+            cur.execute(f"SELECT COUNT(*) FROM {qualified_table}")
+            records_total = cur.fetchone()[0]
+
+            # Build WHERE clause for search
+            where_clause = ""
+            if search_value:
+                escaped = search_value.replace("'", "''").replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                conditions = []
+                for col in column_names:
+                    conditions.append(f"CAST({_quote_ident(col)} AS CHAR) LIKE '%{escaped}%'")
+                where_clause = "WHERE " + " OR ".join(conditions)
+
+            # Filtered count
+            if where_clause:
+                cur.execute(f"SELECT COUNT(*) FROM {qualified_table} {where_clause}")
+                records_filtered = cur.fetchone()[0]
+            else:
+                records_filtered = records_total
+
+            # Fetch page
+            sql = (f"SELECT * FROM {qualified_table} {where_clause} "
+                   f"ORDER BY {order_col_name} {order_dir} "
+                   f"LIMIT {length} OFFSET {start}")
+            cur.execute(sql)
+            rows = cur.fetchall()
+
+            # Process timestamps
+            content = {'rows': rows, 'column_names': column_names}
+            process_table_content(table, content)
+
+            # Convert tuples to lists for JSON serialisation
+            data = [list(row) for row in content['rows']]
+
+            return {
+                'recordsTotal': int(records_total),
+                'recordsFiltered': int(records_filtered),
+                'data': data,
+                'column_names': column_names,
+            }
+        finally:
+            cur.close()
+    except (mysql.connector.Error, mysql.connector.Warning) as e:
+        conn = db['cnf']['servers'][server].get('conn')
+        if conn:
+            conn.close()
+        raise ValueError(e)
+
+
 def process_table_content(table, content):
     """
     Processes content rows by converting time-based fields to UTC datetime strings.

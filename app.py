@@ -259,8 +259,7 @@ def render_show_table_content(server, database="main", table="global_variables")
         session['read_only'] = mdb.get_read_only(server)
         if session.get('role') == 'readonly':
             session['read_only'] = True
-        content = mdb.get_table_content(db, server, database, table)
-        mdb.process_table_content(table,content)
+        content = mdb.get_table_metadata(db, server, database, table)
         return render_template("show_table_info.html", content=content)
     except Exception as e:
         raise ValueError(e)
@@ -290,14 +289,14 @@ def render_change(server, database, table):
         select = re.search(r'^\s*SELECT\b.*\bFROM\b', session['sql'], re.I | re.S)
         if not select and session.get('role') == 'readonly':
             error = "Read-only user cannot execute non-SELECT statements"
-            content = mdb.get_table_content(db, server, database, table)
+            content = mdb.get_table_metadata(db, server, database, table)
             return render_template("show_table_info.html", content=content, error=error, message="")
         if select:
             content = mdb.execute_adhoc_query(db, server, session['sql'])
             content['order'] = 'true'
         else:
             ret = mdb.execute_change(db, server, session['sql'])
-            content = mdb.get_table_content(db, server, database, table)
+            content = mdb.get_table_metadata(db, server, database, table)
 
         if "ERROR" in ret:
             error = ret
@@ -743,6 +742,48 @@ def api_get_schema():
 
 
 _ALLOWED_PROXYSQL_CMD = re.compile(r'^\s*(LOAD|SAVE|SELECT\s+CONFIG)\b', re.IGNORECASE)
+
+@app.route('/api/table_data')
+@login_required
+def api_table_data():
+    """Serve paginated table data for DataTables server-side processing."""
+    try:
+        server = request.args.get('server', session.get('server', ''))
+        database = request.args.get('database', 'main')
+        table = request.args.get('table', '')
+        draw = int(request.args.get('draw', 1))
+        start = int(request.args.get('start', 0))
+        length = int(request.args.get('length', 100))
+        search_value = request.args.get('search[value]', '')
+        order_col = int(request.args.get('order[0][column]', 0))
+        order_dir = request.args.get('order[0][dir]', 'asc')
+
+        if not server or not table or server not in mdb.get_servers():
+            return jsonify({'draw': draw, 'recordsTotal': 0,
+                            'recordsFiltered': 0, 'data': [],
+                            'error': 'Missing or invalid server/table parameter'})
+
+        # Use a request-local db container to avoid cursor state mutation
+        # on the module-level db dict between concurrent requests.
+        req_db = defaultdict(lambda: defaultdict(dict))
+        result = mdb.get_table_content_paginated(
+            req_db, server, database, table,
+            start=start, length=length,
+            search_value=search_value,
+            order_column=order_col, order_dir=order_dir,
+        )
+        result['draw'] = draw
+        return jsonify(result)
+    except Exception as e:
+        logging.exception(f"API error in table_data: {e}")
+        try:
+            safe_draw = int(request.args.get('draw', 1))
+        except (ValueError, TypeError):
+            safe_draw = 1
+        return jsonify({'draw': safe_draw,
+                        'recordsTotal': 0, 'recordsFiltered': 0,
+                        'data': [], 'error': str(e)})
+
 
 @app.route('/api/execute_proxysql_command', methods=['POST'])
 @login_required

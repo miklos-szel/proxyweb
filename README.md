@@ -14,7 +14,7 @@ ProxyWeb gives you full control over ProxySQL through a clean web interface — 
 
 - **MySQL + PostgreSQL** — manage both MySQL and PostgreSQL backends via ProxySQL 3.x
 - **Multi-server management** — switch between ProxySQL instances from the nav bar
-- **Table browser** — view, search, sort, and paginate any ProxySQL table
+- **Table browser** — view, search, sort, and paginate any ProxySQL table with server-side pagination
 - **Inline editing** — insert, update, and delete rows directly in the browser
 - **SQL query editor** — run ad-hoc queries with quick-query shortcuts for common operations
 - **Query history** — persistent per-server history with dropdown recall and full history page

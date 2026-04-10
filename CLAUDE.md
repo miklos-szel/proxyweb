@@ -92,7 +92,7 @@ The `SECRET_KEY` placeholder `12345678901234567890` is replaced at container sta
 
 1. All routes require `@login_required` (session-based, credentials from config).
 2. `render_list_dbs` (route `/`) sets up the session with `dblist`, `server`, `servers`, and `misc` — these are reused by templates.
-3. `render_show_table_content` (route `/<server>/<database>/<table>/`) fetches table data via `mdb.get_table_content()` and calls `mdb.process_table_content()` for any table-specific post-processing.
+3. `render_show_table_content` (route `/<server>/<database>/<table>/`) fetches table metadata (column names, row count) via `mdb.get_table_metadata()`. Row data is loaded on demand via `/api/table_data` using DataTables server-side processing — only one page of rows is ever in memory at a time.
 4. Inline row edits/inserts/deletes go to `/api/update_row`, `/api/insert_row`, `/api/delete_row` — these call the corresponding `mdb.*_row()` functions which build and execute SQL against ProxySQL. All three check `mdb.get_read_only(server)` and reject `runtime_*` tables with 403 before mutating.
 5. The SQL form in `show_table_info.html` posts to `/<server>/<database>/<table>/sql/` — SELECT statements render `show_adhoc_report.html`, everything else executes as a change and refreshes the table.
 6. `/api/execute_proxysql_command` only accepts `LOAD`, `SAVE`, and `SELECT CONFIG` statements (validated per-statement after splitting on `;`).
@@ -180,7 +180,7 @@ Rules:
 | hardcoded `'proxysql'` fallback in `render_list_dbs` and `execute_proxysql_command` crashes when first server is not named `proxysql` | `TestDefaultServerFallback` |
 | `dict_to_yaml()` rendered DSN list entries as inline JSON (`{"host": ...}`) instead of block YAML; new server with empty name silently dropped | `TestSettingsUIServer` |
 | `digest_text` in `stats_mysql_query_digest` had leading whitespace, used `pre-wrap`, truncated at 60 chars, and showed raw Unicode arrows instead of FA chevrons | `TestDigestTextDisplay` |
-| `stats_mysql_query_digest` must serve > 100 rows so DataTables activates client-side pagination; pagination HTML is JS-rendered so the test counts `<tr>` in `<tbody>` | `TestZPagination` |
+| `stats_mysql_query_digest` with large row counts caused OOM; server-side pagination loads only one page at a time via `/api/table_data` | `TestZPagination`, `TestServerSidePagination` |
 | readonly user must not modify data, access settings, execute LOAD/SAVE, or run non-SELECT SQL; can browse tables, view config diff, use SQL editor for SELECTs | `TestReadOnlyUser` |
 | login page should show default credentials hint when passwords are at defaults; hint disappears after changing passwords | `TestDefaultCredentialsHint` |
 | `render_list_dbs` crashes with ValueError when `servers:` is empty; admin should be redirected to settings, readonly gets error page | `TestNoServersRedirect` |

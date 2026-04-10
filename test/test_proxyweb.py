@@ -148,10 +148,24 @@ class ProxyWebSession:
         resp.raise_for_status()
         return resp
 
+    def get_table_data(self, server, database, table, **params):
+        """Fetch paginated table rows via /api/table_data (server-side DataTables)."""
+        defaults = {
+            "server": server, "database": database, "table": table,
+            "draw": "1", "start": "0", "length": "100",
+            "search[value]": "", "order[0][column]": "0",
+            "order[0][dir]": "asc",
+        }
+        defaults.update(params)
+        resp = self.session.get(f"{BASE_URL}/api/table_data",
+                                params=defaults, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+
     def _refresh_csrf(self, html):
         """
         Extracts a CSRF token from the provided HTML and stores it on the instance as `csrf_token`.
-        
+
         Parameters:
             html (str): HTML content to search for a `<meta name="csrf-token" content="...">` tag. If a matching meta tag is found, its `content` value is assigned to `self.csrf_token`; otherwise `self.csrf_token` is left unchanged.
         """
@@ -1024,13 +1038,19 @@ class TestMultiServer(unittest.TestCase):
 
     def test_mysql_server_has_mysql_backends(self):
         """proxysql_mysql should list mysql2 as its backend."""
-        resp = self.s.get(f"/{self.S1}/{self.DB}/mysql_servers/")
-        self.assertIn("mysql2", resp.text)
+        self.s.get(f"/{self.S1}/{self.DB}/mysql_servers/")
+        data = self.s.get_table_data(self.S1, self.DB, "mysql_servers",
+                                      **{"search[value]": "mysql2"})
+        flat = str(data["data"])
+        self.assertIn("mysql2", flat)
 
     def test_pg_server_has_postgres_backends(self):
         """proxysql_postgres should list postgres backends."""
-        resp = self.s.get(f"/{self.S2}/{self.DB}/pgsql_servers/")
-        self.assertIn("postgres", resp.text)
+        self.s.get(f"/{self.S2}/{self.DB}/pgsql_servers/")
+        data = self.s.get_table_data(self.S2, self.DB, "pgsql_servers",
+                                      **{"search[value]": "postgres"})
+        flat = str(data["data"])
+        self.assertIn("postgres", flat)
 
     # ------------------------------------------------------------------
     # Query rules: proxysql_mysql pre-seeded with 2 rules
@@ -1041,8 +1061,10 @@ class TestMultiServer(unittest.TestCase):
         resp = self.s.get(f"/{self.S1}/{self.DB}/mysql_query_rules/")
         self.assertEqual(resp.status_code, 200)
         self.assertIn("rule_id", resp.text)
-        self.assertIn(">1<", resp.text)
-        self.assertIn(">2<", resp.text)
+        data = self.s.get_table_data(self.S1, self.DB, "mysql_query_rules")
+        rule_ids = [str(row[0]) for row in data["data"]]
+        self.assertIn("1", rule_ids)
+        self.assertIn("2", rule_ids)
 
     # ------------------------------------------------------------------
     # Config diff works independently per server
@@ -1479,61 +1501,52 @@ class TestDigestTextDisplay(unittest.TestCase):
         resp = self._page()
         self.assertEqual(resp.status_code, 200)
 
-    def test_truncation_elements_present(self):
-        """Long digest_text rows must render digest-short, digest-full, and digest-toggle."""
+    def test_truncation_js_render_present(self):
+        """Page JS must contain the digest-short/digest-full/digest-toggle render logic."""
         resp = self._page()
         html = resp.text
-        self.assertIn('class="digest-short"', html,
-                      "digest-short span missing — long digest_text rows need truncation markup")
-        self.assertIn('class="digest-full"', html,
-                      "digest-full span missing — long digest_text rows need expand markup")
+        self.assertIn('digest-short', html,
+                      "digest-short class missing from JS render function")
+        self.assertIn('digest-full', html,
+                      "digest-full class missing from JS render function")
         self.assertIn('digest-toggle', html,
-                      "digest-toggle link missing — long digest_text rows need a toggle")
+                      "digest-toggle class missing from JS render function")
 
     def test_toggle_uses_fa_chevron_not_unicode_arrow(self):
-        """Toggle badge must use Font Awesome chevron, not raw Unicode arrow characters."""
+        """JS render function must use Font Awesome chevron, not raw Unicode arrow characters."""
         resp = self._page()
         html = resp.text
         self.assertIn('fa-chevron-right', html,
-                      "fa-chevron-right icon missing from digest toggle badge")
+                      "fa-chevron-right icon missing from digest toggle JS render")
         self.assertNotIn('&#9654;', html,
                          "Raw Unicode arrow &#9654; (▶) must not appear in digest toggle")
         self.assertNotIn('\u25ba', html,
                          "Raw Unicode arrow ▶ must not appear in digest toggle")
 
-    def test_no_leading_whitespace_in_short_span(self):
-        """digest-short span content must not start with whitespace (|trim must be applied)."""
-        resp = self._page()
-        # Match a digest-short span whose content begins with whitespace
-        bad = re.search(r'<span class="digest-short">\s+\S', resp.text)
-        self.assertIsNone(bad,
-                          "digest-short span has leading whitespace — |trim not applied in template")
-
-    def test_td_uses_white_space_normal_not_pre_wrap(self):
-        """digest_text <td> must use white-space:normal so newlines are not preserved."""
+    def test_td_style_in_js_render(self):
+        """JS createdCell must set white-space:normal on digest_text cells."""
         resp = self._page()
         html = resp.text
-        self.assertIn('white-space:normal', html,
-                      "digest_text td must use white-space:normal")
+        self.assertIn('white-space', html,
+                      "white-space style missing from JS createdCell function")
         self.assertNotIn('white-space:pre-wrap', html,
                          "digest_text td must not use white-space:pre-wrap")
 
-    def test_short_span_truncated_at_100(self):
-        """digest-short span text must be at most 100 chars (not the old 60-char limit).
+    def test_api_returns_digest_text_data(self):
+        """The /api/table_data endpoint must return digest_text values for JS to render."""
+        self._page()  # populate session
+        body = self.s.get_table_data(self.SERVER, self.DATABASE, self.TABLE,
+                                      length="25")
+        self.assertGreater(body.get("recordsTotal", 0), 0,
+                           "stats_mysql_query_digest should have rows")
+        self.assertGreater(len(body.get("data", [])), 0,
+                           "API should return at least one row")
 
-        HTML entities (&gt;, &lt;, &amp;) are decoded before measuring length because
-        Jinja2 truncates the raw string at 100 chars then auto-escapes, which can inflate
-        the HTML representation beyond 100 bytes.
-        """
-        import html as html_mod
+    def test_truncation_at_100_via_substring(self):
+        """JS render function must truncate at 100 chars (substring(0, 100))."""
         resp = self._page()
-        # Extract all digest-short span contents
-        spans = re.findall(r'<span class="digest-short">(.*?)</span>', resp.text)
-        self.assertTrue(len(spans) > 0, "No digest-short spans found on page")
-        for span_text in spans:
-            decoded = html_mod.unescape(span_text)
-            self.assertLessEqual(len(decoded), 100,
-                                 f"digest-short span is longer than 100 chars: {decoded!r}")
+        self.assertIn('substring(0, 100)', resp.text,
+                      "JS render must truncate digest_text at 100 chars")
 
 
 @unittest.skipUnless(HAS_PYMYSQL, "pymysql not installed — skipping pagination tests")
@@ -1597,22 +1610,164 @@ class TestZPagination(unittest.TestCase):
         resp = self._page()
         self.assertEqual(resp.status_code, 200)
 
-    def test_pagination_row_count(self):
-        """Server must return > 100 tbody rows so DataTables activates client-side pagination.
-
-        DataTables pagination is rendered entirely in JavaScript and therefore not present
-        in resp.text.  The correct server-side signal is the number of <tr> elements inside
-        <tbody>: when that count exceeds DataTables' pageLength (100 in base.html), DataTables
-        will render Previous/Next controls after the page loads in a browser.
-        """
+    def test_server_side_mode_active(self):
+        """Page must enable DataTables server-side processing."""
         resp = self._page()
-        tbody_match = re.search(r'<tbody>(.*?)</tbody>', resp.text, re.DOTALL)
-        self.assertIsNotNone(tbody_match,
-                             "No <tbody> found on stats_mysql_query_digest page")
-        data_rows = tbody_match.group(1).count('<tr>')
-        self.assertGreater(data_rows, 100,
-                           f"Expected > 100 rows in tbody so DataTables paginates, "
-                           f"got {data_rows} after seeding {self.QUERY_COUNT} digests")
+        self.assertIn('serverSideMode', resp.text,
+                       "serverSideMode JS variable missing from page")
+        self.assertIn('/api/table_data', resp.text,
+                       "AJAX endpoint URL missing from page JS")
+
+    def test_pagination_via_api(self):
+        """The /api/table_data endpoint must report > 100 total rows and paginate correctly.
+
+        With server-side DataTables the HTML tbody is empty (rows load via AJAX).
+        Verify the API returns the correct total count and a page of the requested size.
+        """
+        self._page()  # populate session
+        body = self.s.get_table_data(self.SERVER, self.DATABASE, self.TABLE,
+                                      length="100")
+        self.assertGreater(body.get("recordsTotal", 0), 100,
+                           f"Expected > 100 total records after seeding {self.QUERY_COUNT} "
+                           f"digests, got {body.get('recordsTotal', 0)}")
+        self.assertEqual(len(body.get("data", [])), 100,
+                         f"Expected exactly 100 rows in first page, "
+                         f"got {len(body.get('data', []))}")
+
+
+class TestServerSidePagination(unittest.TestCase):
+    """Verify /api/table_data returns correct DataTables server-side JSON."""
+
+    SERVER   = SERVER
+    DATABASE = "main"
+    TABLE    = "mysql_servers"
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        # Load table page to populate session
+        self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+
+    def _api(self, **overrides):
+        params = {
+            "server": self.SERVER, "database": self.DATABASE,
+            "table": self.TABLE, "draw": "1", "start": "0",
+            "length": "25", "search[value]": "",
+            "order[0][column]": "0", "order[0][dir]": "asc",
+        }
+        params.update(overrides)
+        return self.s.session.get(f"{BASE_URL}/api/table_data",
+                                  params=params, timeout=10)
+
+    def test_response_format(self):
+        """API must return draw, recordsTotal, recordsFiltered, and data keys."""
+        body = self._api().json()
+        for key in ("draw", "recordsTotal", "recordsFiltered", "data"):
+            self.assertIn(key, body, f"Missing key {key!r} in response")
+        self.assertIsInstance(body["data"], list)
+
+    def test_draw_echo(self):
+        """draw parameter must be echoed back."""
+        body = self._api(draw="42").json()
+        self.assertEqual(body["draw"], 42)
+
+    def test_page_size(self):
+        """Returned data length must not exceed requested length."""
+        body = self._api(length="2").json()
+        self.assertLessEqual(len(body["data"]), 2)
+
+    def test_length_capped_at_1000(self):
+        """Requesting length > 1000 must be capped to 1000."""
+        body = self._api(length="99999").json()
+        self.assertLessEqual(len(body["data"]), 1000)
+
+    def test_search_filters(self):
+        """Searching for a nonexistent term must return zero matches."""
+        filtered = self._api(**{"search[value]": "ZZZZNONEXISTENT99999"}).json()
+        self.assertEqual(filtered["recordsFiltered"], 0,
+                         "Nonexistent search term should yield 0 filtered records")
+        self.assertEqual(len(filtered["data"]), 0,
+                         "Nonexistent search term should return no rows")
+
+    def test_sort_direction(self):
+        """Sort direction parameter must produce opposite row ordering."""
+        asc = self._api(**{"order[0][dir]": "asc", "order[0][column]": "0"}).json()
+        desc = self._api(**{"order[0][dir]": "desc", "order[0][column]": "0"}).json()
+        self.assertEqual(asc["recordsTotal"], desc["recordsTotal"])
+        if len(asc["data"]) > 1 and len(desc["data"]) > 1:
+            # First column values should be in opposite order
+            asc_vals = [row[0] for row in asc["data"]]
+            desc_vals = [row[0] for row in desc["data"]]
+            self.assertEqual(asc_vals, list(reversed(desc_vals)),
+                             "asc and desc should produce reversed row order")
+
+    def test_missing_server_returns_error(self):
+        """Missing server parameter should return an error response."""
+        body = self._api(server="").json()
+        self.assertIn("error", body)
+
+    def test_invalid_server_returns_error(self):
+        """A server name not in config must return an error, not crash."""
+        body = self._api(server="nonexistent_server_xyz").json()
+        self.assertIn("error", body)
+        self.assertEqual(body["recordsTotal"], 0)
+
+    def test_missing_table_returns_error(self):
+        """Missing table parameter should return an error response."""
+        body = self._api(table="").json()
+        self.assertIn("error", body)
+
+    def test_invalid_order_dir_defaults_to_asc(self):
+        """Invalid order direction should not crash; server normalises to 'asc'."""
+        body = self._api(**{"order[0][dir]": "DROP TABLE"}).json()
+        self.assertNotIn("error", body)
+        self.assertIsInstance(body["data"], list)
+
+    def test_negative_start_clamped(self):
+        """Negative start offset should be clamped to 0, not error."""
+        body = self._api(start="-5").json()
+        self.assertNotIn("error", body)
+        self.assertIsInstance(body["data"], list)
+
+    def test_zero_length_clamped(self):
+        """Zero length should be clamped to 1, not return empty or error."""
+        body = self._api(length="0").json()
+        self.assertNotIn("error", body)
+        self.assertLessEqual(len(body["data"]), 1)
+
+    def test_second_page_offset(self):
+        """Requesting start > 0 should return a different page of data."""
+        page1 = self._api(start="0", length="2").json()
+        page2 = self._api(start="2", length="2").json()
+        # Both must succeed
+        self.assertIsInstance(page1["data"], list)
+        self.assertIsInstance(page2["data"], list)
+        if page1["recordsTotal"] > 2:
+            self.assertNotEqual(page1["data"], page2["data"],
+                                "Page 1 and page 2 should contain different rows")
+
+    def test_search_known_value(self):
+        """Searching for a value present in the table should return matching rows."""
+        full = self._api().json()
+        if full["recordsTotal"] > 0:
+            # Pick a value from the first row to search for
+            first_row = full["data"][0]
+            search_val = str(first_row[0])
+            filtered = self._api(**{"search[value]": search_val}).json()
+            self.assertGreater(filtered["recordsFiltered"], 0,
+                               f"Searching for '{search_val}' should find at least one row")
+            # Verify returned rows actually contain the search value
+            for row in filtered["data"]:
+                row_str = " ".join(str(c) for c in row)
+                self.assertIn(search_val, row_str,
+                              f"Row {row} should contain search term '{search_val}'")
+
+    def test_non_numeric_draw_returns_error(self):
+        """Non-numeric draw parameter should return gracefully."""
+        resp = self._api(draw="notanumber")
+        body = resp.json()
+        # Should either error cleanly or default — must not 500
+        self.assertIn(resp.status_code, (200, 400))
 
 
 # ---------------------------------------------------------------------------
@@ -2374,8 +2529,11 @@ class TestPgSQLNavigation(unittest.TestCase):
 
     def test_pgsql_users_show_pguser(self):
         """The pguser registered via init must appear in pgsql_users."""
-        resp = self.s.get(f"/{PG_SERVER}/{DATABASE}/pgsql_users/")
-        self.assertIn("pguser", resp.text)
+        self.s.get(f"/{PG_SERVER}/{DATABASE}/pgsql_users/")
+        data = self.s.get_table_data(PG_SERVER, DATABASE, "pgsql_users",
+                                      **{"search[value]": "pguser"})
+        flat = str(data["data"])
+        self.assertIn("pguser", flat)
 
     def test_runtime_pgsql_servers_table_view(self):
         """runtime_pgsql_servers should be browsable and show the publisher backend."""
@@ -2520,8 +2678,11 @@ class TestPgSQLUsers(unittest.TestCase):
 
     def test_table_view_shows_pguser(self):
         """The pguser registered by init must appear."""
-        resp = self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
-        self.assertIn("pguser", resp.text)
+        self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+        data = self.s.get_table_data(self.SERVER, self.DATABASE, self.TABLE,
+                                      **{"search[value]": "pguser"})
+        flat = str(data["data"])
+        self.assertIn("pguser", flat)
 
 
 class TestPgSQLLoadSave(unittest.TestCase):

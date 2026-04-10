@@ -6,30 +6,31 @@ suite that exercise ProxyWeb against a real ProxySQL + MySQL backend.
 ## Stack layout
 
 ```
-                          ┌──────────────┐     3306    ┌───────────┐
-               admin ──►  │   proxysql   │ ──────────► │   mysql   │
-               (6032)     │  sql (6033)  │             │  testdb   │
-┌─────────────┐           └──────────────┘             └───────────┘
+                           ┌──────────────┐   3306   ┌────────┐  repl  ┌────────┐
+                admin ──►  │  proxysql2   │ ───────► │ mysql2 │ ─────► │ mysql3 │
+                (6032)     │  sql (6033)  │          │ writer │        │ reader │
+┌─────────────┐            └──────────────┘          └────────┘        └────────┘
 │   proxyweb  │
-│  :5000      │           ┌──────────────┐     3306    ┌───────────┐
-               admin ──►  │   proxysql2  │ ──────────► │   mysql2  │
-               (6034)     │  sql (6035)  │             │  testdb2  │
-└─────────────┘           └──────────────┘             └───────────┘
+│  :5000      │            ┌──────────────┐   5432   ┌──────────┐ repl ┌───────────┐
+                admin ──►  │  proxysql3   │ ───────► │ postgres │ ───► │ postgres2 │
+                (6034)     │ pgsql (6090) │          │  pubshr  │      │  subscr   │
+└─────────────┘            └──────────────┘          └──────────┘      └───────────┘
 ```
 
-| Service         | Image                   | Exposed ports              |
-|-----------------|-------------------------|----------------------------|
-| mysql           | mysql:8.0               | (internal only)            |
-| mysql2          | mysql:8.0               | (internal only)            |
-| proxysql        | proxysql/proxysql:2.7.1 | 6032 admin, 6033 SQL       |
-| proxysql2       | proxysql/proxysql:2.7.1 | 6034 admin, 6035 SQL       |
-| proxysql-init   | mysql:8.0 (one-shot)    | —                          |
-| proxysql2-init  | mysql:8.0 (one-shot)    | —                          |
-| proxyweb        | built from `../`        | 5000                       |
+| Service         | Image                     | Exposed ports                |
+|-----------------|---------------------------|------------------------------|
+| mysql2          | mysql:8.0                 | (internal only)              |
+| mysql3          | mysql:8.0                 | (internal only)              |
+| postgres        | postgres:16               | (internal only)              |
+| postgres2       | postgres:16               | (internal only)              |
+| proxysql2       | proxysql/proxysql:3.0.6   | 6032 admin, 6033 MySQL       |
+| proxysql3       | proxysql/proxysql:3.0.6   | 6034 admin, 6090 PostgreSQL  |
+| proxysql2-init  | mysql:8.0 (one-shot)      | —                            |
+| proxysql3-init  | mysql:8.0 (one-shot)      | —                            |
+| proxyweb        | built from `../`          | 5000                         |
 
 ProxyWeb is configured (via `config/config.yml`) to manage both ProxySQL
-instances. Each connects on port 6032 using the `radmin/radmin` credentials
-defined in the respective `proxysql/proxysql.cnf` and `proxysql/proxysql2.cnf`.
+instances as `proxysql_mysql` and `proxysql_postgres`.
 
 `proxysql2` is pre-seeded with two query rules (rule_id 1 and 2) to enable
 cross-server isolation tests.
@@ -107,10 +108,19 @@ PROXYWEB_USER=admin PROXYWEB_PASS=admin42 python3 test_proxyweb.py
 | `TestSettingsEditRecovery` | Settings edit page accessible without prior navigation  |
 | `TestSettingsUIServer` | UI form produces block YAML; empty server name rejected    |
 | `TestDigestTextDisplay`| digest_text truncation, whitespace, and chevron rendering  |
-| `TestZPagination`      | DataTables pagination activates with >100 rows             |
+| `TestZPagination`      | DataTables server-side pagination with >1000 seeded digests |
+| `TestServerSidePagination` | `/api/table_data` input validation, paging, search, sort, error handling |
 | `TestReadOnlyUser`     | Read-only user restrictions on data modification and settings |
 | `TestDefaultCredentialsHint` | Login page shows/hides default credential hint       |
 | `TestNoServersRedirect`| Empty servers config redirects admin to settings; readonly gets error |
+| `TestQueryHistory`     | Per-server query history isolation, dropdown, full page, clear |
+| `TestProxySQL3Autocommit` | ProxySQL 3.x autocommit compatibility                   |
+| `TestPgSQLNavigation`  | PostgreSQL table browsing and navigation                   |
+| `TestPgSQLServers`     | CRUD on `pgsql_servers` via API                            |
+| `TestPgSQLUsers`       | PostgreSQL users table view and API                        |
+| `TestPgSQLLoadSave`    | LOAD/SAVE commands for PostgreSQL ProxySQL instance        |
+| `TestPgSQLQueryViaSQL` | SQL execution against PostgreSQL ProxySQL frontend         |
+| `TestPgSQLReplication` | PostgreSQL logical replication end-to-end                  |
 
 ## Directory structure
 
@@ -126,29 +136,31 @@ test/
 ├── config/
 │   └── config.yml            # proxyweb config: both proxysql + proxysql2
 ├── mysql/
-│   ├── init.sql              # mysql: monitor/proxyuser users + testdb.items seed
-│   └── init2.sql             # mysql2: monitor/proxyuser2 users + testdb2.products seed
+│   ├── init2.sql             # mysql2: monitor/proxyuser2 users + testdb2 seed
+│   └── init3.sql             # mysql3: read-only replica setup
+├── postgres/
+│   ├── init.sql              # postgres: pguser + testdb_pg seed + publication
+│   └── init2.sql             # postgres2: subscription setup
 └── proxysql/
-    ├── proxysql.cnf          # ProxySQL 1 config (targets mysql)
-    ├── proxysql2.cnf         # ProxySQL 2 config (targets mysql2)
-    ├── init.sql              # ProxySQL 1 init: backend + user registration
-    └── init2.sql             # ProxySQL 2 init: backend + user + 2 query rules
+    ├── proxysql2.cnf         # ProxySQL MySQL config (targets mysql2/mysql3)
+    ├── proxysql3.cnf         # ProxySQL PgSQL config (targets postgres/postgres2)
+    ├── init2.sql             # proxysql2 init: backends + user + query rules
+    └── init3.sql             # proxysql3 init: pgsql backends + user
 ```
 
 ## Credentials used inside the stack
 
-| What                              | Username   | Password   |
-|-----------------------------------|------------|------------|
-| ProxyWeb UI (admin)               | admin      | admin42    |
-| ProxyWeb UI (read-only)           | readonly   | readonly42 |
-| ProxySQL 1 admin interface        | radmin     | radmin     |
-| ProxySQL 1 monitor (MySQL)        | monitor    | monitor    |
-| MySQL 1 application user          | proxyuser  | proxypass  |
-| MySQL 1 root                      | root       | rootpass   |
-| ProxySQL 2 admin interface        | radmin     | radmin     |
-| ProxySQL 2 monitor (MySQL)        | monitor    | monitor    |
-| MySQL 2 application user          | proxyuser2 | proxypass2 |
-| MySQL 2 root                      | root       | rootpass   |
+| What                              | Username    | Password    |
+|-----------------------------------|-------------|-------------|
+| ProxyWeb UI (admin)               | admin       | admin42     |
+| ProxyWeb UI (read-only)           | readonly    | readonly42  |
+| ProxySQL MySQL admin (proxysql2)  | radmin      | radmin      |
+| ProxySQL PgSQL admin (proxysql3)  | radmin      | radmin      |
+| MySQL monitor                     | monitor     | monitor     |
+| MySQL 2 application user          | proxyuser2  | proxypass2  |
+| MySQL 2 / MySQL 3 root           | root        | rootpass    |
+| PostgreSQL application user       | pguser      | pgpass      |
+| PostgreSQL root                   | postgres    | pgpass      |
 
 These are test-only credentials. **Do not use this configuration in production.**
 
