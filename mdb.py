@@ -919,24 +919,47 @@ def get_table_content(db, server, database, table):
         raise ValueError(e)
 
 
-def get_table_metadata(db, server, database, table):
-    """Return column names, row count, and misc config without fetching row data."""
+def get_table_metadata(db, server, database, table, server_side_threshold=1000):
+    """Return column names, row count, and misc config.
+
+    Tables with fewer than *server_side_threshold* rows are fetched inline
+    (client-side DataTables).  Larger tables return an empty row list and
+    ``server_side=True`` so the browser fetches pages via ``/api/table_data``.
+    """
     try:
         db_connect(db, server=server, dictionary=False)
         cur = db['cnf']['servers'][server]['cur']
         try:
-            cur.execute(f"SELECT * FROM {_quote_ident(database)}.{_quote_ident(table)} LIMIT 0")
-            column_names = [i[0] for i in cur.description]
-            cur.fetchall()  # consume empty result set before next query
-            cur.execute(f"SELECT COUNT(*) FROM {_quote_ident(database)}.{_quote_ident(table)}")
+            qualified = f"{_quote_ident(database)}.{_quote_ident(table)}"
+            cur.execute(f"SELECT COUNT(*) FROM {qualified}")
             row_count = cur.fetchone()[0]
-            return {
-                'rows': [],
-                'column_names': column_names,
-                'row_count': row_count,
-                'misc': get_config()['misc'],
-                'server_side': True,
-            }
+
+            if row_count < server_side_threshold:
+                # Small table – fetch all rows inline (client-side mode)
+                cur.execute(f"SELECT * FROM {qualified} ORDER BY 1")
+                rows = cur.fetchall()
+                column_names = [i[0] for i in cur.description]
+                content = {
+                    'rows': rows,
+                    'column_names': column_names,
+                    'row_count': row_count,
+                    'misc': get_config()['misc'],
+                    'server_side': False,
+                }
+                process_table_content(table, content)
+                return content
+            else:
+                # Large table – metadata only, rows via ajax
+                cur.execute(f"SELECT * FROM {qualified} LIMIT 0")
+                column_names = [i[0] for i in cur.description]
+                cur.fetchall()
+                return {
+                    'rows': [],
+                    'column_names': column_names,
+                    'row_count': row_count,
+                    'misc': get_config()['misc'],
+                    'server_side': True,
+                }
         finally:
             cur.close()
     except (mysql.connector.Error, mysql.connector.Warning) as e:

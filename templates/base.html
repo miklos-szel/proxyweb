@@ -69,6 +69,17 @@
                             d.server = tableServer;
                             d.database = tableDatabase;
                             d.table = tableName;
+                        },
+                        error: function(xhr, errorType, thrown) {
+                            var msg = 'Failed to load table data';
+                            try {
+                                var resp = JSON.parse(xhr.responseText);
+                                if (resp.error) msg += ': ' + resp.error;
+                            } catch(e) {
+                                if (thrown) msg += ': ' + thrown;
+                            }
+                            var tbody = document.querySelector('#proxywebtable tbody');
+                            if (tbody) tbody.innerHTML = '<tr><td colspan="100%" class="text-center text-danger">' + msg + '</td></tr>';
                         }
                     };
                     dtConfig.lengthMenu = [[25, 50, 100, 500], [25, 50, 100, 500]];
