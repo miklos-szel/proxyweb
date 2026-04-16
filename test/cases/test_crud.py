@@ -300,13 +300,18 @@ class TestInlinePrimaryKeyUpdate(unittest.TestCase):
                 return dict(zip(cols, row))
         return None
 
-    def test_update_persists_with_browser_style_pkvalues(self):
-        """Simulate the browser: send every column as ``pkValues``, including
-        NULL columns rendered as the literal string ``"None"``. With a correct
-        PK lookup the backend must filter the WHERE to ``rule_id`` only and
-        the update must be visible on the next read."""
+    @staticmethod
+    def _browser_style_pk_values(row):
+        """Mirror base.html's enableInlineEditing(): every column in the row,
+        with Python ``None`` rendered by Jinja as the literal string ``"None"``.
+        """
+        return {
+            col: ("None" if val is None else str(val))
+            for col, val in row.items()
+        }
 
-        insert = self.s.post_json("/api/insert_row", {
+    def _insert(self):
+        return self.s.post_json("/api/insert_row", {
             "server":      self.SERVER,
             "database":    self.DATABASE,
             "table":       self.TABLE,
@@ -318,18 +323,21 @@ class TestInlinePrimaryKeyUpdate(unittest.TestCase):
                 "apply":         "1",
             },
         }).json()
+
+    def test_update_persists_with_browser_style_pkvalues(self):
+        """Simulate the browser: send every column as ``pkValues``, including
+        NULL columns rendered as the literal string ``"None"``. With a correct
+        PK lookup the backend must filter the WHERE to ``rule_id`` only and
+        the update must be visible on the next read."""
+
+        insert = self._insert()
         self.assertTrue(insert.get("success"), insert.get("error"))
 
         row = self._fetch_row()
         self.assertIsNotNone(row, "inserted test row not readable back")
         self.assertEqual(row["match_pattern"], "original")
 
-        # Build pkValues the way base.html's enableInlineEditing() does:
-        # every column in the row, with None rendered by Jinja as "None".
-        pk_values = {
-            col: ("None" if val is None else str(val))
-            for col, val in row.items()
-        }
+        pk_values    = self._browser_style_pk_values(row)
         column_names = list(row.keys())
 
         upd = self.s.post_json("/api/update_row", {
@@ -350,6 +358,185 @@ class TestInlinePrimaryKeyUpdate(unittest.TestCase):
             "WHERE clause likely included non-PK columns with 'None' literals "
             "(inline PRIMARY KEY not detected in get_primary_key_columns)",
         )
+
+    def test_delete_persists_with_browser_style_pkvalues(self):
+        """Regression: the browser sends every column (including NULL cells
+        rendered as ``"None"``) in ``pkValues`` for DELETE too. The backend
+        must narrow the WHERE to the real PK columns; otherwise the API
+        returns ``success=True`` while ProxySQL keeps the row, and it
+        reappears on the next page load."""
+
+        insert = self._insert()
+        self.assertTrue(insert.get("success"), insert.get("error"))
+
+        row = self._fetch_row()
+        self.assertIsNotNone(row, "inserted test row not readable back")
+
+        delete = self.s.post_json("/api/delete_row", {
+            "server":   self.SERVER,
+            "database": self.DATABASE,
+            "table":    self.TABLE,
+            "pkValues": self._browser_style_pk_values(row),
+        }).json()
+        self.assertTrue(delete.get("success"), delete.get("error"))
+
+        self.assertIsNone(
+            self._fetch_row(),
+            "DELETE returned success=True but the row is still present — "
+            "WHERE clause likely matched zero rows because pkValues included "
+            "non-PK columns with 'None' literals.",
+        )
+
+
+class TestCrossPkStyleEditing(unittest.TestCase):
+    """Browser-style UPDATE must work for every PK declaration ProxySQL uses.
+
+    ``TestInlinePrimaryKeyUpdate`` covers a single-column inline PK
+    (``mysql_query_rules.rule_id``). This class guards the other two styles
+    that ProxySQL's SQLite-backed admin schema mixes in:
+
+    * **Block-form composite PK** — ``mysql_servers`` declares
+      ``PRIMARY KEY (hostgroup_id, hostname, port)``.
+    * **Inline autoinc PK** — ``scheduler`` declares
+      ``id INTEGER PRIMARY KEY AUTOINCREMENT``.
+
+    Each test mimics the browser: the DOM scrape produces pkValues for
+    *every* column, with NULLs rendered as the literal string ``"None"``.
+    If the backend fails to narrow that down to the real PK, the WHERE
+    matches nothing and the edit silently vanishes on refresh.
+    """
+
+    SERVER   = SERVER
+    DATABASE = "main"
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+
+    @staticmethod
+    def _browser_style_pk_values(row):
+        return {
+            col: ("None" if val is None else str(val))
+            for col, val in row.items()
+        }
+
+    def _fetch_row(self, table, key_col, key_val):
+        self.s.get(f"/{self.SERVER}/{self.DATABASE}/{table}/")
+        body = self.s.get_table_data(
+            self.SERVER, self.DATABASE, table,
+            **{"search[value]": str(key_val), "length": "100"},
+        )
+        cols = body["column_names"]
+        idx  = cols.index(key_col)
+        for row in body["data"]:
+            if str(row[idx]) == str(key_val):
+                return dict(zip(cols, row))
+        return None
+
+    # ------------------------------------------------------------------
+    # Block-form composite PK: mysql_servers
+    # ------------------------------------------------------------------
+
+    def test_update_block_form_composite_pk(self):
+        """mysql_servers: PRIMARY KEY (hostgroup_id, hostname, port)."""
+        table = "mysql_servers"
+        host, hg, port = "cross-pk-block-host", 99, 3311
+
+        pk = {"hostgroup_id": str(hg), "hostname": host, "port": str(port)}
+        self.s.get(f"/{self.SERVER}/{self.DATABASE}/{table}/")
+        insert = self.s.post_json("/api/insert_row", {
+            "server":      self.SERVER,
+            "database":    self.DATABASE,
+            "table":       table,
+            "columnNames": ["hostgroup_id", "hostname", "port", "weight"],
+            "data":        {**pk, "weight": "1"},
+        }).json()
+        self.assertTrue(insert.get("success"), insert.get("error"))
+
+        try:
+            row = self._fetch_row(table, "hostname", host)
+            self.assertIsNotNone(row, "inserted mysql_servers row not readable back")
+            self.assertEqual(str(row["weight"]), "1")
+
+            upd = self.s.post_json("/api/update_row", {
+                "server":      self.SERVER,
+                "database":    self.DATABASE,
+                "table":       table,
+                "pkValues":    self._browser_style_pk_values(row),
+                "columnNames": list(row.keys()),
+                "data":        {"weight": "42"},
+            }).json()
+            self.assertTrue(upd.get("success"), upd.get("error"))
+
+            refreshed = self._fetch_row(table, "hostname", host)
+            self.assertIsNotNone(refreshed)
+            self.assertEqual(
+                str(refreshed["weight"]), "42",
+                "Block-form PK UPDATE returned success=True but did not persist.",
+            )
+        finally:
+            self.s.get(f"/{self.SERVER}/{self.DATABASE}/{table}/")
+            self.s.post_json("/api/delete_row", {
+                "server":   self.SERVER,
+                "database": self.DATABASE,
+                "table":    table,
+                "pkValues": pk,
+            })
+
+    # ------------------------------------------------------------------
+    # Inline autoinc PK: scheduler
+    # ------------------------------------------------------------------
+
+    def test_update_inline_autoinc_pk(self):
+        """scheduler: id INTEGER PRIMARY KEY AUTOINCREMENT."""
+        table = "scheduler"
+        marker = "cross-pk-autoinc-test"
+
+        self.s.get(f"/{self.SERVER}/{self.DATABASE}/{table}/")
+        insert = self.s.post_json("/api/insert_row", {
+            "server":      self.SERVER,
+            "database":    self.DATABASE,
+            "table":       table,
+            "columnNames": ["active", "interval_ms", "filename", "comment"],
+            "data": {
+                "active":      "1",
+                "interval_ms": "60000",
+                "filename":    "/bin/true",
+                "comment":     marker,
+            },
+        }).json()
+        self.assertTrue(insert.get("success"), insert.get("error"))
+
+        row = self._fetch_row(table, "comment", marker)
+        self.assertIsNotNone(row, "inserted scheduler row not readable back")
+        row_id = row["id"]
+
+        try:
+            upd = self.s.post_json("/api/update_row", {
+                "server":      self.SERVER,
+                "database":    self.DATABASE,
+                "table":       table,
+                "pkValues":    self._browser_style_pk_values(row),
+                "columnNames": list(row.keys()),
+                "data":        {"interval_ms": "90000"},
+            }).json()
+            self.assertTrue(upd.get("success"), upd.get("error"))
+
+            refreshed = self._fetch_row(table, "id", row_id)
+            self.assertIsNotNone(refreshed)
+            self.assertEqual(
+                str(refreshed["interval_ms"]), "90000",
+                "Inline autoinc PK UPDATE returned success=True but did not persist.",
+            )
+        finally:
+            self.s.get(f"/{self.SERVER}/{self.DATABASE}/{table}/")
+            self.s.post_json("/api/delete_row", {
+                "server":   self.SERVER,
+                "database": self.DATABASE,
+                "table":    table,
+                "pkValues": {"id": str(row_id)},
+            })
+
 
 if __name__ == "__main__":
     unittest.main()
