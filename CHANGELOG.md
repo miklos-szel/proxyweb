@@ -16,9 +16,15 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
   discovers the package; shared fixtures (`ProxyWebSession`, constants,
   `wait_for_proxyweb`, `ColoredRunner`) live in `test/testlib.py`. Each
   topical file can also be run standalone.
-- `test/run_tests.sh` now installs `python3-requests` and `python3-pymysql`
-  via `apt-get` before invoking the suite, so the runner works on a fresh
-  host without requiring a pre-populated Python environment.
+- Integration test suite now runs inside a dedicated `test-runner` container
+  (`test/Dockerfile.runner`, Compose profile: `tests`) on the
+  `proxyweb-test` network, so Docker is the only host prerequisite. The
+  prior host-side `apt-get install python3-requests python3-pymysql` step
+  in `run_tests.sh` is gone; `pymysql` is declared in
+  `test/requirements.txt` and `psql` ships in the runner image.
+- `TestPgSQLReplication._psql` reaches Postgres over the Compose network
+  (`psql -h postgres …`) instead of shelling out to
+  `docker compose exec`, which does not work from inside the runner.
 
 ### Fixed
 - Restored `@unittest.skipUnless(HAS_PYMYSQL, …)` decorators on

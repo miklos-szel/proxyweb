@@ -19,7 +19,7 @@ python3 app.py
 gunicorn --chdir . wsgi:app -w 2 --threads 2 -b 0.0.0.0:5000
 ```
 
-Integration tests live under `test/` — see `test/README.md` for details.
+Integration tests live under `test/` — see `test/README.md` for details. The suite runs inside a `test-runner` container on the Compose network, so Docker is the only host prerequisite.
 
 ```bash
 cd test
@@ -152,6 +152,7 @@ The `test/` directory contains a Docker Compose stack and a Python test suite. T
 | `proxysql3` | proxysql/proxysql:3.0.6 | PostgreSQL ProxySQL — Admin :6034, PgSQL :6090 |
 | `proxysql2-init` / `proxysql3-init` | mysql:8.0 (one-shot) | Register backends, users, and query rules via admin SQL |
 | `proxyweb` | built from repo root | App under test on :5000 |
+| `test-runner` | built from `test/Dockerfile.runner` (profile: `tests`) | Runs the Python suite on the Compose network; invoked by `run_tests.sh` via `docker compose run --rm` |
 
 Config names the servers `proxysql_mysql` and `proxysql_postgres`.
 

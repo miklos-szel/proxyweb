@@ -140,7 +140,7 @@ When running in Docker, place variables in a `.env` file mounted at `/app/.env` 
 
 ## Test Environment
 
-The `test/` directory contains a full Docker Compose stack for integration testing, including MySQL and PostgreSQL backends with replication.
+The `test/` directory contains a full Docker Compose stack for integration testing, including MySQL and PostgreSQL backends with replication. The Python test suite runs inside a dedicated `test-runner` container on the Compose network, so Docker is the only host prerequisite.
 
 ### Services
 
@@ -152,6 +152,7 @@ The `test/` directory contains a full Docker Compose stack for integration testi
 | `postgres` | PostgreSQL publisher (logical replication) | - |
 | `postgres2` | PostgreSQL subscriber | - |
 | `proxyweb` | App under test | 5000 |
+| `test-runner` | Runs the Python suite on the Compose network (profile: `tests`) | - |
 
 ### Running tests
 

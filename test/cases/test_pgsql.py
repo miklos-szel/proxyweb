@@ -300,18 +300,21 @@ class TestPgSQLReplication(unittest.TestCase):
     """Verify PostgreSQL logical replication between postgres (publisher) and postgres2 (subscriber).
 
     Writes a row to the publisher's items_pg table and verifies it appears
-    on the subscriber via logical replication. Uses docker compose exec + psql
-    since no Python PostgreSQL driver is required by the test suite.
+    on the subscriber via logical replication. Runs the `psql` client against
+    each postgres service over the Compose network — the test-runner container
+    ships a postgresql-client package, so no Python PostgreSQL driver is needed.
     """
 
-    @staticmethod
-    def _psql(service, db, user, sql):
-        """Run a psql command inside a docker compose service and return stdout."""
+    _PG_PASSWORDS = {"pguser": "pgpass", "pguser2": "pgpass2"}
+
+    @classmethod
+    def _psql(cls, service, db, user, sql):
+        """Run a psql command against a postgres service and return stdout."""
+        env = {**os.environ, "PGPASSWORD": cls._PG_PASSWORDS[user]}
         result = subprocess.run(
-            ["docker", "compose", "exec", "-T", service,
-             "psql", "-U", user, "-d", db, "-t", "-A", "-c", sql],
-            capture_output=True, text=True, timeout=15,
-            cwd=os.path.dirname(os.path.abspath(__file__)),
+            ["psql", "-h", service, "-U", user, "-d", db,
+             "-t", "-A", "-c", sql],
+            capture_output=True, text=True, timeout=15, env=env,
         )
         if result.returncode != 0:
             raise RuntimeError(

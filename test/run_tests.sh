@@ -16,10 +16,10 @@
 #   PostgreSQL 1          (internal only)         pguser / pgpass   (db: testdb_pg)
 #   PostgreSQL 2          (internal only)         pguser2 / pgpass2 (db: testdb_pg2)
 #
-# Environment overrides (exported before calling this script):
-#   PROXYWEB_URL   default: http://localhost:5000
-#   PROXYWEB_USER  default: admin
-#   PROXYWEB_PASS  default: admin42
+# The test suite itself runs inside the `test-runner` container (profile: tests),
+# so Docker is the only host prerequisite. Test env vars live on that service in
+# docker-compose.yml (PROXYWEB_URL, PROXYWEB_USER, PROXYWEB_PASS,
+# PROXYSQL_MYSQL_HOST, PROXYSQL_MYSQL_PORT). Edit the compose file to override.
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -76,20 +76,17 @@ trap on_exit EXIT
 echo "==> Building and starting stack (this may take a few minutes on first run)..."
 docker compose up -d --build --wait
 
-echo ""
-echo "==> Installing test dependencies..."
-apt-get install -y -qq python3-requests python3-pymysql
-
 # ---------------------------------------------------------------------------
-# Run tests — output goes to terminal; captured separately for error logging
+# Run tests inside the test-runner container — output goes to terminal;
+# captured separately for error logging.
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "==> Running tests against http://localhost:5000 (admin / admin42)..."
+echo "==> Running tests inside test-runner container..."
 echo ""
 
 set +e
-python3 test_proxyweb.py 2>&1 | tee "$TMPOUT"
+docker compose --profile tests run --rm --build test-runner 2>&1 | tee "$TMPOUT"
 TEST_EXIT=${PIPESTATUS[0]}
 set -e
 
