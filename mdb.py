@@ -932,7 +932,7 @@ def get_table_metadata(db, server, database, table, server_side_threshold=1000):
         try:
             qualified = f"{_quote_ident(database)}.{_quote_ident(table)}"
             cur.execute(f"SELECT COUNT(*) FROM {qualified}")
-            row_count = cur.fetchone()[0]
+            row_count = int(cur.fetchone()[0])
 
             if row_count < server_side_threshold:
                 # Small table – fetch all rows inline (client-side mode)
