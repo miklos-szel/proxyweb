@@ -79,7 +79,15 @@
                                 if (thrown) msg += ': ' + thrown;
                             }
                             var tbody = document.querySelector('#proxywebtable tbody');
-                            if (tbody) tbody.innerHTML = '<tr><td colspan="100%" class="text-center text-danger">' + msg + '</td></tr>';
+                            if (tbody) {
+                                var tr = document.createElement('tr');
+                                var td = document.createElement('td');
+                                td.colSpan = document.querySelectorAll('#proxywebtable thead th').length || 1;
+                                td.className = 'text-center text-danger';
+                                td.textContent = msg;
+                                tr.appendChild(td);
+                                tbody.replaceChildren(tr);
+                            }
                         }
                     };
                     dtConfig.lengthMenu = [[25, 50, 100, 500], [25, 50, 100, 500]];
