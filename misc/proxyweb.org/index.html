@@ -561,6 +561,22 @@
 
     .footer-links { display: flex; gap: 1.5rem; }
 
+    /* ---- VERSION TAG ---- */
+    .version-tag {
+      position: fixed;
+      bottom: 0.6rem;
+      right: 0.85rem;
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      color: var(--text-secondary);
+      text-decoration: none;
+      opacity: 0.35;
+      transition: opacity 0.15s;
+      z-index: 50;
+    }
+
+    .version-tag:hover { opacity: 0.8; }
+
     /* ---- RESPONSIVE ---- */
     @media (max-width: 768px) {
       .features-grid { grid-template-columns: 1fr; }
@@ -570,6 +586,7 @@
       .hero { padding: 3rem 1.5rem 2rem; }
       .nav-links a:not(.btn-nav) { display: none; }
       footer { flex-direction: column; gap: 1rem; text-align: center; }
+      .version-tag { display: none; }
     }
 
     /* ---- FADE IN ---- */
@@ -833,6 +850,8 @@
     </div>
   </footer>
 
+  <a class="version-tag" id="version-tag" href="https://github.com/miklos-szel/proxyweb/commits/main" target="_blank" rel="noopener noreferrer"></a>
+
   <script>
     function copyCmd(btn) {
       var text = btn.parentElement.querySelector('.cmd-text').textContent;
@@ -845,6 +864,16 @@
         setTimeout(function() { btn.innerHTML = svg; }, 1500);
       });
     }
+
+    fetch('https://api.github.com/repos/miklos-szel/proxyweb/commits/main')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(d) {
+        if (d && d.sha) {
+          var el = document.getElementById('version-tag');
+          if (el) el.textContent = d.sha.substring(0, 7);
+        }
+      })
+      .catch(function() {});
   </script>
 </body>
 </html>
