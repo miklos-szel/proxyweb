@@ -2168,6 +2168,113 @@ class _ColoredRunner:
         return result
 
 
+class TestInlinePrimaryKeyUpdate(unittest.TestCase):
+    """Updates must persist for ProxySQL tables whose PK is declared inline.
+
+    Regression: ``get_primary_key_columns`` only parsed the block form
+    ``PRIMARY KEY (col, ...)`` and returned ``[]`` for ProxySQL's SQLite-style
+    inline PKs (e.g. ``rule_id INTEGER PRIMARY KEY AUTOINCREMENT`` on
+    ``mysql_query_rules``). ``update_row`` then fell back to using *every*
+    column sent by the browser as the WHERE clause. Because the browser
+    captures cell text — NULL rendered by Jinja as the literal ``"None"`` —
+    the WHERE matched zero rows. ``execute_change`` reported no SQL error,
+    so the API returned ``success=True`` but ProxySQL was never modified,
+    and the edit vanished on the next page load.
+    """
+
+    SERVER   = SERVER
+    DATABASE = "main"
+    TABLE    = "mysql_query_rules"
+    TEST_RULE_ID = 981
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+        # Clean up any stragglers from prior failed runs
+        self._delete(ignore_errors=True)
+
+    def tearDown(self):
+        self._delete(ignore_errors=True)
+
+    def _delete(self, ignore_errors=False):
+        try:
+            resp = self.s.post_json("/api/delete_row", {
+                "server":   self.SERVER,
+                "database": self.DATABASE,
+                "table":    self.TABLE,
+                "pkValues": {"rule_id": str(self.TEST_RULE_ID)},
+            })
+            return resp.json()
+        except Exception:
+            if not ignore_errors:
+                raise
+
+    def _fetch_row(self):
+        """Return the test row as {col: value}, or None if not present."""
+        body = self.s.get_table_data(
+            self.SERVER, self.DATABASE, self.TABLE,
+            **{"search[value]": str(self.TEST_RULE_ID), "length": "100"},
+        )
+        cols = body["column_names"]
+        rule_id_idx = cols.index("rule_id")
+        for row in body["data"]:
+            if str(row[rule_id_idx]) == str(self.TEST_RULE_ID):
+                return dict(zip(cols, row))
+        return None
+
+    def test_update_persists_with_browser_style_pkvalues(self):
+        """Simulate the browser: send every column as ``pkValues``, including
+        NULL columns rendered as the literal string ``"None"``. With a correct
+        PK lookup the backend must filter the WHERE to ``rule_id`` only and
+        the update must be visible on the next read."""
+
+        insert = self.s.post_json("/api/insert_row", {
+            "server":      self.SERVER,
+            "database":    self.DATABASE,
+            "table":       self.TABLE,
+            "columnNames": ["rule_id", "active", "match_pattern", "apply"],
+            "data": {
+                "rule_id":       str(self.TEST_RULE_ID),
+                "active":        "1",
+                "match_pattern": "original",
+                "apply":         "1",
+            },
+        }).json()
+        self.assertTrue(insert.get("success"), insert.get("error"))
+
+        row = self._fetch_row()
+        self.assertIsNotNone(row, "inserted test row not readable back")
+        self.assertEqual(row["match_pattern"], "original")
+
+        # Build pkValues the way base.html's enableInlineEditing() does:
+        # every column in the row, with None rendered by Jinja as "None".
+        pk_values = {
+            col: ("None" if val is None else str(val))
+            for col, val in row.items()
+        }
+        column_names = list(row.keys())
+
+        upd = self.s.post_json("/api/update_row", {
+            "server":      self.SERVER,
+            "database":    self.DATABASE,
+            "table":       self.TABLE,
+            "pkValues":    pk_values,
+            "columnNames": column_names,
+            "data":        {"match_pattern": "updated"},
+        }).json()
+        self.assertTrue(upd.get("success"), upd.get("error"))
+
+        refreshed = self._fetch_row()
+        self.assertIsNotNone(refreshed)
+        self.assertEqual(
+            refreshed["match_pattern"], "updated",
+            "UPDATE returned success=True but the change did not persist — "
+            "WHERE clause likely included non-PK columns with 'None' literals "
+            "(inline PRIMARY KEY not detected in get_primary_key_columns)",
+        )
+
+
 class TestQueryHistory(unittest.TestCase):
     """Verify per-server persistent query history across two servers.
 
