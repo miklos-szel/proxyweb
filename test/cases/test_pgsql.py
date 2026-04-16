@@ -118,7 +118,7 @@ class TestPgSQLServers(unittest.TestCase):
             "server":   self.SERVER,
             "database": self.DATABASE,
             "table":    self.TABLE,
-            "pk_values": self._pk(),
+            "pkValues": self._pk(),
         }).json()
 
     def test_insert_pgsql_server(self):
@@ -135,8 +135,12 @@ class TestPgSQLServers(unittest.TestCase):
                 "server":      self.SERVER,
                 "database":    self.DATABASE,
                 "table":       self.TABLE,
-                "pk_values":   self._pk(),
-                "changes":     {"weight": "10"},
+                "pkValues":    self._pk(),
+                "columnNames": ["hostgroup_id", "hostname", "port", "weight",
+                                "status", "compression", "max_connections",
+                                "max_replication_lag", "use_ssl",
+                                "max_latency_ms", "comment"],
+                "data": {"weight": "10"},
             }).json()
             self.assertTrue(result.get("success"), result.get("error"))
         finally:
@@ -192,7 +196,7 @@ class TestPgSQLUsers(unittest.TestCase):
             "server":   self.SERVER,
             "database": self.DATABASE,
             "table":    self.TABLE,
-            "pk_values": self._pk(),
+            "pkValues": self._pk(),
         }).json()
 
     def test_insert_pgsql_user(self):

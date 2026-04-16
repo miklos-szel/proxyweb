@@ -130,7 +130,7 @@ class TestAPIRowOperations(unittest.TestCase):
             "server":   self.SERVER,
             "database": self.DATABASE,
             "table":    self.TABLE,
-            "pk_values": self._pk_values(),
+            "pkValues": self._pk_values(),
         })
         return resp.json()
 
@@ -157,8 +157,12 @@ class TestAPIRowOperations(unittest.TestCase):
                 "server":      self.SERVER,
                 "database":    self.DATABASE,
                 "table":       self.TABLE,
-                "pk_values":   self._pk_values(),
-                "changes":     {"weight": "5"},
+                "pkValues":    self._pk_values(),
+                "columnNames": ["hostgroup_id", "hostname", "port", "weight",
+                                "status", "compression", "max_connections",
+                                "max_replication_lag", "use_ssl", "max_latency_ms",
+                                "comment"],
+                "data":        {"weight": "5"},
             })
             result = resp.json()
             self.assertTrue(result.get("success"), f"Update failed: {result.get('error')}")
@@ -173,7 +177,7 @@ class TestAPIRowOperations(unittest.TestCase):
                 "server":   self.SERVER,
                 "database": self.DATABASE,
                 "table":    "runtime_mysql_servers",
-                "pk_values": self._pk_values(),
+                "pkValues": self._pk_values(),
             },
             headers={
                 "Content-Type": "application/json",
@@ -266,7 +270,7 @@ class TestConfigDiffMemoryRuntime(unittest.TestCase):
                 "server":   self.SERVER,
                 "database": self.DB,
                 "table":    self.TABLE,
-                "pk_values": {"username": self.TEST_USER},
+                "pkValues": {"username": self.TEST_USER},
             })
         except Exception:
             pass
