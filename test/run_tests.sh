@@ -78,7 +78,7 @@ docker compose up -d --build --wait
 
 echo ""
 echo "==> Installing test dependencies..."
-#apt-get install -y -qq python3-requests python3-pymysql
+apt-get install -y -qq python3-requests python3-pymysql
 
 # ---------------------------------------------------------------------------
 # Run tests — output goes to terminal; captured separately for error logging
