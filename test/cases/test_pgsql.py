@@ -118,7 +118,7 @@ class TestPgSQLServers(unittest.TestCase):
             "server":   self.SERVER,
             "database": self.DATABASE,
             "table":    self.TABLE,
-            "pkValues": self._pk(),
+            "pk_values": self._pk(),
         }).json()
 
     def test_insert_pgsql_server(self):
@@ -135,12 +135,8 @@ class TestPgSQLServers(unittest.TestCase):
                 "server":      self.SERVER,
                 "database":    self.DATABASE,
                 "table":       self.TABLE,
-                "pkValues":    self._pk(),
-                "columnNames": ["hostgroup_id", "hostname", "port", "weight",
-                                "status", "compression", "max_connections",
-                                "max_replication_lag", "use_ssl",
-                                "max_latency_ms", "comment"],
-                "data": {"weight": "10"},
+                "pk_values":   self._pk(),
+                "changes":     {"weight": "10"},
             }).json()
             self.assertTrue(result.get("success"), result.get("error"))
         finally:
@@ -196,7 +192,7 @@ class TestPgSQLUsers(unittest.TestCase):
             "server":   self.SERVER,
             "database": self.DATABASE,
             "table":    self.TABLE,
-            "pkValues": self._pk(),
+            "pk_values": self._pk(),
         }).json()
 
     def test_insert_pgsql_user(self):
@@ -360,12 +356,17 @@ class TestPgSQLReplication(unittest.TestCase):
         # Insert and wait for replication
         self._psql("postgres", "testdb_pg", "pguser",
                    f"INSERT INTO items_pg (name, val) VALUES ('{tag}', 99)")
+        found_insert = False
         for _ in range(10):
             out = self._psql("postgres2", "testdb_pg2", "pguser2",
                              f"SELECT name FROM items_pg WHERE name = '{tag}'")
             if tag in out:
+                found_insert = True
                 break
             time.sleep(0.5)
+        # Assert the inserted row was observed on subscriber
+        self.assertTrue(found_insert,
+                        f"Inserted row '{tag}' did not replicate to subscriber within 5 seconds")
 
         # Delete on publisher
         self._psql("postgres", "testdb_pg", "pguser",

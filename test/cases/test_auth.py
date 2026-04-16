@@ -306,8 +306,13 @@ class TestDefaultServerFallback(unittest.TestCase):
         the name was not in the servers dict.
         """
         # Point default_server at a name that does not exist in servers
+        # Extract the current default_server value and replace it
+        match = re.search(r'default_server:\s*(\S+)', self._original_yaml)
+        if not match:
+            self.fail("Could not find default_server in original YAML")
+        current_default = match.group(1)
         modified = self._original_yaml.replace(
-            "default_server: proxysql_mysql",
+            f"default_server: {current_default}",
             "default_server: nonexistent_server",
             1,
         )

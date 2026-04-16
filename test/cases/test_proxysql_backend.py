@@ -57,38 +57,43 @@ class TestProxySQL2BackendSQL(unittest.TestCase):
         self.assertIn("widget", names)
 
     def test_insert_row(self):
-        with self._conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO products (name, price) VALUES (%s, %s)",
-                    ("ps2-test-insert", "7.77"),
-                )
-                inserted_id = conn.insert_id()
-        self.assertGreater(inserted_id, 0)
-        # FOR UPDATE routes to writer (hg1) to avoid replication lag on the reader
-        with self._conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT name, price FROM products WHERE id = %s FOR UPDATE", (inserted_id,)
-                )
-                row = cur.fetchone()
-        self.assertIsNotNone(row)
-        self.assertEqual(row[0], "ps2-test-insert")
-        self.assertAlmostEqual(float(row[1]), 7.77, places=2)
-        # Cleanup
-        with self._conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM products WHERE id = %s", (inserted_id,))
+        inserted_id = None
+        try:
+            with self._conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO products (name, price) VALUES (%s, %s)",
+                        ("ps2-test-insert", "7.77"),
+                    )
+                    inserted_id = conn.insert_id()
+            self.assertGreater(inserted_id, 0)
+            # FOR UPDATE routes to writer (hg1) to avoid replication lag on the reader
+            with self._conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT name, price FROM products WHERE id = %s FOR UPDATE", (inserted_id,)
+                    )
+                    row = cur.fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row[0], "ps2-test-insert")
+            self.assertAlmostEqual(float(row[1]), 7.77, places=2)
+        finally:
+            # Cleanup
+            if inserted_id is not None:
+                with self._conn() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM products WHERE id = %s", (inserted_id,))
 
     def test_update_row(self):
-        with self._conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO products (name, price) VALUES (%s, %s)",
-                    ("ps2-test-update", "1.00"),
-                )
-                row_id = conn.insert_id()
+        row_id = None
         try:
+            with self._conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO products (name, price) VALUES (%s, %s)",
+                        ("ps2-test-update", "1.00"),
+                    )
+                    row_id = conn.insert_id()
             with self._conn() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
@@ -104,9 +109,10 @@ class TestProxySQL2BackendSQL(unittest.TestCase):
                     )
                     self.assertAlmostEqual(float(cur.fetchone()[0]), 49.99, places=2)
         finally:
-            with self._conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("DELETE FROM products WHERE id = %s", (row_id,))
+            if row_id is not None:
+                with self._conn() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM products WHERE id = %s", (row_id,))
 
     def test_delete_row(self):
         with self._conn() as conn:

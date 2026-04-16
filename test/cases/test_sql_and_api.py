@@ -122,7 +122,7 @@ class TestAPIRowOperations(unittest.TestCase):
     def _delete_test_row(self):
         """
         Delete the test row from the configured server/database/table via the API.
-        
+
         Returns:
             dict: The parsed JSON response from the `/api/delete_row` endpoint.
         """
@@ -130,7 +130,7 @@ class TestAPIRowOperations(unittest.TestCase):
             "server":   self.SERVER,
             "database": self.DATABASE,
             "table":    self.TABLE,
-            "pkValues": self._pk_values(),
+            "pk_values": self._pk_values(),
         })
         return resp.json()
 
@@ -157,12 +157,8 @@ class TestAPIRowOperations(unittest.TestCase):
                 "server":      self.SERVER,
                 "database":    self.DATABASE,
                 "table":       self.TABLE,
-                "pkValues":    self._pk_values(),
-                "columnNames": ["hostgroup_id", "hostname", "port", "weight",
-                                "status", "compression", "max_connections",
-                                "max_replication_lag", "use_ssl", "max_latency_ms",
-                                "comment"],
-                "data":        {"weight": "5"},
+                "pk_values":   self._pk_values(),
+                "changes":     {"weight": "5"},
             })
             result = resp.json()
             self.assertTrue(result.get("success"), f"Update failed: {result.get('error')}")
@@ -177,7 +173,7 @@ class TestAPIRowOperations(unittest.TestCase):
                 "server":   self.SERVER,
                 "database": self.DATABASE,
                 "table":    "runtime_mysql_servers",
-                "pkValues": self._pk_values(),
+                "pk_values": self._pk_values(),
             },
             headers={
                 "Content-Type": "application/json",
@@ -261,7 +257,7 @@ class TestConfigDiffMemoryRuntime(unittest.TestCase):
         # Remove test user regardless of test outcome so it does not pollute state.
         """
         Clean up the test user from the mysql_users table to avoid leaving test state behind.
-        
+
         Attempts to load the table page (to refresh CSRF) and delete the row identified by `TEST_USER`. Any errors during cleanup are suppressed so teardown does not raise.
         """
         try:
@@ -270,7 +266,7 @@ class TestConfigDiffMemoryRuntime(unittest.TestCase):
                 "server":   self.SERVER,
                 "database": self.DB,
                 "table":    self.TABLE,
-                "pkValues": {"username": self.TEST_USER},
+                "pk_values": {"username": self.TEST_USER},
             })
         except Exception:
             pass

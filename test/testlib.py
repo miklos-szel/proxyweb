@@ -45,6 +45,14 @@ class ProxyWebSession:
         self.session = requests.Session()
         self.csrf_token = ""
 
+    def _assert_authenticated(self, resp):
+        """Raise an exception if the response is a redirect to the login page."""
+        if "/login" in resp.url:
+            raise AssertionError(
+                f"Request redirected to login page: {resp.url}\n"
+                "Session is not authenticated or has expired."
+            )
+
     def login(self, username=USERNAME, password=PASSWORD):
         resp = self.session.post(
             f"{BASE_URL}/login",
@@ -60,6 +68,7 @@ class ProxyWebSession:
         kwargs.setdefault("timeout", 10)
         resp = self.session.get(f"{BASE_URL}{path}", **kwargs)
         resp.raise_for_status()
+        self._assert_authenticated(resp)
         self._refresh_csrf(resp.text)
         return resp
 
@@ -69,6 +78,7 @@ class ProxyWebSession:
         kwargs.setdefault("timeout", 10)
         resp = self.session.post(f"{BASE_URL}{path}", data=payload, **kwargs)
         resp.raise_for_status()
+        self._assert_authenticated(resp)
         self._refresh_csrf(resp.text)
         return resp
 
@@ -82,6 +92,7 @@ class ProxyWebSession:
             f"{BASE_URL}{path}", json=body, headers=headers, **kwargs
         )
         resp.raise_for_status()
+        self._assert_authenticated(resp)
         return resp
 
     def get_table_data(self, server, database, table, **params):
@@ -96,6 +107,7 @@ class ProxyWebSession:
         resp = self.session.get(f"{BASE_URL}/api/table_data",
                                 params=defaults, timeout=10)
         resp.raise_for_status()
+        self._assert_authenticated(resp)
         return resp.json()
 
     def _refresh_csrf(self, html):

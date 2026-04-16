@@ -41,19 +41,31 @@ class TestSettingsSave(unittest.TestCase):
                          f"save returned {resp.status_code}; body: {resp.text!r}")
 
     def test_save_invalid_yaml_returns_error(self):
-        """Submitting broken YAML must not return 200."""
+        """Submitting broken YAML must return a client error (4xx) not 5xx."""
         payload = {"settings": "not: valid: yaml: [[[", "_csrf_token": self.s.csrf_token}
         resp = self.s.session.post(f"{BASE_URL}/settings/save/", data=payload, timeout=10)
-        self.assertNotEqual(resp.status_code, 200,
-                            "broken YAML was accepted without error")
+        self.assertTrue(400 <= resp.status_code < 500,
+                        f"broken YAML returned {resp.status_code}, expected 4xx")
+        # Also check that the response body mentions validation or invalid YAML
+        body_lower = resp.text.lower()
+        self.assertTrue(
+            "validation" in body_lower or "invalid" in body_lower or "yaml" in body_lower,
+            "Response body does not contain validation error text"
+        )
 
     def test_save_missing_required_section_returns_error(self):
-        """YAML missing a required section (auth) must not return 200."""
+        """YAML missing a required section (auth) must return a client error (4xx) not 5xx."""
         bad_yaml = "global:\n  default_server: x\nflask:\n  SECRET_KEY: x\nservers:\n  x:\n    dsn: []\nmisc:\n  apply_config: []\n"
         payload = {"settings": bad_yaml, "_csrf_token": self.s.csrf_token}
         resp = self.s.session.post(f"{BASE_URL}/settings/save/", data=payload, timeout=10)
-        self.assertNotEqual(resp.status_code, 200,
-                            "YAML missing auth section was accepted without error")
+        self.assertTrue(400 <= resp.status_code < 500,
+                        f"YAML missing auth returned {resp.status_code}, expected 4xx")
+        # Check that the response body mentions validation, auth, or required
+        body_lower = resp.text.lower()
+        self.assertTrue(
+            "validation" in body_lower or "auth" in body_lower or "required" in body_lower or "missing" in body_lower,
+            "Response body does not contain validation error text"
+        )
 
 
 class TestHideTables(unittest.TestCase):
@@ -243,6 +255,9 @@ class TestSettingsUIServer(unittest.TestCase):
             data={**form_data, "_csrf_token": self.s.csrf_token},
             timeout=10,
         )
+        # 5xx responses are failures (server error)
+        self.assertFalse(500 <= resp.status_code < 600,
+                         f"ui_save returned {resp.status_code} (5xx server error)")
         # Either rejected (4xx) or accepted (200/302) — both are valid outcomes
         if resp.status_code in (200, 302):
             export = self.s.get("/settings/export/").json()
@@ -257,6 +272,11 @@ class TestSettingsUIServer(unittest.TestCase):
             # The phantom DSN host (1.2.3.4) must not appear
             self.assertNotIn("1.2.3.4", yaml_text,
                              "DSN from empty-named server leaked into the YAML output")
+        elif resp.status_code in (400, 403, 422):
+            # Expected rejection — the form was invalid
+            pass
+        else:
+            self.fail(f"Unexpected response status: {resp.status_code}")
 
 if __name__ == "__main__":
     unittest.main()

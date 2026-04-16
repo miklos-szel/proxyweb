@@ -139,7 +139,7 @@ The `test/` directory contains a Docker Compose stack and a Python test suite. T
 
 - `test_proxyweb.py` — thin entrypoint that waits for the stack and discovers every `test_*.py` under `cases/`.
 - `testlib.py` — shared fixtures: `ProxyWebSession`, constants, `wait_for_proxyweb`, `ColoredRunner`.
-- `cases/test_*.py` — topical test files grouped by surface area (auth, CRUD, SQL API, settings, table display, query history, PgSQL, etc.). Each file can be run standalone via `python3 test/cases/test_<topic>.py`.
+- `cases/test_*.py` — topical test files grouped by surface area (auth, CRUD, SQL API, settings, table display, query history, PgSQL, etc.). Each file can be run standalone from the `test/` directory via `python3 cases/test_<topic>.py` (or set `PYTHONPATH` or use `python3 -m test.cases.test_<topic>` from the repo root).
 
 | Service | Image | Role |
 |---|---|---|
