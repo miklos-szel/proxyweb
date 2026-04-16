@@ -193,3 +193,5 @@ Rules:
 | ProxySQL 3.x admin rejects `SET @@session.autocommit` → `db_connect()` crashes on every page load; removed unnecessary autocommit setter | `TestProxySQL3Autocommit` |
 | `get_table_metadata` compared `row_count` (str from ProxySQL `COUNT(*)`) against int threshold, raising TypeError and breaking DataTables with empty grid / ajax error | `TestSmallTableClientSideMode` |
 | `get_primary_key_columns` only parsed block-form `PRIMARY KEY (...)` → for ProxySQL's SQLite-style inline `col TYPE PRIMARY KEY` (e.g. `mysql_query_rules.rule_id`) the WHERE clause silently fell back to all columns, so edits returned `success=True` but matched zero rows and reverted on refresh | `TestInlinePrimaryKeyUpdate` |
+| Same browser-style `pkValues` payload (every column, NULLs as `"None"`) silently no-op'd DELETE on tables with an inline PK — API returned `success=True` but the row reappeared on refresh | `TestInlinePrimaryKeyUpdate.test_delete_persists_with_browser_style_pkvalues` |
+| Browser-style UPDATE coverage extended to the other PK declaration styles ProxySQL uses: block-form composite (`mysql_servers`) and inline autoinc (`scheduler`) | `TestCrossPkStyleEditing` |

@@ -26,6 +26,16 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
   (`psql -h postgres …`) instead of shelling out to
   `docker compose exec`, which does not work from inside the runner.
 
+### Added
+- `TestInlinePrimaryKeyUpdate.test_delete_persists_with_browser_style_pkvalues`
+  guards the DELETE counterpart of the inline-PK regression: when the browser
+  sends every column in `pkValues` (NULLs rendered by Jinja as the literal
+  `"None"`), the WHERE clause must still narrow to the real PK or the API
+  returns `success=True` while the row stays.
+- `TestCrossPkStyleEditing` covers the two PK declaration styles the existing
+  inline-PK test does not exercise: block-form composite (`mysql_servers`)
+  and inline autoinc (`scheduler`).
+
 ### Fixed
 - Restored `@unittest.skipUnless(HAS_PYMYSQL, …)` decorators on
   `TestProxySQL2BackendSQL`, `TestDigestTextDisplay`, and `TestZPagination`
@@ -34,6 +44,12 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
   `try/finally`, so a failed assertion no longer leaves state behind.
 - `TestSettingsUIServer` asserts that `/settings/export/` returns
   `success=True` instead of silently skipping the YAML-shape checks.
+- Reverted CodeRabbit auto-rename of the row-API request fields in the test
+  suite (`pkValues` → `pk_values`, `data` → `changes`, dropped `columnNames`)
+  — `app.py`'s handlers still expect the camelCase names, so every CRUD test
+  failed with `KeyError: 'pkValues'` after the auto-fix landed. Also reverted
+  the tightened `/settings/save/` assertions back to `assertNotEqual(200)`,
+  since the route raises `ValueError` on bad input and Flask returns 500.
 
 ### Removed
 - Orphaned `test/test_mdb.py` (never wired into the suite run).

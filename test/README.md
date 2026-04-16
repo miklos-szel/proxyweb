@@ -135,7 +135,8 @@ Tests are grouped by surface area under `cases/`. Each topical file can also be 
 |------------------------|------------------------------------------------------------|
 | `TestMySQLServers`     | Full CRUD on `mysql_servers` via proxyweb API              |
 | `TestQueryRules`       | Full CRUD on `mysql_query_rules` including end-to-end cycle |
-| `TestInlinePrimaryKeyUpdate` | Inline-PK UPDATE regression (ProxySQL SQLite-style `col TYPE PRIMARY KEY`) |
+| `TestInlinePrimaryKeyUpdate` | Inline-PK UPDATE/DELETE regression (ProxySQL SQLite-style `col TYPE PRIMARY KEY`) — guards against silent no-op edits when the browser sends every column in `pkValues` |
+| `TestCrossPkStyleEditing` | Browser-style UPDATE for the other PK shapes: block-form composite (`mysql_servers`) and inline autoinc (`scheduler`) |
 
 ### `cases/test_settings.py`
 
