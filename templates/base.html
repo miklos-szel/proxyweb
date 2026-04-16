@@ -69,6 +69,25 @@
                             d.server = tableServer;
                             d.database = tableDatabase;
                             d.table = tableName;
+                        },
+                        error: function(xhr, errorType, thrown) {
+                            var msg = 'Failed to load table data';
+                            try {
+                                var resp = JSON.parse(xhr.responseText);
+                                if (resp.error) msg += ': ' + resp.error;
+                            } catch(e) {
+                                if (thrown) msg += ': ' + thrown;
+                            }
+                            var tbody = document.querySelector('#proxywebtable tbody');
+                            if (tbody) {
+                                var tr = document.createElement('tr');
+                                var td = document.createElement('td');
+                                td.colSpan = document.querySelectorAll('#proxywebtable thead th').length || 1;
+                                td.className = 'text-center text-danger';
+                                td.textContent = msg;
+                                tr.appendChild(td);
+                                tbody.replaceChildren(tr);
+                            }
                         }
                     };
                     dtConfig.lengthMenu = [[25, 50, 100, 500], [25, 50, 100, 500]];

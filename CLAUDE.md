@@ -186,3 +186,4 @@ Rules:
 | `render_list_dbs` crashes with ValueError when `servers:` is empty; admin should be redirected to settings, readonly gets error page | `TestNoServersRedirect` |
 | persistent per-server query history: isolation between servers, dropdown shows last 10, full page shows all, clear per server | `TestQueryHistory` |
 | ProxySQL 3.x admin rejects `SET @@session.autocommit` → `db_connect()` crashes on every page load; removed unnecessary autocommit setter | `TestProxySQL3Autocommit` |
+| `get_table_metadata` compared `row_count` (str from ProxySQL `COUNT(*)`) against int threshold, raising TypeError and breaking DataTables with empty grid / ajax error | `TestSmallTableClientSideMode` |

@@ -1635,6 +1635,39 @@ class TestZPagination(unittest.TestCase):
                          f"got {len(body.get('data', []))}")
 
 
+class TestSmallTableClientSideMode(unittest.TestCase):
+    """Small tables (< threshold) must render inline without an AJAX call.
+
+    Regression: `get_table_metadata` compared `row_count` (str from ProxySQL
+    COUNT(*)) against an int threshold, raising TypeError on every table
+    view request and breaking DataTables with an empty grid / ajax error.
+    """
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+
+    def test_small_table_page_loads_200(self):
+        """mysql_query_rules (3 rows) must render the table page successfully."""
+        resp = self.s.get(f"/{SERVER}/{DATABASE}/mysql_query_rules/")
+        self.assertEqual(resp.status_code, 200,
+                         f"Small table page returned {resp.status_code}, "
+                         "likely str<int TypeError in get_table_metadata")
+
+    def test_small_table_renders_rows_inline(self):
+        """Small tables must ship rows in the HTML, not rely on AJAX."""
+        resp = self.s.get(f"/{SERVER}/{DATABASE}/mysql_query_rules/")
+        self.assertEqual(resp.status_code, 200)
+        # Client-side mode: serverSideMode should be false in the rendered JS
+        self.assertIn("var serverSideMode = false", resp.text,
+                      "Small tables must render in client-side mode")
+
+    def test_global_variables_loads(self):
+        """global_variables page must not 500 (has ~150 rows, depends on mode)."""
+        resp = self.s.get(f"/{SERVER}/{DATABASE}/global_variables/")
+        self.assertEqual(resp.status_code, 200)
+
+
 class TestServerSidePagination(unittest.TestCase):
     """Verify /api/table_data returns correct DataTables server-side JSON."""
 
