@@ -19,7 +19,7 @@ python3 app.py
 gunicorn --chdir . wsgi:app -w 2 --threads 2 -b 0.0.0.0:5000
 ```
 
-Integration tests live under `test/` — see `test/README.md` for details.
+Integration tests live under `test/` — see `test/README.md` for details. The suite runs inside a `test-runner` container on the Compose network, so Docker is the only host prerequisite.
 
 ```bash
 cd test
@@ -135,7 +135,11 @@ All templates extend `base.html`. Key templates:
 
 ### Integration Test Stack (`test/`)
 
-The `test/` directory contains a Docker Compose stack and a Python test suite (`test_proxyweb.py`).
+The `test/` directory contains a Docker Compose stack and a Python test suite. The suite is organised as:
+
+- `test_proxyweb.py` — thin entrypoint that waits for the stack and discovers every `test_*.py` under `cases/`.
+- `testlib.py` — shared fixtures: `ProxyWebSession`, constants, `wait_for_proxyweb`, `ColoredRunner`.
+- `cases/test_*.py` — topical test files grouped by surface area (auth, CRUD, SQL API, settings, table display, query history, PgSQL, etc.). Each file can be run standalone from the `test/` directory via `python3 cases/test_<topic>.py` (or set `PYTHONPATH` or use `python3 -m test.cases.test_<topic>` from the repo root).
 
 | Service | Image | Role |
 |---|---|---|
@@ -148,6 +152,7 @@ The `test/` directory contains a Docker Compose stack and a Python test suite (`
 | `proxysql3` | proxysql/proxysql:3.0.6 | PostgreSQL ProxySQL — Admin :6034, PgSQL :6090 |
 | `proxysql2-init` / `proxysql3-init` | mysql:8.0 (one-shot) | Register backends, users, and query rules via admin SQL |
 | `proxyweb` | built from repo root | App under test on :5000 |
+| `test-runner` | built from `test/Dockerfile.runner` (profile: `tests`) | Runs the Python suite on the Compose network; invoked by `run_tests.sh` via `docker compose run --rm` |
 
 Config names the servers `proxysql_mysql` and `proxysql_postgres`.
 
@@ -166,7 +171,7 @@ When a bug is fixed, add an integration test that would have caught it, so it ca
 
 Rules:
 - One test (or test class) per bug, named/documented to describe the original problem
-- Tests live in `test/test_proxyweb.py` and use the existing `ProxyWebSession` helper
+- Tests live under `test/cases/test_*.py` and use the `ProxyWebSession` helper from `test/testlib.py`; add each new test to the topical file that best matches its surface area
 - The test must **fail** on the un-fixed code and **pass** after the fix
 - Add a docstring explaining what bug the test guards against
 
@@ -188,3 +193,5 @@ Rules:
 | ProxySQL 3.x admin rejects `SET @@session.autocommit` → `db_connect()` crashes on every page load; removed unnecessary autocommit setter | `TestProxySQL3Autocommit` |
 | `get_table_metadata` compared `row_count` (str from ProxySQL `COUNT(*)`) against int threshold, raising TypeError and breaking DataTables with empty grid / ajax error | `TestSmallTableClientSideMode` |
 | `get_primary_key_columns` only parsed block-form `PRIMARY KEY (...)` → for ProxySQL's SQLite-style inline `col TYPE PRIMARY KEY` (e.g. `mysql_query_rules.rule_id`) the WHERE clause silently fell back to all columns, so edits returned `success=True` but matched zero rows and reverted on refresh | `TestInlinePrimaryKeyUpdate` |
+| Same browser-style `pkValues` payload (every column, NULLs as `"None"`) silently no-op'd DELETE on tables with an inline PK — API returned `success=True` but the row reappeared on refresh | `TestInlinePrimaryKeyUpdate.test_delete_persists_with_browser_style_pkvalues` |
+| Browser-style UPDATE coverage extended to the other PK declaration styles ProxySQL uses: block-form composite (`mysql_servers`) and inline autoinc (`scheduler`) | `TestCrossPkStyleEditing` |

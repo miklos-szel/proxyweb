@@ -187,6 +187,24 @@ services:
     networks:
       - proxyweb-test
 
+  test-runner:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile.runner
+    profiles: ["tests"]
+    environment:
+      PROXYWEB_URL: http://proxyweb:5000
+      PROXYWEB_USER: admin
+      PROXYWEB_PASS: admin42
+      PROXYSQL_MYSQL_HOST: proxysql2
+      PROXYSQL_MYSQL_PORT: "6033"
+      PY_COLORS: "1"
+    depends_on:
+      proxyweb:
+        condition: service_healthy
+    networks:
+      - proxyweb-test
+
 networks:
   proxyweb-test:
     driver: bridge
