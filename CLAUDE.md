@@ -135,7 +135,11 @@ All templates extend `base.html`. Key templates:
 
 ### Integration Test Stack (`test/`)
 
-The `test/` directory contains a Docker Compose stack and a Python test suite (`test_proxyweb.py`).
+The `test/` directory contains a Docker Compose stack and a Python test suite. The suite is organised as:
+
+- `test_proxyweb.py` — thin entrypoint that waits for the stack and discovers every `test_*.py` under `cases/`.
+- `testlib.py` — shared fixtures: `ProxyWebSession`, constants, `wait_for_proxyweb`, `ColoredRunner`.
+- `cases/test_*.py` — topical test files grouped by surface area (auth, CRUD, SQL API, settings, table display, query history, PgSQL, etc.). Each file can be run standalone via `python3 test/cases/test_<topic>.py`.
 
 | Service | Image | Role |
 |---|---|---|
@@ -166,7 +170,7 @@ When a bug is fixed, add an integration test that would have caught it, so it ca
 
 Rules:
 - One test (or test class) per bug, named/documented to describe the original problem
-- Tests live in `test/test_proxyweb.py` and use the existing `ProxyWebSession` helper
+- Tests live under `test/cases/test_*.py` and use the `ProxyWebSession` helper from `test/testlib.py`; add each new test to the topical file that best matches its surface area
 - The test must **fail** on the un-fixed code and **pass** after the fix
 - Add a docstring explaining what bug the test guards against
 
