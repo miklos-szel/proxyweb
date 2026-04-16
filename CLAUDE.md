@@ -187,3 +187,4 @@ Rules:
 | persistent per-server query history: isolation between servers, dropdown shows last 10, full page shows all, clear per server | `TestQueryHistory` |
 | ProxySQL 3.x admin rejects `SET @@session.autocommit` → `db_connect()` crashes on every page load; removed unnecessary autocommit setter | `TestProxySQL3Autocommit` |
 | `get_table_metadata` compared `row_count` (str from ProxySQL `COUNT(*)`) against int threshold, raising TypeError and breaking DataTables with empty grid / ajax error | `TestSmallTableClientSideMode` |
+| `get_primary_key_columns` only parsed block-form `PRIMARY KEY (...)` → for ProxySQL's SQLite-style inline `col TYPE PRIMARY KEY` (e.g. `mysql_query_rules.rule_id`) the WHERE clause silently fell back to all columns, so edits returned `success=True` but matched zero rows and reverted on refresh | `TestInlinePrimaryKeyUpdate` |

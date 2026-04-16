@@ -1366,12 +1366,61 @@ def get_table_schema(db, server, database, table_name):
     return result
 
 
+def _split_top_level_commas(s):
+    """Split *s* on commas that are at parenthesis depth zero."""
+    parts = []
+    depth = 0
+    start = 0
+    for i, ch in enumerate(s):
+        if ch == '(':
+            depth += 1
+        elif ch == ')':
+            depth = max(depth - 1, 0)
+        elif ch == ',' and depth == 0:
+            parts.append(s[start:i])
+            start = i + 1
+    parts.append(s[start:])
+    return parts
+
+
+def _parse_inline_primary_keys(create_table_sql):
+    """Extract PK columns declared inline as ``colname TYPE ... PRIMARY KEY``.
+
+    ProxySQL (SQLite-backed) uses this form for many admin tables
+    (``mysql_query_rules``, ``global_variables``, ``scheduler``, etc.)
+    where the classic ``PRIMARY KEY (col, ...)`` trailing clause is absent.
+    """
+    first = create_table_sql.find('(')
+    last = create_table_sql.rfind(')')
+    if first == -1 or last <= first:
+        return []
+    body = create_table_sql[first + 1:last]
+
+    reserved = {'PRIMARY', 'UNIQUE', 'KEY', 'CHECK',
+                'CONSTRAINT', 'FOREIGN', 'INDEX'}
+    pk_cols = []
+    for defn in _split_top_level_commas(body):
+        defn = defn.strip()
+        if not defn:
+            continue
+        if not re.search(r'\bPRIMARY\s+KEY\b(?!\s*\()', defn, re.IGNORECASE):
+            continue
+        m = re.match(r'[`"\[]?([A-Za-z_][\w$]*)[`"\]]?\b', defn)
+        if not m:
+            continue
+        first_ident = m.group(1)
+        if first_ident.upper() in reserved:
+            continue
+        pk_cols.append(first_ident)
+    return pk_cols
+
+
 def get_primary_key_columns(db, server, database, table_name):
     """
     Return the primary key column names defined for the specified table.
-    
+
     Parses the table's CREATE TABLE SQL and extracts the PRIMARY KEY column list.
-    
+
     Returns:
         list: Primary key column names in definition order. Returns an empty list if the table has no primary key or if the primary key cannot be determined.
     """
@@ -1394,20 +1443,24 @@ def get_primary_key_columns(db, server, database, table_name):
         else:
             create_table_sql = create_table_result[1]
 
-        # Find PRIMARY KEY definition
-        # Pattern: PRIMARY KEY (column1, column2, ...)
+        # Block form: PRIMARY KEY (column1, column2, ...)
         pk_pattern = r'PRIMARY\s+KEY\s*\(([^)]+)\)'
         match = re.search(pk_pattern, create_table_sql, re.IGNORECASE)
-
         if match:
-            pk_columns_str = match.group(1)
-            # Split by comma and clean up column names
-            pk_columns = [col.strip().strip('`"[]') for col in pk_columns_str.split(',')]
+            pk_columns = [col.strip().strip('`"[]')
+                          for col in match.group(1).split(',')]
             logging.debug(f"Primary key columns for {table_name}: {pk_columns}")
             return pk_columns
-        else:
-            logging.warning(f"No primary key found for table {table_name}")
-            return []
+
+        # Inline form: `col TYPE ... PRIMARY KEY` — common in ProxySQL's
+        # SQLite-style admin schemas, and missed by the block-form regex above.
+        inline_pk = _parse_inline_primary_keys(create_table_sql)
+        if inline_pk:
+            logging.debug(f"Primary key columns for {table_name}: {inline_pk}")
+            return inline_pk
+
+        logging.warning(f"No primary key found for table {table_name}")
+        return []
 
     except Exception as e:
         logging.error(f"Error extracting primary key for {table_name}: {e}")
