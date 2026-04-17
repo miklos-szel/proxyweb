@@ -370,11 +370,13 @@ class TestConfigDiffMemoryRuntime(unittest.TestCase):
             "server":      self.SERVER,
             "database":    self.DB,
             "table":       self.TABLE,
-            "columnNames": ["username", "password", "default_hostgroup", "active"],
+            "columnNames": ["username", "password", "default_hostgroup",
+                            "default_schema", "active"],
             "data": {
                 "username":          self.TEST_USER,
                 "password":          "difftest-pass",
                 "default_hostgroup": "0",
+                "default_schema":    "",
                 "active":            "1",
             },
         }).json()
