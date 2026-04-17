@@ -203,6 +203,93 @@ class TestAPIRowOperations(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
 
 
+class TestShellMetacharPayloadRoundTrip(unittest.TestCase):
+    """Regression: values with shell metacharacters and newlines must be stored
+    literally via /api/insert_row, not interpreted by a shell.
+
+    ``execute_change`` previously invoked the mysql CLI with
+    ``subprocess.Popen(cmd, shell=True)``, interpolating the SQL into a bash
+    ``-c`` string. This test guards against regressions where somebody
+    reintroduces shell-based execution: the inserted comment contains newlines,
+    semicolons, pipes, redirections, backticks, ``$(...)`` and ``${...}``. If
+    any shell expansion were to occur, the round-tripped value would differ
+    from the original.
+    """
+
+    SERVER   = SERVER
+    DATABASE = "main"
+    TABLE    = "mysql_servers"
+
+    TEST_HOST = "test-shellinj-host"
+    TEST_HG   = 98
+    TEST_PORT = 3398
+
+    PAYLOAD = (
+        "safe\n"
+        "; touch /tmp/pwn_proxyweb_shellinj ;\n"
+        "`touch /tmp/pwn_backtick` $(touch /tmp/pwn_cmdsub) "
+        "${IFS}|&<>\"'\\"
+    )
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+
+    def _pk_values(self):
+        return {
+            "hostgroup_id": str(self.TEST_HG),
+            "hostname":     self.TEST_HOST,
+            "port":         str(self.TEST_PORT),
+        }
+
+    def tearDown(self):
+        try:
+            self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+            self.s.post_json("/api/delete_row", {
+                "server":   self.SERVER,
+                "database": self.DATABASE,
+                "table":    self.TABLE,
+                "pkValues": self._pk_values(),
+            })
+        except Exception:
+            pass
+
+    def test_shell_metachars_in_comment_are_stored_literally(self):
+        insert = self.s.post_json("/api/insert_row", {
+            "server":      self.SERVER,
+            "database":    self.DATABASE,
+            "table":       self.TABLE,
+            "columnNames": ["hostgroup_id", "hostname", "port", "comment"],
+            "data": {
+                "hostgroup_id": str(self.TEST_HG),
+                "hostname":     self.TEST_HOST,
+                "port":         str(self.TEST_PORT),
+                "comment":      self.PAYLOAD,
+            },
+        }).json()
+        self.assertTrue(insert.get("success"),
+                        f"Insert failed: {insert.get('error')}")
+
+        data = self.s.get_table_data(self.SERVER, self.DATABASE, self.TABLE,
+                                     **{"search[value]": self.TEST_HOST})
+        rows = data.get("data", [])
+        cols = data.get("column_names", [])
+        self.assertTrue(rows, "Inserted row not found via /api/table_data")
+
+        host_idx    = cols.index("hostname")
+        comment_idx = cols.index("comment")
+        match = next((r for r in rows if r[host_idx] == self.TEST_HOST), None)
+        self.assertIsNotNone(match,
+                             f"No row with hostname={self.TEST_HOST} in {rows!r}")
+
+        self.assertEqual(
+            match[comment_idx], self.PAYLOAD,
+            "Comment did not round-trip verbatim — shell or SQL quoting may "
+            "have stripped/rewritten metacharacters.",
+        )
+
+
 class TestAPIConfigDiff(unittest.TestCase):
     """Config diff API returns structured data."""
 

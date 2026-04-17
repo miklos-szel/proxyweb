@@ -169,6 +169,11 @@ services:
     build:
       context: ..
       dockerfile: test/Dockerfile
+    # Compose bind-mounts config.yml as a single file; os.replace() returns
+    # EXDEV/EBUSY on bind-mounts, so opt in to the non-atomic fallback so
+    # the settings save roundtrip keeps working inside the test stack.
+    environment:
+      PROXYWEB_ALLOW_NONATOMIC_WRITE: "1"
     volumes:
       - ./config/config.yml:/app/config/config.yml
     depends_on:
