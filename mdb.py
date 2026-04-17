@@ -28,7 +28,7 @@ import json
 from datetime import datetime, timezone
 
 _LOG_LEVEL = logging.DEBUG if os.environ.get('PROXYWEB_DEBUG', '0') == '1' else logging.INFO
-logging.basicConfig(level=_LOG_LEVEL, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=_LOG_LEVEL, format='%(asctime)s - %(levelname)s - %(message)s', force=True)
 
 HISTORY_DIR = os.path.join(os.path.dirname(__file__), 'data', 'history')
 
