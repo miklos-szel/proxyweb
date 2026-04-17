@@ -222,7 +222,8 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username') or ''
         password = request.form.get('password') or ''
-        if (hmac.compare_digest(str(admin_user), username)
+        if (admin_user and admin_password
+                and hmac.compare_digest(str(admin_user), username)
                 and hmac.compare_digest(str(admin_password), password)):
             session['logged_in'] = True
             session['role'] = 'admin'

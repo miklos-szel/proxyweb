@@ -1254,9 +1254,9 @@ def execute_change(db, server, sql):
             logging.error("mysql CLI timed out after 30s for server %s", server)
             return "ERROR: mysql command timed out"
 
-        error_msg = proc.stderr.decode('utf-8', errors='replace').replace(
-            "mysql: [Warning] Using a password on the command line interface can be insecure.\n", ''
-        )
+        error_msg = proc.stderr.decode('utf-8', errors='replace')
+        if proc.returncode != 0 and not error_msg:
+            error_msg = f"mysql CLI exited with status {proc.returncode}"
         if error_msg:
             logging.error(f"SQL execution error: {error_msg}")
         else:
