@@ -8,7 +8,37 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
 
 ## [Unreleased]
 
+### Security
+- `mdb.execute_change` no longer spawns the `mysql` CLI with `shell=True` and
+  the password on `argv`; it now runs argv-list `subprocess.run(shell=False)`
+  with `MYSQL_PWD` in the env, SQL piped over stdin, and a 30 s timeout.
+  Removes the shell-metachar injection surface and hides the password from
+  `ps`/`/proc`.
+- Admin and read-only login checks use `hmac.compare_digest` so credential
+  comparisons are constant-time.
+- DataTables `search[value]` is now escaped with `ESCAPE '!'` before it hits
+  the LIKE clause in `get_table_content_paginated`, so searching for `%` or
+  `_` matches literal characters instead of expanding into SQL wildcards.
+- Uncaught route exceptions render a redacted `"{ExceptionType}: see server
+  logs for details"` page instead of leaking the raw exception text to the
+  browser; full traceback still goes to the server log.
+
 ### Changed
+- Request-scoped connection/cache state moved from a module-level `db` dict
+  to `flask.g.db`, initialised in `@before_request` and torn down in
+  `@teardown_request`. Gunicorn thread workers no longer share cursors or
+  connections.
+- `_atomic_write` now fsyncs the parent directory after `os.replace` so the
+  rename survives a power loss. The EXDEV/EBUSY fallback for Docker
+  single-file bind-mounts is gated behind `PROXYWEB_ALLOW_NONATOMIC_WRITE=1`
+  (set by the test compose file) so production deployments keep full
+  atomicity by default.
+- `misc/entry.sh` SECRET_KEY replacement is now idempotent: the `sed`
+  pattern is anchored to the shipped placeholder line, so typing
+  `12345678901234567890` in an unrelated field no longer rotates the key on
+  every container restart.
+- `datetime.utcfromtimestamp` (deprecated in 3.12) replaced with
+  timezone-aware `datetime.fromtimestamp(..., tz=timezone.utc)`.
 - Integration test suite split out of the monolithic `test/test_proxyweb.py`
   into topical modules under `test/cases/` (auth, crud, navigation, pgsql,
   proxysql_backend, query_history, settings, sql_and_api, tables_display).

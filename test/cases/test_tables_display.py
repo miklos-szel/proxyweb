@@ -389,6 +389,97 @@ class TestServerSidePagination(unittest.TestCase):
         self.assertIn(resp.status_code, (200, 400))
 
 
+class TestWildcardSearchEscape(unittest.TestCase):
+    """DataTables search must treat '%' and '_' as literal characters.
+
+    Regression guard: the LIKE clause in `get_table_content_paginated` used
+    an unescaped search value, so a search for "%" expanded into a SQL
+    wildcard and matched every row instead of only rows literally
+    containing "%". The fix escapes '%', '_' and '!' via `ESCAPE '!'`.
+    """
+
+    SERVER   = SERVER
+    DATABASE = "main"
+    TABLE    = "mysql_servers"
+
+    PCT_HG,  PCT_HOST,  PCT_PORT  = 97, "pct-marker-host", 3311
+    UND_HG,  UND_HOST,  UND_PORT  = 96, "und-marker-host", 3312
+    BNG_HG,  BNG_HOST,  BNG_PORT  = 95, "bng-marker-host", 3313
+    PCT_COMMENT = "literal%pct%only"
+    UND_COMMENT = "literal_und_only"
+    BNG_COMMENT = "literal!bang!only"
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+        self._insert(self.PCT_HG, self.PCT_HOST, self.PCT_PORT, self.PCT_COMMENT)
+        self._insert(self.UND_HG, self.UND_HOST, self.UND_PORT, self.UND_COMMENT)
+        self._insert(self.BNG_HG, self.BNG_HOST, self.BNG_PORT, self.BNG_COMMENT)
+
+    def tearDown(self):
+        self._delete(self.PCT_HG, self.PCT_HOST, self.PCT_PORT)
+        self._delete(self.UND_HG, self.UND_HOST, self.UND_PORT)
+        self._delete(self.BNG_HG, self.BNG_HOST, self.BNG_PORT)
+
+    def _insert(self, hg, host, port, comment):
+        self.s.post_json("/api/insert_row", {
+            "server":      self.SERVER,
+            "database":    self.DATABASE,
+            "table":       self.TABLE,
+            "columnNames": ["hostgroup_id", "hostname", "port", "comment"],
+            "data": {
+                "hostgroup_id": str(hg),
+                "hostname":     host,
+                "port":         str(port),
+                "comment":      comment,
+            },
+        })
+
+    def _delete(self, hg, host, port):
+        self.s.post_json("/api/delete_row", {
+            "server":   self.SERVER,
+            "database": self.DATABASE,
+            "table":    self.TABLE,
+            "pkValues": {
+                "hostgroup_id": str(hg),
+                "hostname":     host,
+                "port":         str(port),
+            },
+        })
+
+    def _search(self, value):
+        return self.s.get_table_data(self.SERVER, self.DATABASE, self.TABLE,
+                                     **{"search[value]": value})
+
+    def test_percent_is_literal_not_wildcard(self):
+        body = self._search("%")
+        self.assertGreater(body["recordsFiltered"], 0,
+                           "'%' must match the seeded row containing '%'")
+        self.assertLess(body["recordsFiltered"], body["recordsTotal"],
+                        "'%' must not match every row — it should be a literal")
+        for row in body["data"]:
+            self.assertIn("%", " ".join(str(c) for c in row))
+
+    def test_underscore_is_literal_not_single_char_wildcard(self):
+        body = self._search("_")
+        self.assertGreater(body["recordsFiltered"], 0,
+                           "'_' must match the seeded row containing '_'")
+        self.assertLess(body["recordsFiltered"], body["recordsTotal"],
+                        "'_' must not match every row — it should be a literal")
+        for row in body["data"]:
+            self.assertIn("_", " ".join(str(c) for c in row))
+
+    def test_escape_char_is_literal(self):
+        body = self._search("!")
+        self.assertGreater(body["recordsFiltered"], 0,
+                           "'!' must match the seeded row containing '!'")
+        self.assertLess(body["recordsFiltered"], body["recordsTotal"],
+                        "'!' must not match every row — it should be a literal")
+        for row in body["data"]:
+            self.assertIn("!", " ".join(str(c) for c in row))
+
+
 class TestProxySQL3Autocommit(unittest.TestCase):
     """ProxySQL 3.x admin rejects SET @@session.autocommit which
     mysql-connector-python sends internally when setting the autocommit

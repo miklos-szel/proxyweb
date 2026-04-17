@@ -17,11 +17,12 @@ __author__ = "Miklos Mukka Szel"
 __contact__ = "email@miklos-szel.com"
 __license__ = "GPLv3"
 
+import hmac
 import logging
 import secrets
 import subprocess
 from collections import defaultdict
-from flask import Flask, render_template, request, session, url_for, flash, redirect, jsonify, abort
+from flask import Flask, g, render_template, request, session, url_for, flash, redirect, jsonify, abort
 from functools import wraps
 import re
 import errno
@@ -38,7 +39,8 @@ try:
         stderr=subprocess.DEVNULL,
         cwd=os.path.dirname(os.path.abspath(__file__))
     ).decode().strip()
-except Exception:
+except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:
+    logging.debug("Git commit lookup skipped: %s", exc)
     _git_commit = ''
 
 @app.context_processor
@@ -68,25 +70,50 @@ def _atomic_write(path, content):
             f.write(content)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-    except OSError as exc:
-        logging.warning(f"_atomic_write: os.replace failed errno={exc.errno} ({exc}); path={path}")
+        try:
+            os.replace(tmp_path, path)
+        except OSError as exc:
+            # Docker file bind-mount can return EXDEV/EBUSY from rename(). A
+            # non-atomic open(path, 'w') fallback has worse semantics than a
+            # 500 (partial write on crash leaves the config corrupt), so let
+            # the error propagate unless PROXYWEB_ALLOW_NONATOMIC_WRITE=1.
+            if (exc.errno in (errno.EXDEV, errno.EBUSY)
+                    and os.environ.get('PROXYWEB_ALLOW_NONATOMIC_WRITE') == '1'):
+                logging.warning(
+                    "_atomic_write: rename errno=%s fallback — writing directly to %s",
+                    exc.errno, path,
+                )
+                with open(path, 'w') as f:
+                    f.write(content)
+                    f.flush()
+                    os.fsync(f.fileno())
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+            else:
+                raise
+        # fsync the directory so the rename is durable across power loss.
+        try:
+            dir_fd = os.open(dir_, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            pass
+    except BaseException:
         try:
             os.unlink(tmp_path)
         except OSError:
             pass
-        if exc.errno in (errno.EXDEV, errno.EBUSY):
-            # Docker file bind-mount: rename() can fail with EXDEV (cross-device)
-            # or EBUSY (device busy) when the target is a bind-mounted file.
-            # Fall back to a direct overwrite which is safe enough in this context.
-            logging.warning(f"_atomic_write: rename errno={exc.errno} fallback — writing directly to {path}")
-            with open(path, 'w') as f:
-                f.write(content)
-        else:
-            raise
+        raise
 
 
-db = defaultdict(lambda: defaultdict(dict))
+# Per-request connection/cursor container. gunicorn runs with --threads, so
+# sharing a module-level dict here would let concurrent requests swap each
+# other's cursors and connections mid-call. ``g.db`` is populated in
+# ``init_db`` below and cleaned up in ``close_db``.
 
 # read/apply the flask config from the config file
 flask_custom_config = mdb.get_config(config)
@@ -118,6 +145,36 @@ def login_required(f):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
+
+
+@app.before_request
+def init_db():
+    """Create a fresh per-request connection/cursor container on ``g``."""
+    g.db = defaultdict(lambda: defaultdict(dict))
+
+
+@app.teardown_request
+def close_db(exc):
+    """Close any cursors/connections the request opened via ``g.db``."""
+    db_ = g.pop('db', None)
+    if db_ is None:
+        return
+    servers = db_.get('cnf', {}).get('servers', {}) if isinstance(db_.get('cnf'), dict) else {}
+    for server_info in servers.values():
+        if not isinstance(server_info, dict):
+            continue
+        cur = server_info.get('cur')
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        conn = server_info.get('conn')
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 @app.before_request
@@ -163,13 +220,17 @@ def login():
     readonly_password = auth_cfg.get('readonly_password', '')
 
     if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        if admin_user == username and admin_password == password:
+        username = request.form.get('username') or ''
+        password = request.form.get('password') or ''
+        if (admin_user and admin_password
+                and hmac.compare_digest(str(admin_user), username)
+                and hmac.compare_digest(str(admin_password), password)):
             session['logged_in'] = True
             session['role'] = 'admin'
             return redirect(url_for('render_list_dbs'))
-        elif readonly_user and readonly_password and username == readonly_user and password == readonly_password:
+        elif (readonly_user and readonly_password
+              and hmac.compare_digest(str(readonly_user), username)
+              and hmac.compare_digest(str(readonly_password), password)):
             session['logged_in'] = True
             session['role'] = 'readonly'
             return redirect(url_for('render_list_dbs'))
@@ -208,20 +269,17 @@ def render_list_dbs():
             return render_template("error.html", error="No servers configured. Ask an admin to set one up."), 503
         flash('No servers configured. Please add one below.', 'warning')
         return redirect(url_for('render_settings', action='edit'))
-    try:
-        session['server'] = server
-        session['dblist'] = mdb.get_all_dbs_and_tables(db, server)
-        session['servers'] = mdb.get_servers()
-        session['read_only'] = mdb.get_read_only(server)
-        if session.get('role') == 'readonly':
-            session['read_only'] = True
-        session['misc'] = mdb.get_config(config)['misc']
-        recent = mdb.load_query_history(server, limit=10)
-        session['history'] = [e['sql'] for e in recent]
+    session['server'] = server
+    session['dblist'] = mdb.get_all_dbs_and_tables(g.db, server)
+    session['servers'] = mdb.get_servers()
+    session['read_only'] = mdb.get_read_only(server)
+    if session.get('role') == 'readonly':
+        session['read_only'] = True
+    session['misc'] = mdb.get_config(config)['misc']
+    recent = mdb.load_query_history(server, limit=10)
+    session['history'] = [e['sql'] for e in recent]
 
-        return render_template("list_dbs.html", server=server)
-    except Exception as e:
-        raise ValueError(e)
+    return render_template("list_dbs.html", server=server)
 
 @app.route('/<server>/')
 @app.route('/<server>/<database>/<table>/')
@@ -243,26 +301,22 @@ def render_show_table_content(server, database="main", table="global_variables")
     Raises:
         ValueError: If any underlying operation (data loading, processing, or rendering) fails.
     """
-    try:
-        # refresh the tablelist if changing to a new server
+    # refresh the tablelist if changing to a new server
+    if server not in session['dblist']:
+        session['dblist'].update(mdb.get_all_dbs_and_tables(g.db, server))
 
-        if server not in session['dblist']:
-            session['dblist'].update(mdb.get_all_dbs_and_tables(db, server))
-
-        session['servers'] = mdb.get_servers()
-        session['server'] = server
-        recent = mdb.load_query_history(server, limit=10)
-        session['history'] = [e['sql'] for e in recent]
-        session['table'] = table
-        session['database'] = database
-        session['misc'] = mdb.get_config(config)['misc']
-        session['read_only'] = mdb.get_read_only(server)
-        if session.get('role') == 'readonly':
-            session['read_only'] = True
-        content = mdb.get_table_metadata(db, server, database, table)
-        return render_template("show_table_info.html", content=content)
-    except Exception as e:
-        raise ValueError(e)
+    session['servers'] = mdb.get_servers()
+    session['server'] = server
+    recent = mdb.load_query_history(server, limit=10)
+    session['history'] = [e['sql'] for e in recent]
+    session['table'] = table
+    session['database'] = database
+    session['misc'] = mdb.get_config(config)['misc']
+    session['read_only'] = mdb.get_read_only(server)
+    if session.get('role') == 'readonly':
+        session['read_only'] = True
+    content = mdb.get_table_metadata(g.db, server, database, table)
+    return render_template("show_table_info.html", content=content)
 
 @app.route('/<server>/<database>/<table>/sql/', methods=['GET', 'POST'])
 @login_required
@@ -278,47 +332,39 @@ def render_change(server, database, table):
     Raises:
         ValueError: If an unexpected exception occurs during processing.
     """
-    try:
-        error = ""
-        message = ""
-        ret = ""
-        session['sql'] = request.form["sql"]
+    error = ""
+    message = ""
+    ret = ""
+    session['sql'] = request.form["sql"]
 
+    mdb.logging.debug(session['history'])
+    select = re.search(r'^\s*SELECT\b.*\bFROM\b', session['sql'], re.I | re.S)
+    if not select and session.get('role') == 'readonly':
+        error = "Read-only user cannot execute non-SELECT statements"
+        content = mdb.get_table_metadata(g.db, server, database, table)
+        return render_template("show_table_info.html", content=content, error=error, message="")
+    if select:
+        content = mdb.execute_adhoc_query(g.db, server, session['sql'])
+        content['order'] = 'true'
+    else:
+        ret = mdb.execute_change(g.db, server, session['sql'])
+        content = mdb.get_table_metadata(g.db, server, database, table)
 
-        mdb.logging.debug(session['history'])
-        select = re.search(r'^\s*SELECT\b.*\bFROM\b', session['sql'], re.I | re.S)
-        if not select and session.get('role') == 'readonly':
-            error = "Read-only user cannot execute non-SELECT statements"
-            content = mdb.get_table_metadata(db, server, database, table)
-            return render_template("show_table_info.html", content=content, error=error, message="")
-        if select:
-            content = mdb.execute_adhoc_query(db, server, session['sql'])
-            content['order'] = 'true'
-        else:
-            ret = mdb.execute_change(db, server, session['sql'])
-            content = mdb.get_table_metadata(db, server, database, table)
+    if "ERROR" in ret:
+        error = ret
+    else:
+        message = "Success"
+    if session['sql'].replace("\r\n","") not in session['history'] and not error:
+        session['history'].append(session['sql'].replace("\r\n",""))
+        mdb.append_query_history(server, session['sql'].replace("\r\n",""), session.get('role', 'admin'))
 
-        if "ERROR" in ret:
-            error = ret
-        else:
-            message = "Success"
-        if session['sql'].replace("\r\n","") not in session['history'] and not error:
-            session['history'].append(session['sql'].replace("\r\n",""))
-            mdb.append_query_history(server, session['sql'].replace("\r\n",""), session.get('role', 'admin'))
-
-        return render_template("show_table_info.html", content=content, error=error, message=message)
-    except Exception as e:
-        raise ValueError(e)
+    return render_template("show_table_info.html", content=content, error=error, message=message)
 
 @app.route('/<server>/adhoc/')
 @login_required
 def adhoc_report(server):
-    try:
-
-        adhoc_results = mdb.execute_adhoc_report(db, server)
-        return render_template("show_adhoc_report.html", adhoc_results=adhoc_results)
-    except Exception as e:
-        raise ValueError(e)
+    adhoc_results = mdb.execute_adhoc_report(g.db, server)
+    return render_template("show_adhoc_report.html", adhoc_results=adhoc_results)
 
 
 @app.route('/settings/<action>/', methods=['GET', 'POST'])
@@ -338,27 +384,23 @@ def render_settings(action):
     """
     if session.get('role') == 'readonly':
         abort(403)
-    try:
-        config_file_content = ""
-        message = ""
-        if action == 'edit':
-            with open(config, "r") as f:
-                config_file_content = f.read()
-        if action == 'save':
-            raw = request.form["settings"]
-            mdb.validate_yaml(raw)
-            mdb.validate_config_shape(yaml.safe_load(raw))
+    config_file_content = ""
+    message = ""
+    if action == 'edit':
+        with open(config, "r") as f:
+            config_file_content = f.read()
+    if action == 'save':
+        raw = request.form["settings"]
+        mdb.validate_yaml(raw)
+        mdb.validate_config_shape(yaml.safe_load(raw))
 
-            # back it up first
-            with open(config, "r") as src, open(config + ".bak", "w") as dest:
-                dest.write(src.read())
+        # back it up first
+        with open(config, "r") as src, open(config + ".bak", "w") as dest:
+            dest.write(src.read())
 
-            _atomic_write(config, raw)
-            message = "success"
-        return render_template("settings.html", config_file_content=config_file_content, message=message)
-    except Exception as e:
-        logging.exception(f"Error in settings/{action}/")
-        raise ValueError(e)
+        _atomic_write(config, raw)
+        message = "success"
+    return render_template("settings.html", config_file_content=config_file_content, message=message)
 
 
 @app.route('/settings/ui_save/', methods=['POST'])
@@ -609,7 +651,7 @@ def api_update_row():
         logging.debug(f"Row Data: {row_data}")
         logging.debug("=" * 80)
 
-        result = mdb.update_row(db, server, database, table, pk_values, column_names, row_data)
+        result = mdb.update_row(g.db, server, database, table, pk_values, column_names, row_data)
         logging.debug(f"Update result: {result}")
         return jsonify(result)
     except Exception as e:
@@ -659,7 +701,7 @@ def api_delete_row():
         logging.debug(f"PK Values: {pk_values}")
         logging.debug("=" * 80)
 
-        result = mdb.delete_row(db, server, database, table, pk_values)
+        result = mdb.delete_row(g.db, server, database, table, pk_values)
         logging.debug(f"Delete result: {result}")
         return jsonify(result)
     except Exception as e:
@@ -705,7 +747,7 @@ def api_insert_row():
         logging.debug(f"Row Data: {row_data}")
         logging.debug("=" * 80)
 
-        result = mdb.insert_row(db, server, database, table, column_names, row_data)
+        result = mdb.insert_row(g.db, server, database, table, column_names, row_data)
         logging.debug(f"Insert result: {result}")
         return jsonify(result)
     except Exception as e:
@@ -734,7 +776,7 @@ def api_get_schema():
         server = session.get('server', 'default')
         database = session.get('database', 'main')
 
-        schema_info = mdb.get_table_schema(db, server, database, table_name)
+        schema_info = mdb.get_table_schema(g.db, server, database, table_name)
         return jsonify({'success': True, 'schema': schema_info})
     except Exception as e:
         logging.exception(f"Schema extraction error: {e}")
@@ -763,11 +805,8 @@ def api_table_data():
                             'recordsFiltered': 0, 'data': [],
                             'error': 'Missing or invalid server/table parameter'})
 
-        # Use a request-local db container to avoid cursor state mutation
-        # on the module-level db dict between concurrent requests.
-        req_db = defaultdict(lambda: defaultdict(dict))
         result = mdb.get_table_content_paginated(
-            req_db, server, database, table,
+            g.db, server, database, table,
             start=start, length=length,
             search_value=search_value,
             order_column=order_col, order_dir=order_dir,
@@ -813,7 +852,7 @@ def api_execute_proxysql_command():
             return jsonify({'success': False, 'error': 'Server is in read-only mode'})
 
         # Execute the SQL commands
-        error = mdb.execute_change(db, server, sql)
+        error = mdb.execute_change(g.db, server, sql)
 
         if error:
             # Convert error to string if it's an exception object
@@ -847,7 +886,7 @@ def query_history(server):
     session['servers'] = mdb.get_servers()
     if server not in session.get('dblist', {}):
         session['dblist'] = session.get('dblist', {})
-        session['dblist'].update(mdb.get_all_dbs_and_tables(db, server))
+        session['dblist'].update(mdb.get_all_dbs_and_tables(g.db, server))
     session['misc'] = mdb.get_config(config)['misc']
     session['read_only'] = mdb.get_read_only(server)
     if session.get('role') == 'readonly':
@@ -881,22 +920,17 @@ def api_clear_query_history():
 
 @app.errorhandler(Exception)
 def handle_exception(e):
-    """
-    Render an error page for an exception.
-    
-    If the exception is an instance of werkzeug.exceptions.HTTPException, return its HTTP response directly; otherwise log the exception and render "error.html" with the exception passed as `error`, returning an HTTP 500 status.
-    
-    Parameters:
-        e (Exception): The exception to handle and display in the error template.
-    
-    Returns:
-        tuple or Response: The rendered error page and HTTP status code 500, or the HTTPException's response object.
-    """
+    """Render a redacted error page; full traceback goes to the log."""
     from werkzeug.exceptions import HTTPException
     if isinstance(e, HTTPException):
         return e.get_response()
     logging.exception(e)
-    return render_template("error.html", error=e), 500
+    # Avoid echoing raw exception text — mysql.connector, subprocess and
+    # requests can embed connection strings or credentials in their messages.
+    return render_template(
+        "error.html",
+        error=f"{type(e).__name__}: see server logs for details",
+    ), 500
 
 
 if __name__ == '__main__':

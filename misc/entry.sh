@@ -13,9 +13,15 @@ if [ -f "${ENV_FILE}" ]; then
     set +a
 fi
 
-#Generate a unique secret key for flask
-SECRET_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1)
-sed -i "s/12345678901234567890/${SECRET_KEY}/" ${CONFIG}
+# Generate a unique SECRET_KEY for Flask — only when the shipped placeholder
+# is still in place. Restarting the container otherwise would invalidate every
+# live session on every restart. The sed pattern is anchored to the specific
+# placeholder line so a user accidentally typing 12345678901234567890 in an
+# unrelated field (e.g. a comment or port) does not get clobbered.
+SECRET_KEY=$(tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 32)
+if grep -Eq '^[[:space:]]+SECRET_KEY: 12345678901234567890[[:space:]]*$' "${CONFIG}"; then
+    sed -i -E "s|^([[:space:]]+SECRET_KEY:) 12345678901234567890[[:space:]]*$|\1 ${SECRET_KEY}|" "${CONFIG}"
+fi
 echo
 if [ -n "${WEBSERVER_PORT}" ]; then
     GUNICORN_PORT=${WEBSERVER_PORT}

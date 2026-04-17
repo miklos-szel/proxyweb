@@ -54,7 +54,7 @@ sudo make uninstall
 
 ### Core Files
 
-- **`app.py`** — Flask application. All routes live here. A module-level `db` dict (`defaultdict`) acts as an in-memory connection/cache store passed into `mdb` functions.
+- **`app.py`** — Flask application. All routes live here. A per-request `db` dict (on `flask.g.db`) acts as an in-memory connection/cache store passed into `mdb` functions; it's initialised in a `@before_request` hook and its cursors/connections are closed in a `@teardown_request` hook so gunicorn thread workers don't share handles.
 - **`mdb.py`** — All database logic. Connects to ProxySQL via `mysql.connector`, executes queries, parses results, and handles config YAML manipulation.
 - **`config/config.yml`** — Single config file for everything: ProxySQL server DSNs, auth credentials, Flask settings, hidden tables, adhoc report definitions, and SQL shortcut menus.
 - **`wsgi.py`** — Gunicorn entrypoint, just imports `app` from `app.py`.
@@ -100,7 +100,9 @@ The `SECRET_KEY` placeholder `12345678901234567890` is replaced at container sta
 
 ### Config File Writes
 
-All writes to `config/config.yml` must go through `_atomic_write(path, content)` in `app.py`. It writes to a temp file in the same directory, fsyncs, then calls `os.replace()` to swap atomically. Never use `open(config, "w")` directly for config writes.
+All writes to `config/config.yml` must go through `_atomic_write(path, content)` in `app.py`. It writes to a temp file in the same directory, fsyncs the file, calls `os.replace()` to swap atomically, then fsyncs the parent directory so the rename survives a power loss. Never use `open(config, "w")` directly for config writes.
+
+On Docker single-file bind-mounts `os.replace()` raises EXDEV/EBUSY; set `PROXYWEB_ALLOW_NONATOMIC_WRITE=1` (as the test compose file does) to opt into a non-atomic fallback that truncates and writes in place. The fallback is off by default to keep atomicity guarantees in production deployments.
 
 Every config write handler also backs up the current file to `config.yml.bak` before writing, and validates YAML syntax and shape (`mdb.validate_yaml` + `mdb.validate_config_shape`) before touching the file.
 
@@ -195,3 +197,5 @@ Rules:
 | `get_primary_key_columns` only parsed block-form `PRIMARY KEY (...)` → for ProxySQL's SQLite-style inline `col TYPE PRIMARY KEY` (e.g. `mysql_query_rules.rule_id`) the WHERE clause silently fell back to all columns, so edits returned `success=True` but matched zero rows and reverted on refresh | `TestInlinePrimaryKeyUpdate` |
 | Same browser-style `pkValues` payload (every column, NULLs as `"None"`) silently no-op'd DELETE on tables with an inline PK — API returned `success=True` but the row reappeared on refresh | `TestInlinePrimaryKeyUpdate.test_delete_persists_with_browser_style_pkvalues` |
 | Browser-style UPDATE coverage extended to the other PK declaration styles ProxySQL uses: block-form composite (`mysql_servers`) and inline autoinc (`scheduler`) | `TestCrossPkStyleEditing` |
+| `execute_change` used `subprocess.Popen(cmd, shell=True)` with the password on argv and fragile metachar escaping; rewrote as argv-list `subprocess.run(shell=False)` with `MYSQL_PWD` env var, SQL via stdin, and a 30s timeout | `TestShellMetacharPayloadRoundTrip` |
+| DataTables `search[value]` flowed into a LIKE clause unescaped → searching for `%` or `_` matched every row; fixed by escaping via `ESCAPE '!'` | `TestWildcardSearchEscape` |

@@ -25,9 +25,10 @@ import yaml
 import subprocess
 import re
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+_LOG_LEVEL = logging.DEBUG if os.environ.get('PROXYWEB_DEBUG', '0') == '1' else logging.INFO
+logging.basicConfig(level=_LOG_LEVEL, format='%(asctime)s - %(levelname)s - %(message)s', force=True)
 
 HISTORY_DIR = os.path.join(os.path.dirname(__file__), 'data', 'history')
 
@@ -1002,10 +1003,22 @@ def get_table_content_paginated(db, server, database, table,
             # Build WHERE clause for search
             where_clause = ""
             if search_value:
-                escaped = search_value.replace("'", "''").replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                # Escape SQL-string metacharacters (') and LIKE wildcards (%, _)
+                # so user input cannot act as wildcards. We use '!' as the
+                # ESCAPE char rather than '\' because ProxySQL's admin
+                # interface is SQLite-based and does not treat '\' as a
+                # string-literal escape — `ESCAPE '\\'` would be parsed as a
+                # two-character string and rejected.
+                escaped = (search_value
+                           .replace("!", "!!")
+                           .replace("'", "''")
+                           .replace("%", "!%")
+                           .replace("_", "!_"))
                 conditions = []
                 for col in column_names:
-                    conditions.append(f"CAST({_quote_ident(col)} AS CHAR) LIKE '%{escaped}%'")
+                    conditions.append(
+                        f"CAST({_quote_ident(col)} AS CHAR) LIKE '%{escaped}%' ESCAPE '!'"
+                    )
                 where_clause = "WHERE " + " OR ".join(conditions)
 
             # Filtered count
@@ -1070,7 +1083,7 @@ def process_table_content(table, content):
                     if time_fields[field] == 'us':
                         # Convert microseconds to seconds
                         value /= 1_000_000
-                    row[idx] = datetime.utcfromtimestamp(value).strftime('%Y-%m-%d %H:%M:%S')
+                    row[idx] = datetime.fromtimestamp(value, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
                 except (ValueError, TypeError, OverflowError):
                     # Leave the value as is if it's invalid
                     pass
@@ -1206,8 +1219,8 @@ def execute_change(db, server, sql):
         error_msg (str): Error output from the client if the command failed, or an empty string if execution succeeded.
     """
     try:
-        # this is a temporary solution as using the  mysql.connector for certain writes ended up with weird results, ProxySQL
-        # is not a MySQL server after all. We're investigating the issue.
+        # We shell out to the mysql CLI because mysql.connector returns wrong
+        # results for some ProxySQL admin writes (LOAD/SAVE and runtime_* tables).
         db_connect(db, server=server, dictionary=False)
         logging.debug("=" * 80)
         logging.debug("EXECUTING SQL (UPDATE/INSERT/DELETE):")
@@ -1217,15 +1230,33 @@ def execute_change(db, server, sql):
         logging.debug("=" * 80)
         dsn = get_config()['servers'][server]['dsn'][0]
 
-        # Escape double quotes and backslashes in SQL to prevent shell interpretation issues
-        # This allows both single and double quotes to be used in SQL statements
-        escaped_sql = sql.replace('\\', '\\\\').replace('"', '\\"').replace('$', '\\$').replace('`', '\\`')
+        cmd = [
+            'mysql',
+            '-h', str(dsn['host']),
+            '-P', str(dsn['port']),
+            '-u', str(dsn['user']),
+            'main',
+        ]
+        # MYSQL_PWD keeps the password off argv (and out of ps/proc).
+        env = os.environ.copy()
+        env['MYSQL_PWD'] = str(dsn['passwd'])
 
-        cmd = ('mysql -h %s -P %s -u %s -p%s main   -e "%s" ' % (dsn['host'], dsn['port'], dsn['user'], dsn['passwd'], escaped_sql))
-        p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = p.communicate()
+        try:
+            proc = subprocess.run(
+                cmd,
+                input=sql.encode('utf-8'),
+                capture_output=True,
+                env=env,
+                timeout=30,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            logging.error("mysql CLI timed out after 30s for server %s", server)
+            return "ERROR: mysql command timed out"
 
-        error_msg = stderr.decode().replace("mysql: [Warning] Using a password on the command line interface can be insecure.\n",'')
+        error_msg = proc.stderr.decode('utf-8', errors='replace')
+        if proc.returncode != 0 and not error_msg:
+            error_msg = f"mysql CLI exited with status {proc.returncode}"
         if error_msg:
             logging.error(f"SQL execution error: {error_msg}")
         else:
