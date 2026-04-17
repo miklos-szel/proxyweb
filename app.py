@@ -20,7 +20,6 @@ __license__ = "GPLv3"
 import hmac
 import logging
 import secrets
-import subprocess
 from collections import defaultdict
 from flask import Flask, g, render_template, request, session, url_for, flash, redirect, jsonify, abort
 from functools import wraps
@@ -33,19 +32,24 @@ import mdb
 
 app = Flask(__name__)
 
+CHANGELOG_URL = 'https://github.com/miklos-szel/proxyweb/blob/main/CHANGELOG.md'
+
 try:
-    _git_commit = subprocess.check_output(
-        ['git', 'rev-parse', '--short', 'HEAD'],
-        stderr=subprocess.DEVNULL,
-        cwd=os.path.dirname(os.path.abspath(__file__))
-    ).decode().strip()
-except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:
-    logging.debug("Git commit lookup skipped: %s", exc)
-    _git_commit = ''
+    _changelog_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'CHANGELOG.md')
+    with open(_changelog_path, 'r', encoding='utf-8') as _f:
+        _version = ''
+        for _line in _f:
+            _m = re.match(r'##\s+\[(?!Unreleased\])([^\]]+)\]', _line)
+            if _m:
+                _version = _m.group(1).strip()
+                break
+except OSError as exc:
+    logging.debug("Version lookup skipped: %s", exc)
+    _version = ''
 
 @app.context_processor
-def inject_git_commit():
-    return {'git_commit': _git_commit}
+def inject_version():
+    return {'app_version': _version, 'changelog_url': CHANGELOG_URL}
 
 config = "config/config.yml"
 

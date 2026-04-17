@@ -1472,6 +1472,6 @@
             </div>
         </div>
     </div>
-{% if git_commit %}<span style="position:fixed;bottom:4px;right:8px;font-size:10px;color:#ccc;pointer-events:none;user-select:none;">{{ git_commit }}</span>{% endif %}
+{% if app_version %}<a href="{{ changelog_url }}" target="_blank" rel="noopener" style="position:fixed;bottom:4px;right:8px;font-size:10px;color:#ccc;text-decoration:none;">v{{ app_version }}</a>{% endif %}
 </body>
 </html>

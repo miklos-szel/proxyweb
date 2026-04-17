@@ -24,6 +24,14 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
   browser; full traceback still goes to the server log.
 
 ### Changed
+- Bottom-right build stamp in the app now shows the released version parsed
+  from `CHANGELOG.md` (e.g. `v2.1.4`) as a link to the GitHub changelog,
+  instead of the short git SHA. Works inside Docker images where the
+  `.git` directory is absent, so the tag no longer silently disappears.
+- `misc/proxyweb.org/index.html` mirrors the same treatment: the
+  bottom-right tag now hits the GitHub `releases/latest` API and renders
+  the tag name (e.g. `v2.1.4`) linked to `CHANGELOG.md`, instead of the
+  short commit SHA from `/commits/main`.
 - Request-scoped connection/cache state moved from a module-level `db` dict
   to `flask.g.db`, initialised in `@before_request` and torn down in
   `@teardown_request`. Gunicorn thread workers no longer share cursors or

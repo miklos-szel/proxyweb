@@ -850,7 +850,7 @@
     </div>
   </footer>
 
-  <a class="version-tag" id="version-tag" href="https://github.com/miklos-szel/proxyweb/commits/main" target="_blank" rel="noopener noreferrer"></a>
+  <a class="version-tag" id="version-tag" href="https://github.com/miklos-szel/proxyweb/blob/main/CHANGELOG.md" target="_blank" rel="noopener noreferrer"></a>
 
   <script>
     function copyCmd(btn) {
@@ -865,12 +865,12 @@
       });
     }
 
-    fetch('https://api.github.com/repos/miklos-szel/proxyweb/commits/main')
+    fetch('https://api.github.com/repos/miklos-szel/proxyweb/releases/latest')
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(d) {
-        if (d && d.sha) {
+        if (d && d.tag_name) {
           var el = document.getElementById('version-tag');
-          if (el) el.textContent = d.sha.substring(0, 7);
+          if (el) el.textContent = d.tag_name.charAt(0) === 'v' ? d.tag_name : 'v' + d.tag_name;
         }
       })
       .catch(function() {});
