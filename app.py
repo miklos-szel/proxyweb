@@ -87,6 +87,10 @@ def _atomic_write(path, content):
                     f.write(content)
                     f.flush()
                     os.fsync(f.fileno())
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
             else:
                 raise
         # fsync the directory so the rename is durable across power loss.
