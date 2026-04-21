@@ -435,30 +435,10 @@
                     rowData.push(cell.textContent.trim());
                 });
 
-                const generatedSql = buildRowSql(columnNames, rowData, tableName);
-                const copyButtonHtml = `
-                        <button type="button" class="btn btn-icon btn-icon-secondary copy-btn" onclick="copyRowSql(this)"
-                                data-sql="${escapeHtmlAttr(generatedSql)}"
-                                data-bs-toggle="tooltip" data-bs-placement="top" title="Copy SQL" aria-label="Copy row SQL">
-                            <i class="fas fa-copy"></i>
-                        </button>`;
-                const editDeleteHtml = tableIsEditable ? `
-                        <button type="button" class="btn btn-icon edit-btn" onclick="editRow(this)"
-                                data-bs-toggle="tooltip" data-bs-placement="top" title="Edit row" aria-label="Edit row">
-                            <i class="fas fa-edit"></i>
-                        </button>
-                        <button type="button" class="btn btn-icon delete-btn" onclick="deleteRow(this)"
-                                data-bs-toggle="tooltip" data-bs-placement="top" title="Delete row" aria-label="Delete row">
-                            <i class="fas fa-trash"></i>
-                        </button>` : '';
-
                 const controlsCell = document.createElement('td');
                 controlsCell.className = 'edit-controls';
                 controlsCell.style.whiteSpace = 'nowrap';
-                controlsCell.innerHTML = `
-                    <div class="action-buttons">${editDeleteHtml}${copyButtonHtml}
-                    </div>
-                `;
+                controlsCell.innerHTML = buildControlsHtml(columnNames, rowData, tableIsEditable);
                 row.insertBefore(controlsCell, row.firstChild);
 
                 // Store row data as data attributes
@@ -502,6 +482,32 @@
                     row.classList.remove('has-overflow');
                 }
             });
+        }
+
+        // Build the action-buttons markup used by both the initial row render
+        // (enableInlineEditing) and the post-edit restore (restoreEditControls).
+        // Editable rows get Edit+Delete+Copy; read-only rows get Copy only.
+        function buildControlsHtml(columnNames, rowData, tableIsEditable) {
+            const generatedSql = buildRowSql(columnNames, rowData, tableName);
+            const copyButtonHtml = `
+                        <button type="button" class="btn btn-icon btn-icon-secondary copy-btn" onclick="copyRowSql(this)"
+                                data-sql="${escapeHtmlAttr(generatedSql)}"
+                                data-bs-toggle="tooltip" data-bs-placement="top" title="Copy SQL" aria-label="Copy row SQL">
+                            <i class="fas fa-copy"></i>
+                        </button>`;
+            const editDeleteHtml = tableIsEditable ? `
+                        <button type="button" class="btn btn-icon edit-btn" onclick="editRow(this)"
+                                data-bs-toggle="tooltip" data-bs-placement="top" title="Edit row" aria-label="Edit row">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button type="button" class="btn btn-icon delete-btn" onclick="deleteRow(this)"
+                                data-bs-toggle="tooltip" data-bs-placement="top" title="Delete row" aria-label="Delete row">
+                            <i class="fas fa-trash"></i>
+                        </button>` : '';
+            return `
+                    <div class="action-buttons">${editDeleteHtml}${copyButtonHtml}
+                    </div>
+                `;
         }
 
         // Escape a string for safe inclusion in a double-quoted HTML attribute.
@@ -930,18 +936,19 @@
 
         function restoreEditControls(row) {
             const controlsCell = row.querySelector('.edit-controls');
-            controlsCell.innerHTML = `
-                <div class="action-buttons">
-                    <button type="button" class="btn btn-icon edit-btn" onclick="editRow(this)"
-                            data-bs-toggle="tooltip" data-bs-placement="top" title="Edit row" aria-label="Edit row">
-                        <i class="fas fa-edit"></i>
-                    </button>
-                    <button type="button" class="btn btn-icon delete-btn" onclick="deleteRow(this)"
-                            data-bs-toggle="tooltip" data-bs-placement="top" title="Delete row" aria-label="Delete row">
-                        <i class="fas fa-trash"></i>
-                    </button>
-                </div>
-            `;
+            // Re-read values from the live cells so the rebuilt Copy button
+            // reflects edits just saved (saveRow writes back via textContent)
+            // or the originals restored by cancelEdit.
+            const columnNames = JSON.parse(row.dataset.columnNames || '[]');
+            const table = row.closest('table');
+            const headerCells = Array.from(table.querySelectorAll('thead th'))
+                .filter(th => !th.classList.contains('actions-header'));
+            const dataCells = row.querySelectorAll('td:not(.edit-controls)');
+            const rowData = headerCells.map((_th, i) => {
+                const cell = dataCells[i];
+                return cell ? cell.textContent.trim() : '';
+            });
+            controlsCell.innerHTML = buildControlsHtml(columnNames, rowData, isTableEditable());
             document.querySelectorAll('.edit-btn').forEach(btn => btn.disabled = false);
 
             // Re-initialize tooltips for the restored buttons
