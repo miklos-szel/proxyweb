@@ -329,26 +329,21 @@
             const table = document.getElementById('proxywebtable');
             if (!table) return;
 
-            // Check if table is editable based on our new restrictions
-            if (!isTableEditable()) {
-                console.log('[DEBUG] Table is not editable, returning early');
-                return;
-            }
-
-            console.log('[DEBUG] Table is editable, continuing...');
+            const tableIsEditable = isTableEditable();
+            console.log('[DEBUG] tableIsEditable:', tableIsEditable);
 
             // Check if table has a variable_name column
             const headerCells = table.querySelectorAll('thead th');
             const hasVariableNameColumn = Array.from(headerCells).some(th => th.textContent.trim() === 'variable_name');
             console.log('[DEBUG] hasVariableNameColumn:', hasVariableNameColumn);
 
-            // Add header cell for actions column at the beginning
+            // Add header cell for actions column at the beginning (always — copy button lives here too)
             const thead = table.querySelector('thead tr');
             if (thead && !thead.querySelector('th.actions-header')) {
                 const actionsHeader = document.createElement('th');
                 actionsHeader.className = 'actions-header';
-                actionsHeader.style.width = '100px';
-                actionsHeader.style.minWidth = '100px';
+                actionsHeader.style.width = '156px';
+                actionsHeader.style.minWidth = '156px';
                 actionsHeader.textContent = '';
                 thead.insertBefore(actionsHeader, thead.firstChild);
             }
@@ -440,12 +435,14 @@
                     rowData.push(cell.textContent.trim());
                 });
 
-                // Create edit controls cell
-                const controlsCell = document.createElement('td');
-                controlsCell.className = 'edit-controls';
-                controlsCell.style.whiteSpace = 'nowrap';
-                controlsCell.innerHTML = `
-                    <div class="action-buttons">
+                const generatedSql = buildRowSql(columnNames, rowData, tableName);
+                const copyButtonHtml = `
+                        <button type="button" class="btn btn-icon btn-icon-secondary copy-btn" onclick="copyRowSql(this)"
+                                data-sql="${escapeHtmlAttr(generatedSql)}"
+                                data-bs-toggle="tooltip" data-bs-placement="top" title="Copy SQL" aria-label="Copy row SQL">
+                            <i class="fas fa-copy"></i>
+                        </button>`;
+                const editDeleteHtml = tableIsEditable ? `
                         <button type="button" class="btn btn-icon edit-btn" onclick="editRow(this)"
                                 data-bs-toggle="tooltip" data-bs-placement="top" title="Edit row" aria-label="Edit row">
                             <i class="fas fa-edit"></i>
@@ -453,7 +450,13 @@
                         <button type="button" class="btn btn-icon delete-btn" onclick="deleteRow(this)"
                                 data-bs-toggle="tooltip" data-bs-placement="top" title="Delete row" aria-label="Delete row">
                             <i class="fas fa-trash"></i>
-                        </button>
+                        </button>` : '';
+
+                const controlsCell = document.createElement('td');
+                controlsCell.className = 'edit-controls';
+                controlsCell.style.whiteSpace = 'nowrap';
+                controlsCell.innerHTML = `
+                    <div class="action-buttons">${editDeleteHtml}${copyButtonHtml}
                     </div>
                 `;
                 row.insertBefore(controlsCell, row.firstChild);
@@ -463,10 +466,12 @@
                 row.dataset.columnNames = JSON.stringify(columnNames);
             });
 
-            // Add hidden row for new row insertion
-            const tbody = table.querySelector('tbody');
-            if (tbody && !tbody.querySelector('.new-row-template')) {
-                createNewRowTemplate(table);
+            // Add hidden row for new row insertion (editable tables only)
+            if (tableIsEditable) {
+                const tbody = table.querySelector('tbody');
+                if (tbody && !tbody.querySelector('.new-row-template')) {
+                    createNewRowTemplate(table);
+                }
             }
 
             // Apply floating button behavior to rows that need horizontal scrolling
@@ -496,6 +501,91 @@
                 } else {
                     row.classList.remove('has-overflow');
                 }
+            });
+        }
+
+        // Escape a string for safe inclusion in a double-quoted HTML attribute.
+        function escapeHtmlAttr(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        }
+
+        // Build the SQL that would recreate the given row.
+        // Regular tables get an INSERT with single-quoted values; global_variables
+        // tables (memory or runtime) get a SET statement with a double-quoted value.
+        // For runtime_* source tables the target table name has `runtime_` stripped
+        // so the copied SQL is pasteable against ProxySQL (runtime_ is read-only).
+        function buildRowSql(columnNames, rowData, sourceTableName) {
+            const targetTable = sourceTableName.startsWith('runtime_')
+                ? sourceTableName.slice('runtime_'.length)
+                : sourceTableName;
+
+            if (targetTable === 'global_variables') {
+                const nameIdx = columnNames.indexOf('variable_name');
+                const valueIdx = columnNames.indexOf('variable_value');
+                if (nameIdx === -1 || valueIdx === -1) return '';
+                const name = String(rowData[nameIdx] ?? '');
+                const value = String(rowData[valueIdx] ?? '').replace(/"/g, '""');
+                return `SET ${name}="${value}";`;
+            }
+
+            // Skip columns whose DOM value is NULL (rendered as the literal
+            // string "None" by the Jinja template). Mirrors insert_row() in
+            // mdb.py which omits None values so DEFAULTs apply.
+            const keptCols = [];
+            const keptVals = [];
+            for (let i = 0; i < columnNames.length; i++) {
+                const raw = rowData[i];
+                if (raw === null || raw === undefined || raw === 'None') continue;
+                keptCols.push(columnNames[i]);
+                keptVals.push("'" + String(raw).replace(/'/g, "''") + "'");
+            }
+            return `INSERT INTO ${targetTable}(${keptCols.join(',')}) VALUES (${keptVals.join(',')});`;
+        }
+
+        // Write `text` to the clipboard, falling back to a hidden textarea +
+        // document.execCommand('copy') when navigator.clipboard is unavailable
+        // (plain HTTP origins — ProxyWeb is commonly served on a LAN IP).
+        function writeToClipboard(text) {
+            if (navigator.clipboard && window.isSecureContext) {
+                return navigator.clipboard.writeText(text);
+            }
+            return new Promise((resolve, reject) => {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.setAttribute('readonly', '');
+                ta.style.position = 'fixed';
+                ta.style.top = '-9999px';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                ta.setSelectionRange(0, text.length);
+                let ok = false;
+                try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+                document.body.removeChild(ta);
+                ok ? resolve() : reject(new Error('execCommand copy failed'));
+            });
+        }
+
+        // Copy the SQL stored on a copy button to the clipboard and flash a
+        // check-mark icon for ~1.5s. Mirrors templates/query_history.html.
+        function copyRowSql(button) {
+            const sql = button.getAttribute('data-sql') || '';
+            if (!sql) return;
+            writeToClipboard(sql).then(() => {
+                const icon = button.querySelector('i');
+                if (!icon) return;
+                icon.classList.replace('fa-copy', 'fa-check');
+                button.classList.replace('btn-icon-secondary', 'btn-icon-success');
+                setTimeout(() => {
+                    icon.classList.replace('fa-check', 'fa-copy');
+                    button.classList.replace('btn-icon-success', 'btn-icon-secondary');
+                }, 1500);
+            }).catch(err => {
+                console.error('Clipboard write failed:', err);
             });
         }
 
