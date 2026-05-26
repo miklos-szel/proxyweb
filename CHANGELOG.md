@@ -8,6 +8,21 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
 
 ## [Unreleased]
 
+## [2.1.5] — 2026-05-26
+
+### Added
+- Per-row **Copy SQL** button on the disk / memory / runtime config tables
+  that copies an `INSERT … ON DUPLICATE KEY UPDATE` (or equivalent) statement
+  for the row to the clipboard, so a row can be replayed against another
+  ProxySQL instance. The button is preserved across inline edit save/cancel
+  cycles. Landing-page feature card added. (PR #19)
+
+### Changed
+- Default `global.hide_tables` in `config/config.yml` no longer hides
+  `.*aurora.*`, `.*galera.*`, `.*pgsql.*`, or `.*mysql_firewall.*` tables —
+  only `mysql_collations` remains hidden by default, so fresh installs see
+  the full table set out of the box.
+
 ### Security
 - `mdb.execute_change` no longer spawns the `mysql` CLI with `shell=True` and
   the password on `argv`; it now runs argv-list `subprocess.run(shell=False)`
@@ -161,7 +176,8 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
 
 See the git history for earlier milestones.
 
-[Unreleased]: https://github.com/miklos-szel/proxyweb/compare/v2.1.4...HEAD
+[Unreleased]: https://github.com/miklos-szel/proxyweb/compare/v2.1.5...HEAD
+[2.1.5]: https://github.com/miklos-szel/proxyweb/compare/v2.1.4...v2.1.5
 [2.1.4]: https://github.com/miklos-szel/proxyweb/compare/v2.1.3...v2.1.4
 [2.1.3]: https://github.com/miklos-szel/proxyweb/compare/2.1.2...v2.1.3
 [2.1.2]: https://github.com/miklos-szel/proxyweb/compare/v2.1.1...2.1.2

@@ -2,10 +2,6 @@ global:
   default_server: proxysql
   read_only: false
   hide_tables:
-  - .*aurora.*
-  - .*galera.*
-  - .*pgsql.*
-  - .*mysql_firewall.*
   - mysql_collations
   config_diff_skip_variable:
   - admin-cluster_mysql_servers_diffs_before_sync
