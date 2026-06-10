@@ -130,6 +130,24 @@ def _quote_ident(name):
     return '`' + name.replace('`', '``') + '`'
 
 
+def _safe_close_conn(db, server):
+    """Close a server connection if one was stored, swallowing any error.
+
+    Error paths must not assume ``db_connect`` got far enough to store a
+    ``conn`` — reaching into ``db['cnf']['servers'][server]['conn']`` blindly
+    can raise KeyError/TypeError and mask the original exception.
+    """
+    try:
+        conn = db.get('cnf', {}).get('servers', {}).get(server, {}).get('conn')
+    except AttributeError:
+        return
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 sql_get_databases = "show databases"
 
 def get_config(config="config/config.yml"):
@@ -281,8 +299,13 @@ def format_yaml_value(value):
     if isinstance(value, (int, float)):
         return str(value)
     if isinstance(value, str):
-        # Check if string contains special characters that need quotes
-        if any(char in value for char in ['[', ']', ':', '{', '}', ',', '&', '*', '?', '|', '-', '<', '>', '=', '!', '%', '@', '`']):
+        # Quote when the string contains YAML-significant characters. A bare
+        # '-' is dropped from this list so ordinary hostnames/values like
+        # ``my-db-host`` round-trip unquoted; a *leading* dash is still quoted
+        # below because it would otherwise read as a YAML sequence indicator.
+        special_chars = ['[', ']', ':', '{', '}', ',', '&', '*', '?', '|',
+                         '<', '>', '=', '!', '%', '@', '`', '#']
+        if value.lstrip().startswith('-') or any(char in value for char in special_chars):
             return f'"{value}"'
         return value
     if isinstance(value, list):
@@ -916,7 +939,7 @@ def get_table_content(db, server, database, table):
         content['misc'] = get_config()['misc']
         return content
     except (mysql.connector.Error, mysql.connector.Warning) as e:
-        db['cnf']['servers'][server]['conn'].close()
+        _safe_close_conn(db, server)
         raise ValueError(e)
 
 
@@ -1069,9 +1092,9 @@ def process_table_content(table, content):
         'success_time_us': 'us'
     }
 
-    # Get indices for the target columns
+    # Get indices for the target columns (single pass over the column list)
     col_names = content.get('column_names', [])
-    field_indices = {field: idx for field, unit in time_fields.items() if field in col_names for idx, name in enumerate(col_names) if name == field}
+    field_indices = {name: idx for idx, name in enumerate(col_names) if name in time_fields}
 
     if field_indices:
         new_rows = []
@@ -1108,7 +1131,7 @@ def execute_adhoc_query(db, server, sql):
 
         return content
     except (mysql.connector.Error, mysql.connector.Warning) as e:
-        db['cnf']['servers'][server]['conn'].close()
+        _safe_close_conn(db, server)
         raise ValueError(e)
 
 def execute_adhoc_report(db, server):
@@ -1152,7 +1175,7 @@ def execute_adhoc_report(db, server):
 
         return adhoc_results
     except (mysql.connector.Error, mysql.connector.Warning) as e:
-        db['cnf']['servers'][server]['conn'].close()
+        _safe_close_conn(db, server)
         raise ValueError(e)
 
 
@@ -1324,7 +1347,7 @@ def get_table_schema(db, server, database, table_name):
         logging.debug(f"Extracting schema for table: {database}.{table_name} via server: {server}")
 
         # Use SHOW CREATE TABLE to get the full table definition
-        query = f"SHOW CREATE TABLE `{database}`.`{table_name}`"
+        query = f"SHOW CREATE TABLE {_quote_ident(database)}.{_quote_ident(table_name)}"
         db['cnf']['servers'][server]['cur'].execute(query)
         create_table_result = db['cnf']['servers'][server]['cur'].fetchone()
 
@@ -1459,7 +1482,7 @@ def get_primary_key_columns(db, server, database, table_name):
         db_connect(db, server=server, dictionary=True)
 
         # Get the CREATE TABLE statement
-        query = f"SHOW CREATE TABLE `{database}`.`{table_name}`"
+        query = f"SHOW CREATE TABLE {_quote_ident(database)}.{_quote_ident(table_name)}"
         db['cnf']['servers'][server]['cur'].execute(query)
         create_table_result = db['cnf']['servers'][server]['cur'].fetchone()
 

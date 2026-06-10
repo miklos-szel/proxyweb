@@ -642,10 +642,6 @@ function loadQueryWithInfo(sqlVarName, infoVarName) {
         return;
     }
 
-    if (!info) {
-    }
-
-
     // Load the SQL into textarea (but don't close dropdown again since we already did it above)
     const textarea = document.getElementById('sql');
     if (textarea) {
@@ -856,10 +852,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 submenu.classList.add('show');
                 trigger.classList.add('active');
             });
-
-            if (!isAlreadyVisible) {
-            } else {
-            }
         });
 
         // Keep submenu open when hovering over it
@@ -881,7 +873,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!mouseStillOnParent && !mouseStillOnSubmenu) {
                     submenu.classList.remove('show');
                     trigger.classList.remove('active');
-                } else {
                 }
             }, 500);  // Longer delay to allow for mouse movement
         });

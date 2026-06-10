@@ -8,6 +8,36 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
 
 ## [Unreleased]
 
+### Security
+- The ad-hoc SQL form (`/<server>/<db>/<table>/sql/`) now blocks non-SELECT
+  statements on **read-only servers**, not just for the read-only *role*.
+  Previously the editor was only hidden in the UI, so an admin could POST a
+  write directly to a `read_only: true` server.
+- Inline row editing escapes cell values through `escapeHtmlAttr()` before
+  injecting them into `<input>`/`<textarea>` markup, and `showNotification`
+  builds DOM nodes with `textContent` instead of `innerHTML` — closes a
+  stored-DOM-XSS path where a value containing HTML executed on Edit.
+- `get_table_schema` and `get_primary_key_columns` backtick-quote the
+  `SHOW CREATE TABLE` target via `_quote_ident()`.
+- The SELECT/non-SELECT classifier strips SQL comments and requires a single
+  `SELECT`/`WITH` statement, rejecting `SELECT 1; DELETE …` multi-statement
+  smuggling (and no longer requiring a `FROM`).
+- JSON API handlers return a redacted error to the client on unexpected
+  exceptions instead of echoing `str(e)`; full detail still goes to the log.
+
+### Changed
+- Failed inline row saves now revert the edited cells in place instead of
+  silently reloading the whole page after a delay.
+- `format_yaml_value` no longer wraps values containing a hyphen in quotes
+  (ordinary hostnames like `my-db-host` round-trip unquoted); a leading dash
+  and `#` are still quoted.
+- Removed debug `console.log` noise from the table view and dead conditional
+  blocks; hardened connection cleanup on error paths in `mdb.py`.
+
+### Added
+- Regression tests: CSRF rejection for token-less/wrong-token POSTs, the
+  read-only-server SQL-form block, and HTML escaping of stored cell values.
+
 ## [2.1.5] — 2026-05-26
 
 ### Added

@@ -130,6 +130,39 @@ if not isinstance(app.config.get('SECRET_KEY'), (str, bytes)):
 
 mdb.logging.debug(flask_custom_config)
 
+def _redacted_error():
+    """Generic client-facing error string; full detail goes to the server log.
+
+    mysql.connector, subprocess and requests can embed connection strings or
+    credentials in their messages, so unexpected-exception handlers must not
+    echo ``str(e)`` back to the browser. They log the traceback and return
+    this instead.
+    """
+    return 'Internal error — see server logs for details'
+
+
+# Strip SQL comments (block, ``--`` and ``#`` line comments) before classifying
+# a statement, so a leading comment cannot hide the real verb.
+_SQL_COMMENT_RE = re.compile(r'/\*.*?\*/|--[^\n]*|#[^\n]*', re.S)
+
+
+def _is_read_only_sql(sql):
+    """Return True only for a single read-only (SELECT/WITH) statement.
+
+    Used to gate ad-hoc SQL execution for read-only users and read-only
+    servers, and to decide whether a statement is rendered as a result set.
+    Comments are stripped first; the input must contain exactly one non-empty
+    statement that begins with SELECT or WITH. This is intentionally stricter
+    than a bare ``SELECT ... FROM`` regex: it rejects ``SELECT 1; DELETE ...``
+    multi-statement smuggling and no longer requires a FROM clause.
+    """
+    stripped = _SQL_COMMENT_RE.sub(' ', sql)
+    statements = [s for s in stripped.split(';') if s.strip()]
+    if len(statements) != 1:
+        return False
+    return re.match(r'^\s*(SELECT|WITH)\b', statements[0], re.I) is not None
+
+
 def login_required(f):
     """
     Decorator that requires a user to be logged in before calling the wrapped view.
@@ -342,11 +375,18 @@ def render_change(server, database, table):
     session['sql'] = request.form["sql"]
 
     mdb.logging.debug(session['history'])
-    select = re.search(r'^\s*SELECT\b.*\bFROM\b', session['sql'], re.I | re.S)
-    if not select and session.get('role') == 'readonly':
-        error = "Read-only user cannot execute non-SELECT statements"
-        content = mdb.get_table_metadata(g.db, server, database, table)
-        return render_template("show_table_info.html", content=content, error=error, message="")
+    select = _is_read_only_sql(session['sql'])
+    # Non-SELECT statements are mutations: block them for read-only users and
+    # read-only servers. The SQL editor is hidden in the UI for these cases,
+    # but the form endpoint must enforce it independently of the template.
+    if not select:
+        if session.get('role') == 'readonly':
+            error = "Read-only user cannot execute non-SELECT statements"
+        elif mdb.get_read_only(server):
+            error = "Server is read-only; only SELECT statements are allowed"
+        if error:
+            content = mdb.get_table_metadata(g.db, server, database, table)
+            return render_template("show_table_info.html", content=content, error=error, message="")
     if select:
         content = mdb.execute_adhoc_query(g.db, server, session['sql'])
         content['order'] = 'true'
@@ -358,9 +398,10 @@ def render_change(server, database, table):
         error = ret
     else:
         message = "Success"
-    if session['sql'].replace("\r\n","") not in session['history'] and not error:
-        session['history'].append(session['sql'].replace("\r\n",""))
-        mdb.append_query_history(server, session['sql'].replace("\r\n",""), session.get('role', 'admin'))
+    normalized_sql = session['sql'].replace("\r\n", "\n").strip()
+    if normalized_sql not in session['history'] and not error:
+        session['history'].append(normalized_sql)
+        mdb.append_query_history(server, normalized_sql, session.get('role', 'admin'))
 
     return render_template("show_table_info.html", content=content, error=error, message=message)
 
@@ -443,7 +484,7 @@ def settings_ui_save():
         return jsonify({'success': True, 'message': 'Settings saved successfully'})
     except Exception as e:
         logging.exception(f"Error saving settings from UI: {e}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 @app.route('/settings/load_ui/', methods=['GET'])
@@ -464,7 +505,7 @@ def settings_load_ui():
         return jsonify({'success': True, 'config': config_data})
     except Exception as e:
         logging.exception(f"Error loading config for UI: {e}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 @app.route('/settings/export/', methods=['GET'])
@@ -486,7 +527,7 @@ def settings_export():
         return jsonify({'success': True, 'yaml': yaml_content})
     except Exception as e:
         logging.exception(f"Error exporting config: {e}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 @app.route('/settings/import/', methods=['POST'])
@@ -521,7 +562,7 @@ def settings_import():
         return jsonify({'success': True, 'message': 'Configuration imported successfully'})
     except Exception as e:
         logging.exception(f"Error importing config: {e}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 @app.route('/<server>/config_diff/', methods=['GET', 'POST'])
@@ -558,7 +599,7 @@ def get_config_diff(server):
         return jsonify({'success': True, 'diff': diff_data})
     except Exception as e:
         logging.exception(f"Error getting config diff: {e}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 @app.route('/api/update_config_skip_variables', methods=['POST'])
@@ -600,7 +641,7 @@ def update_config_skip_variables():
         return jsonify({'success': True})
     except Exception as e:
         logging.exception(f"Error updating config skip variables: {e}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 # API Routes for Inline Editing
@@ -660,7 +701,7 @@ def api_update_row():
         return jsonify(result)
     except Exception as e:
         logging.exception(f"API error in update_row: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 @app.route('/api/delete_row', methods=['POST'])
@@ -710,7 +751,7 @@ def api_delete_row():
         return jsonify(result)
     except Exception as e:
         logging.exception(f"API error in delete_row: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 @app.route('/api/insert_row', methods=['POST'])
@@ -756,7 +797,7 @@ def api_insert_row():
         return jsonify(result)
     except Exception as e:
         logging.exception(f"API error in insert_row: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 @app.route('/api/get_schema', methods=['GET'])
@@ -784,7 +825,7 @@ def api_get_schema():
         return jsonify({'success': True, 'schema': schema_info})
     except Exception as e:
         logging.exception(f"Schema extraction error: {e}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 _ALLOWED_PROXYSQL_CMD = re.compile(r'^\s*(LOAD|SAVE|SELECT\s+CONFIG)\b', re.IGNORECASE)
@@ -825,7 +866,7 @@ def api_table_data():
             safe_draw = 1
         return jsonify({'draw': safe_draw,
                         'recordsTotal': 0, 'recordsFiltered': 0,
-                        'data': [], 'error': str(e)})
+                        'data': [], 'error': _redacted_error()})
 
 
 @app.route('/api/execute_proxysql_command', methods=['POST'])
@@ -869,7 +910,7 @@ def api_execute_proxysql_command():
 
     except Exception as e:
         logging.exception(f"API error in execute_proxysql_command: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 @app.route('/<server>/query_history/')

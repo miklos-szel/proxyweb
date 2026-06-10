@@ -199,11 +199,6 @@
             const tableName = '{{ session.get('table', '') }}';
             const isReadOnly = {{ session.get('read_only', false) | tojson }};
 
-            console.log('[DEBUG isTableEditable] database:', database);
-            console.log('[DEBUG isTableEditable] tableName:', tableName);
-            console.log('[DEBUG isTableEditable] tableName.startsWith("runtime_"):', tableName.startsWith('runtime_'));
-            console.log('[DEBUG isTableEditable] isReadOnly:', isReadOnly);
-            console.log('[DEBUG isTableEditable] returning:', database === 'main' && !tableName.startsWith('runtime_') && !isReadOnly);
 
             // Table can only be edited if:
             // 1. Database is 'main'
@@ -218,11 +213,6 @@
             const tableName = '{{ session.get('table', '') }}';
             const isReadOnly = {{ session.get('read_only', false) | tojson }};
 
-            console.log('[DEBUG canAddRows] database:', database);
-            console.log('[DEBUG canAddRows] tableName:', tableName);
-            console.log('[DEBUG canAddRows] isReadOnly:', isReadOnly);
-            console.log('[DEBUG canAddRows] tableName.startsWith("runtime_"):', tableName.startsWith('runtime_'));
-            console.log('[DEBUG canAddRows] returning:', database === 'main' && !tableName.startsWith('runtime_') && !isReadOnly);
 
             // Rows can only be added if:
             // 1. Database is 'main'
@@ -241,7 +231,6 @@
                 const data = await response.json();
                 if (data.success) {
                     tableSchema = data.schema;
-                    console.log('Table schema loaded:', tableSchema);
                 } else {
                     console.error('Failed to load schema:', data.error);
                 }
@@ -260,14 +249,12 @@
                 row.classList.contains('d-none') ||
                 row.classList.contains('dtr-inline.collapsed') ||
                 row.classList.contains('child')) {
-                console.log('[DEBUG isValidDataRow] SKIP - row has class:', row.className);
                 return false;
             }
 
             // Skip DataTables empty/loading placeholder rows
             if (row.classList.contains('dataTables_empty') ||
                 row.classList.contains('dataTables_processing')) {
-                console.log('[DEBUG isValidDataRow] SKIP - DataTables placeholder row, class:', row.className);
                 return false;
             }
 
@@ -276,7 +263,6 @@
 
             // Skip if no cells found
             if (!cells || cells.length === 0) {
-                console.log('[DEBUG isValidDataRow] SKIP - no cells found');
                 return false;
             }
 
@@ -307,21 +293,14 @@
             });
 
             if (!hasActualContent) {
-                console.log('[DEBUG isValidDataRow] SKIP - all cells empty or placeholder');
-                console.log('[DEBUG isValidDataRow] Cell contents:', cellContents.join(', '));
                 return false;
             }
 
-            console.log('[DEBUG isValidDataRow] VALID - row has actual content');
-            console.log('[DEBUG isValidDataRow] Cell contents:', cellContents.join(', '));
             return true;
         }
 
         async function enableInlineEditing() {
             // Debug logging
-            console.log('[DEBUG enableInlineEditing] Starting...');
-            console.log('[DEBUG] isTableEditable():', isTableEditable());
-            console.log('[DEBUG] canAddRows():', canAddRows());
 
             // First, load the table schema
             await loadTableSchema();
@@ -330,12 +309,10 @@
             if (!table) return;
 
             const tableIsEditable = isTableEditable();
-            console.log('[DEBUG] tableIsEditable:', tableIsEditable);
 
             // Check if table has a variable_name column
             const headerCells = table.querySelectorAll('thead th');
             const hasVariableNameColumn = Array.from(headerCells).some(th => th.textContent.trim() === 'variable_name');
-            console.log('[DEBUG] hasVariableNameColumn:', hasVariableNameColumn);
 
             // Add header cell for actions column at the beginning (always — copy button lives here too)
             const thead = table.querySelector('thead tr');
@@ -349,27 +326,20 @@
             }
 
             const rows = table.querySelectorAll('tbody tr');
-            console.log('[DEBUG] Total rows found in DOM:', rows.length);
 
             // Log all rows found for debugging
             rows.forEach((row, index) => {
-                console.log(`[DEBUG] Row ${index} classes: "${row.className}"`);
-                console.log(`[DEBUG] Row ${index} has ${row.querySelectorAll('td').length} cells`);
                 const cells = row.querySelectorAll('td');
                 if (cells.length > 0) {
                     const cellTexts = Array.from(cells).map((cell, i) => `"${cell.textContent.trim()}"`).join(', ');
-                    console.log(`[DEBUG] Row ${index} cell contents: [${cellTexts}]`);
                 }
             });
 
             // Check if table has valid data rows - filter using our comprehensive check
             const actualDataRows = Array.from(rows).filter(row => isValidDataRow(row));
-            console.log('[DEBUG] actualDataRows count:', actualDataRows.length);
-            console.log('[DEBUG] Total rows in DOM:', rows.length);
 
             // Log which rows were filtered out
             const filteredRows = Array.from(rows).filter(row => !isValidDataRow(row));
-            console.log('[DEBUG] Filtered OUT rows count:', filteredRows.length);
 
             // Show the Add Row button for non-empty tables with data (AND meets other criteria)
             if (actualDataRows.length > 0 && !hasVariableNameColumn && canAddRows()) {
@@ -391,34 +361,23 @@
                         addRowContainer.style.display = 'block';
                     }
                 }
-                console.log('[DEBUG] Table is empty (0 data rows), returning early - NO edit buttons will be created');
-                console.log('[DEBUG] Table rows found:', rows.length);
-                console.log('[DEBUG] Actual data rows:', actualDataRows.length);
                 return;
             }
 
-            console.log('[DEBUG] Table has', actualDataRows.length, 'data rows - creating edit buttons');
-            console.log('[DEBUG] Table rows found:', rows.length);
-            console.log('[DEBUG] Actual data rows:', actualDataRows.length);
 
             // CRITICAL SAFETY CHECK: If no actual data rows, don't create ANY edit buttons
             if (actualDataRows.length === 0) {
-                console.log('[DEBUG CRITICAL] Table is completely empty (0 data rows)');
-                console.log('[DEBUG CRITICAL] Returning early - NO edit buttons will be created');
-                console.log('[DEBUG CRITICAL] This is the final safety check to prevent buttons on empty tables');
                 return;
             }
 
             rows.forEach((row, rowIndex) => {
                 // Skip if already processed
                 if (row.querySelector('.edit-controls')) {
-                    console.log(`[DEBUG] Row ${rowIndex} SKIP - already has edit controls`);
                     return;
                 }
 
                 // Use our comprehensive validation function
                 if (!isValidDataRow(row)) {
-                    console.log(`[DEBUG] Row ${rowIndex} SKIP - not a valid data row`);
                     return;
                 }
 
@@ -628,10 +587,8 @@
                         // Only re-enable inline editing if we haven't processed this table yet
                         const existingControls = table.querySelectorAll('.edit-controls').length;
                         if (existingControls === 0) {
-                            console.log('[DEBUG draw.dt] No edit controls found, re-enabling inline editing');
                             enableInlineEditing();
                         } else {
-                            console.log(`[DEBUG draw.dt] Found ${existingControls} existing edit controls, skipping`);
                         }
                     }, 100);
                 });
@@ -715,7 +672,7 @@
                     const lines = value.split('\n').length;
                     const rows = Math.min(Math.max(lines, 3), 10); // Min 3 rows, max 10 rows
 
-                    cell.innerHTML = `<textarea class="form-control form-control-sm" rows="${rows}" style="min-width: 300px; min-height: 80px; width: 100%;">${value}</textarea>`;
+                    cell.innerHTML = `<textarea class="form-control form-control-sm" rows="${rows}" style="min-width: 300px; min-height: 80px; width: 100%;">${escapeHtmlAttr(value)}</textarea>`;
 
                     // Auto-resize after a short delay to ensure DOM is ready
                     setTimeout(() => {
@@ -726,7 +683,7 @@
                         }
                     }, 10);
                 } else {
-                    cell.innerHTML = `<input type="${inputType}" class="form-control form-control-sm" value="${value}" style="min-width: 150px;">`;
+                    cell.innerHTML = `<input type="${inputType}" class="form-control form-control-sm" value="${escapeHtmlAttr(value)}" style="min-width: 150px;">`;
                 }
                 cellIndex++;
             });
@@ -830,15 +787,12 @@
             headerCells.forEach((th, index) => {
                 const cell = cells[cellIndex];
                 if (!cell) {
-                    console.log(`No cell at cellIndex ${cellIndex}`);
                     return;
                 }
 
                 const columnName = th.textContent.trim();
-                console.log(`Processing column ${columnName} at cellIndex ${cellIndex}`);
 
                 if (cell.classList.contains('edit-controls')) {
-                    console.log(`Cell is edit-controls, incrementing cellIndex from ${cellIndex} to ${cellIndex + 1}`);
                     cellIndex++;
                     return;
                 }
@@ -851,16 +805,12 @@
                     const originalValue = originalValues[valueIndex] || '';
 
                     // Debug logging
-                    console.log(`  Current value: "${value}"`);
-                    console.log(`  Original value: "${originalValue}"`);
-                    console.log(`  Changed: ${value !== originalValue}`);
 
                     // Only send the value if it has actually changed
                     if (value !== originalValue) {
                         // Convert empty string to null for database
                         const processedValue = value === '' ? null : value;
                         updatedData[columnName] = processedValue;
-                        console.log(`  ✓ Will update ${columnName} = "${processedValue}"`);
                     }
                     cell.textContent = value;
                     valueIndex++;
@@ -909,18 +859,15 @@
                     showNotification('Row updated successfully!', 'success');
                 } else {
                     showNotification('Error updating row: ' + data.error, 'error');
-                    // Revert on error after showing message
-                    setTimeout(() => {
-                        location.reload();
-                    }, 5000);
+                    // The write failed, so the DB is unchanged — restore the
+                    // displayed cells to their original values rather than
+                    // silently reloading the whole page.
+                    revertRowCells(row);
                 }
             })
             .catch(error => {
                 showNotification('Error: ' + error, 'error');
-                // Revert on error after showing message
-                setTimeout(() => {
-                    location.reload();
-                }, 5000);
+                revertRowCells(row);
             })
             .finally(() => {
                 // Remove keyboard event listener
@@ -931,6 +878,32 @@
                 row.classList.remove('editing');
                 restoreEditControls(row);
                 currentlyEditing = false;
+            });
+        }
+
+        // Restore a row's data cells to the original (pre-edit) values stored
+        // on the row. Used when a save fails so the grid keeps reflecting the
+        // actual DB state without a full page reload.
+        function revertRowCells(row) {
+            const originalValues = JSON.parse(row.dataset.originalValues || '[]');
+            const cells = row.querySelectorAll('td:not(.edit-controls)');
+            const headerCells = Array.from(row.closest('table').querySelectorAll('thead th'))
+                .filter(th => !th.classList.contains('actions-header'));
+            let cellIndex = 0;
+            let valueIndex = 0;
+            headerCells.forEach((th) => {
+                const cell = cells[cellIndex];
+                if (!cell) return;
+                const columnName = th.textContent.trim();
+                if (cell.classList.contains('edit-controls') || columnName === 'variable_name') {
+                    cellIndex++;
+                    return;
+                }
+                if (valueIndex < originalValues.length) {
+                    cell.textContent = originalValues[valueIndex];
+                }
+                valueIndex++;
+                cellIndex++;
             });
         }
 
@@ -1060,9 +1033,9 @@
                     if (isLongContent) {
                         const lines = defaultValue.split('\n').length;
                         const rows = Math.min(Math.max(lines, 3), 10);
-                        td.innerHTML = `<textarea class="form-control form-control-sm" rows="${rows}" style="min-width: 300px; min-height: 80px; width: 100%;" placeholder="Enter value">${defaultValue}</textarea>`;
+                        td.innerHTML = `<textarea class="form-control form-control-sm" rows="${rows}" style="min-width: 300px; min-height: 80px; width: 100%;" placeholder="Enter value">${escapeHtmlAttr(defaultValue)}</textarea>`;
                     } else {
-                        td.innerHTML = `<input type="text" class="form-control form-control-sm" value="${defaultValue}" placeholder="Enter value" style="min-width: 150px;">`;
+                        td.innerHTML = `<input type="text" class="form-control form-control-sm" value="${escapeHtmlAttr(defaultValue)}" placeholder="Enter value" style="min-width: 150px;">`;
                     }
                 }
                 newRowTemplate.appendChild(td);
@@ -1086,7 +1059,6 @@
 
             // If template doesn't exist or was created before schema was loaded, create/update it
             if (!newRowTemplate || !tableSchema) {
-                console.log('Creating/updating new row template...');
                 // Remove existing template if any
                 if (newRowTemplate) {
                     newRowTemplate.remove();
@@ -1192,26 +1164,19 @@
 
                 // Check if field is required
                 if (!value && columnName !== 'variable_name') {
-                    console.log(`[DEBUG] tableSchema exists: ${!!tableSchema}`);
-                    console.log(`[DEBUG] tableSchema.columns:`, tableSchema ? Object.keys(tableSchema.columns) : 'null');
-                    console.log(`[DEBUG] columnName: ${columnName}`);
 
                     // Check if column has a default value (check for undefined, not just truthiness)
                     const columnSchema = tableSchema && tableSchema.columns[columnName];
-                    console.log(`[DEBUG] columnSchema:`, columnSchema);
 
                     // If no schema available, allow empty (safer - let database enforce)
                     if (!tableSchema || !columnSchema) {
-                        console.log(`[DEBUG] No schema info available, allowing empty value for ${columnName}`);
                         rowData[columnName] = null;
                         cellIndex++;
                         continue;
                     }
 
                     const hasDefault = 'default' in columnSchema && columnSchema.default !== undefined;
-                    console.log(`[DEBUG] hasDefault check: has 'default' property = ${'default' in columnSchema}, value = ${columnSchema.default}, !== undefined = ${columnSchema.default !== undefined}`);
 
-                    console.log(`[DEBUG] Checking column ${columnName}: value="${value}", hasDefault=${hasDefault}, default="${columnSchema.default}"`);
 
                     // If no default, field is required
                     if (!hasDefault) {
@@ -1221,7 +1186,6 @@
                         break;
                     }
                     // If empty and has default, skip this field (don't add to rowData)
-                    console.log(`[DEBUG] Skipping column ${columnName} - using DEFAULT`);
                     cellIndex++;
                     continue;
                 }
@@ -1237,8 +1201,6 @@
                 return;
             }
 
-            console.log('[DEBUG] Final data to send to backend:', rowData);
-            console.log('[DEBUG] Column names to send:', columnNames);
 
             // Send to server
             fetch('/api/insert_row', {
@@ -1290,13 +1252,20 @@
             notification.style.zIndex = '9999';
             notification.style.minWidth = '300px';
             notification.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
-            notification.innerHTML = `
-                <div class="d-flex align-items-center">
-                    <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'} me-2"></i>
-                    ${message}
-                    <button type="button" class="btn-close ms-auto" onclick="this.parentElement.parentElement.remove()"></button>
-                </div>
-            `;
+            // Build via DOM nodes so server-returned text (which can include
+            // mysql error output echoing user SQL) is inserted as text, never HTML.
+            const wrapper = document.createElement('div');
+            wrapper.className = 'd-flex align-items-center';
+            const icon = document.createElement('i');
+            icon.className = `fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'} me-2`;
+            const msgSpan = document.createElement('span');
+            msgSpan.textContent = message;
+            const closeBtn = document.createElement('button');
+            closeBtn.type = 'button';
+            closeBtn.className = 'btn-close ms-auto';
+            closeBtn.addEventListener('click', function () { notification.remove(); });
+            wrapper.append(icon, msgSpan, closeBtn);
+            notification.appendChild(wrapper);
 
             document.body.appendChild(notification);
 

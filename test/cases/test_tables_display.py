@@ -513,5 +513,53 @@ class TestProxySQL3Autocommit(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertNotIn("Query Error", resp.text)
 
+
+class TestStoredValueHtmlEscaping(unittest.TestCase):
+    """Stored cell values containing HTML metacharacters are escaped, not rendered.
+
+    Guards the XSS surface in the inline-edit flow. Server-side the table grid
+    must HTML-escape stored values (Jinja autoescaping of {{ column }}); the
+    client-side edit path in base.html escapes the same values via
+    escapeHtmlAttr() before injecting them into input/textarea markup. This
+    test inserts a query rule whose comment carries an <img onerror> payload
+    and asserts the rendered table page contains the escaped form, never the
+    raw executable tag.
+    """
+
+    TABLE = "mysql_query_rules"
+    RULE_ID = 911
+    PAYLOAD = '<img src=x onerror=alert(1)>'
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        self.s.get(f"/{SERVER}/{DATABASE}/{self.TABLE}/")
+
+    def tearDown(self):
+        self.s.post_json("/api/delete_row", {
+            "server": SERVER, "database": DATABASE, "table": self.TABLE,
+            "pkValues": {"rule_id": str(self.RULE_ID)},
+        })
+
+    def test_html_metacharacters_in_cell_are_escaped(self):
+        ins = self.s.post_json("/api/insert_row", {
+            "server": SERVER, "database": DATABASE, "table": self.TABLE,
+            "columnNames": ["rule_id", "active", "apply", "comment"],
+            "data": {
+                "rule_id": str(self.RULE_ID),
+                "active": "1",
+                "apply": "1",
+                "comment": self.PAYLOAD,
+            },
+        }).json()
+        self.assertTrue(ins.get("success"), ins.get("error"))
+
+        resp = self.s.get(f"/{SERVER}/{DATABASE}/{self.TABLE}/")
+        # The raw, executable tag must never appear unescaped in the markup.
+        self.assertNotIn(self.PAYLOAD, resp.text)
+        # The escaped rendering must be present instead.
+        self.assertIn("&lt;img src=x onerror=alert(1)&gt;", resp.text)
+
+
 if __name__ == "__main__":
     unittest.main()
