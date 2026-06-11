@@ -162,31 +162,6 @@
             return meta ? meta.content : '';
         }
 
-        function unEscape(htmlStr) {
-            // Important: Replace &amp; FIRST to avoid double-unescaping
-            htmlStr = htmlStr.replace(/&amp;/g, "&");
-            htmlStr = htmlStr.replace(/&lt;/g, "<");
-            htmlStr = htmlStr.replace(/&gt;/g, ">");
-            htmlStr = htmlStr.replace(/&#34;/g, "\"");
-            htmlStr = htmlStr.replace(/&#39;/g, "'");
-            return htmlStr;
-        }
-    </script>
-
-    <script>
-        {% for item in session.get('misc', {}) %}
-            {% for subitem in session.get('misc', {})[item] %}
-                let {{ item }}_item_{{loop.index}} = {{ subitem.get('sql', '')|tojson }};
-            {% endfor %}
-        {% endfor %}
-    </script>
-
-    <script>
-        {% if session.get('history') %}
-            {% for item in session.get('history', [])[:25]|reverse %}
-                let history_item_{{loop.index}} = {{ item|tojson }};
-            {% endfor %}
-        {% endif %}
     </script>
 
     <script>
@@ -277,10 +252,8 @@
             ];
             let hasActualContent = false;
 
-            const cellContents = [];
-            cells.forEach((cell, index) => {
+            cells.forEach((cell) => {
                 const text = cell.textContent.trim();
-                cellContents.push(`Cell ${index}: "${text}"`);
 
                 // Check if this cell has actual content
                 const hasContent = !emptyPlaceholders.includes(text);
@@ -300,8 +273,6 @@
         }
 
         async function enableInlineEditing() {
-            // Debug logging
-
             // First, load the table schema
             await loadTableSchema();
 
@@ -327,19 +298,8 @@
 
             const rows = table.querySelectorAll('tbody tr');
 
-            // Log all rows found for debugging
-            rows.forEach((row, index) => {
-                const cells = row.querySelectorAll('td');
-                if (cells.length > 0) {
-                    const cellTexts = Array.from(cells).map((cell, i) => `"${cell.textContent.trim()}"`).join(', ');
-                }
-            });
-
             // Check if table has valid data rows - filter using our comprehensive check
             const actualDataRows = Array.from(rows).filter(row => isValidDataRow(row));
-
-            // Log which rows were filtered out
-            const filteredRows = Array.from(rows).filter(row => !isValidDataRow(row));
 
             // Show the Add Row button for non-empty tables with data (AND meets other criteria)
             if (actualDataRows.length > 0 && !hasVariableNameColumn && canAddRows()) {
@@ -361,12 +321,6 @@
                         addRowContainer.style.display = 'block';
                     }
                 }
-                return;
-            }
-
-
-            // CRITICAL SAFETY CHECK: If no actual data rows, don't create ANY edit buttons
-            if (actualDataRows.length === 0) {
                 return;
             }
 
@@ -588,7 +542,6 @@
                         const existingControls = table.querySelectorAll('.edit-controls').length;
                         if (existingControls === 0) {
                             enableInlineEditing();
-                        } else {
                         }
                     }, 100);
                 });
@@ -803,8 +756,6 @@
                     const input = cell.querySelector('select, input, textarea');
                     const value = input ? input.value : cell.textContent.trim();
                     const originalValue = originalValues[valueIndex] || '';
-
-                    // Debug logging
 
                     // Only send the value if it has actually changed
                     if (value !== originalValue) {
@@ -1078,7 +1029,6 @@
             firstCell.innerHTML = '<input type="text" class="form-control form-control-sm" placeholder="Enter value" required>';
 
             // Add edit controls
-            const headerCells = table.querySelectorAll('thead th');
             const controlsCell = document.createElement('td');
             controlsCell.className = 'edit-controls';
             controlsCell.innerHTML = `
@@ -1164,7 +1114,6 @@
 
                 // Check if field is required
                 if (!value && columnName !== 'variable_name') {
-
                     // Check if column has a default value (check for undefined, not just truthiness)
                     const columnSchema = tableSchema && tableSchema.columns[columnName];
 
@@ -1176,7 +1125,6 @@
                     }
 
                     const hasDefault = 'default' in columnSchema && columnSchema.default !== undefined;
-
 
                     // If no default, field is required
                     if (!hasDefault) {
@@ -1200,7 +1148,6 @@
                 if (focusInput) focusInput.focus();
                 return;
             }
-
 
             // Send to server
             fetch('/api/insert_row', {
@@ -1306,14 +1253,6 @@
         function setupKeyboardShortcuts() {
             let focusedRow = null;
 
-            // Track which row is being hovered/focused
-            document.addEventListener('mouseover', function(e) {
-                const row = e.target.closest('tbody tr');
-                if (row && isValidDataRow(row)) {
-                    focusedRow = row;
-                }
-            });
-
             // Handle keyboard shortcuts
             document.addEventListener('keydown', function(e) {
                 // Don't trigger shortcuts if user is typing in an input/textarea
@@ -1349,17 +1288,8 @@
                 }
             });
 
-            // Add visual focus indicator
-            const style = document.createElement('style');
-            style.textContent = `
-                tbody tr.keyboard-focused {
-                    outline: 2px solid var(--primary-color);
-                    outline-offset: -2px;
-                }
-            `;
-            document.head.appendChild(style);
-
-            // Update focused row class on hover
+            // Track the hovered row and show the visual focus indicator
+            // (.keyboard-focused style lives in custom.css)
             document.addEventListener('mouseover', function(e) {
                 const row = e.target.closest('tbody tr');
                 if (row && isValidDataRow(row)) {

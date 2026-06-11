@@ -163,7 +163,7 @@ def get_config(config="config/config.yml"):
     Raises:
         ValueError: If the file cannot be opened or the YAML cannot be parsed.
     """
-    logging.debug("Using file: %s" % (config))
+    logging.debug(f"Using file: {config}")
     try:
         with open(config, 'r') as yml:
             cfg = yaml.safe_load(yml)
@@ -597,16 +597,13 @@ def db_connect(db, server, buffered=False, dictionary=True):
         db['cnf']['servers'][server]['conn'] = conn
 
         if conn.is_connected():
-            logging.debug("Connected successfully to %s as %s db=%s" % (
-                config['host'],
-                config['user'],
-                config['db']))
+            logging.debug(f"Connected successfully to {config['host']} as {config['user']} db={config['db']}")
 
         conn.get_warnings = True
 
         db['cnf']['servers'][server]['cur'] = conn.cursor(buffered=buffered,
                                                           dictionary=dictionary)
-        logging.debug("buffered: %s, dictionary: %s" % (buffered, dictionary))
+        logging.debug(f"buffered: {buffered}, dictionary: {dictionary}")
 
     except (mysql.connector.Error, mysql.connector.Warning) as e:
         raise ValueError(e)
@@ -1170,8 +1167,6 @@ def execute_adhoc_report(db, server):
                 result['info'] = item['info']
                 result['column_names'] = [i[0] for i in db['cnf']['servers'][server]['cur'].description]
                 adhoc_results.append(result.copy())
-        else:
-            pass
 
         return adhoc_results
     except (mysql.connector.Error, mysql.connector.Warning) as e:

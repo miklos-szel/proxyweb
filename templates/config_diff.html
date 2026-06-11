@@ -680,8 +680,6 @@ const VALID_COMPONENTS = [
 ];
 
 function loadConfigDiff() {
-    console.log('Loading config diff...');
-
     // Show loading state
     const container = document.getElementById('diff-content');
     container.innerHTML = `
@@ -701,7 +699,6 @@ function loadConfigDiff() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            console.log('Config diff loaded successfully');
             displayDiff(data.diff);
         } else {
             displayError(data.error || 'Failed to load configuration diff');
@@ -719,7 +716,6 @@ function executeProxySQLCommandAndRefresh(title, sql) {
         executeProxySQLCommand(title, sql);
         // Refresh after 3 seconds to allow command to complete
         setTimeout(function() {
-            console.log('Auto-refreshing config diff...');
             loadConfigDiff();
         }, 3000);
     } else {

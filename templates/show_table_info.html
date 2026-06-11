@@ -549,12 +549,11 @@ function toggleSqlEditor() {
 
 // Check localStorage immediately when the script loads, before DOMContentLoaded
 (function() {
-    const STORAGE_KEY = 'proxyweb_sql_editor_collapsed';
     const collapseElement = document.getElementById('sqlEditorCollapse');
     const toggleButton = document.getElementById('sqlEditorToggle');
 
     if (collapseElement && toggleButton) {
-        const savedState = localStorage.getItem(STORAGE_KEY);
+        const savedState = localStorage.getItem(SQL_EDITOR_STORAGE_KEY);
 
         // Apply state immediately if it exists
         if (savedState === 'false') {
@@ -695,13 +694,12 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    const STORAGE_KEY = 'proxyweb_sql_editor_collapsed';
     const toggleButton = document.getElementById('sqlEditorToggle');
     const collapseElement = document.getElementById('sqlEditorCollapse');
 
     if (toggleButton && collapseElement) {
         // Check if state was already applied by the immediate script
-        const savedState = localStorage.getItem(STORAGE_KEY);
+        const savedState = localStorage.getItem(SQL_EDITOR_STORAGE_KEY);
 
         // Only restore state if we have a saved preference and it wasn't already applied
         if (savedState !== null && savedState !== undefined) {
@@ -726,30 +724,17 @@ document.addEventListener('DOMContentLoaded', function() {
             toggleButton.classList.remove('expanded');
         }
 
-        // Wait for Bootstrap's collapse to initialize, then ensure state is correct
-        setTimeout(function() {
-            if (savedState === 'false') {
-                collapseElement.classList.add('show');
-                toggleButton.classList.add('expanded');
-                toggleButton.setAttribute('aria-expanded', 'true');
-            } else if (savedState === 'true') {
-                collapseElement.classList.remove('show');
-                toggleButton.classList.remove('expanded');
-                toggleButton.setAttribute('aria-expanded', 'false');
-            }
-        }, 50);
-
         // Listen for collapse events and save state
         collapseElement.addEventListener('show.bs.collapse', function() {
             toggleButton.setAttribute('aria-expanded', 'true');
             toggleButton.classList.add('expanded');
-            localStorage.setItem(STORAGE_KEY, 'false');
+            localStorage.setItem(SQL_EDITOR_STORAGE_KEY, 'false');
         });
 
         collapseElement.addEventListener('hide.bs.collapse', function() {
             toggleButton.setAttribute('aria-expanded', 'false');
             toggleButton.classList.remove('expanded');
-            localStorage.setItem(STORAGE_KEY, 'true');
+            localStorage.setItem(SQL_EDITOR_STORAGE_KEY, 'true');
         });
 
         // Handle toggle button click
@@ -770,10 +755,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!trigger || !submenu) {
             return;
         }
-
-
-        // Store original parent for cleanup
-        const originalParent = submenu.parentElement;
 
         // Show submenu on hover (desktop)
         submenuItem.addEventListener('mouseenter', function() {
