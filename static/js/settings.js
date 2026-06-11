@@ -534,7 +534,7 @@ function addHideTable(section, value = '') {
     item.innerHTML = `
         <input type="text" name="${section}_hide_tables_${index}" class="form-control"
                placeholder="table_name" value="${value}" style="padding-right: 40px;" />
-        <button type="button" class="array-item-remove" onclick="this.parentElement.remove()">
+        <button type="button" class="array-item-remove" onclick="this.parentElement.remove()" aria-label="Remove table pattern">
             <i class="fas fa-times"></i>
         </button>
     `;
@@ -599,7 +599,7 @@ function addMiscCommand(type, data = null) {
                       class="form-control" placeholder="SQL command or query" rows="3"></textarea>
         </div>
 
-        <button type="button" class="array-item-remove" onclick="removeMiscCommand(this, '${type}')">
+        <button type="button" class="array-item-remove" onclick="removeMiscCommand(this, '${type}')" aria-label="Remove item">
             <i class="fas fa-times"></i>
         </button>
     `;

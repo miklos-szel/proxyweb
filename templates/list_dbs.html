@@ -63,9 +63,9 @@
                         {% for item in session['dblist'][session['server']]['disk'] %}
                             <li>
                                 {% if session['database'] == 'disk' and item == session['table'] %}
-                                    <a class="dropdown-item active" href="#">
+                                    <span class="dropdown-item active" aria-current="true">
                                         <i class="fas fa-check-circle text-success me-2"></i>{{ item }}
-                                    </a>
+                                    </span>
                                 {% else %}
                                     <a class="dropdown-item" href="/{{ session['server'] }}/disk/{{ item }}/">
                                         <i class="fas fa-table me-2"></i>{{ item }}
@@ -90,9 +90,9 @@
                             {% if not item.startswith('runtime_') %}
                             <li>
                                 {% if session['database'] == 'main' and item == session['table'] %}
-                                    <a class="dropdown-item active" href="#">
+                                    <span class="dropdown-item active" aria-current="true">
                                         <i class="fas fa-check-circle text-success me-2"></i>{{ item }}
-                                    </a>
+                                    </span>
                                 {% else %}
                                     <a class="dropdown-item" href="/{{ session['server'] }}/main/{{ item }}/">
                                         <i class="fas fa-table me-2"></i>{{ item }}
@@ -124,9 +124,9 @@
                         {% for item in runtime_tables|sort %}
                             <li>
                                 {% if session['database'] == 'main' and item == session['table'] %}
-                                    <a class="dropdown-item active" href="#">
+                                    <span class="dropdown-item active" aria-current="true">
                                         <i class="fas fa-check-circle text-success me-2"></i>{{ item }}
-                                    </a>
+                                    </span>
                                 {% else %}
                                     <a class="dropdown-item" href="/{{ session['server'] }}/main/{{ item }}/">
                                         <i class="fas fa-table me-2"></i>{{ item }}
@@ -152,9 +152,9 @@
                             {% for item in value %}
                                 <li>
                                     {% if key == session['database'] and item == session['table'] %}
-                                        <a class="dropdown-item active" href="#">
+                                        <span class="dropdown-item active" aria-current="true">
                                             <i class="fas fa-check-circle text-success me-2"></i>{{ item }}
-                                        </a>
+                                        </span>
                                     {% else %}
                                         <a class="dropdown-item" href="/{{ session['server'] }}/{{ key }}/{{ item }}/">
                                             <i class="fas fa-table me-2"></i>{{ item }}
@@ -193,24 +193,24 @@
                         {% if session.get('role') != 'readonly' %}
                         <li><hr class="dropdown-divider"></li>
                         <li>
-                            <a class="dropdown-item" href="#" onclick="executeProxySQLCommand('Load Memory to Runtime', 'LOAD MYSQL USERS TO RUNTIME;LOAD MYSQL SERVERS TO RUNTIME;LOAD MYSQL QUERY RULES TO RUNTIME;LOAD MYSQL VARIABLES TO RUNTIME;LOAD ADMIN VARIABLES TO RUNTIME;LOAD PROXYSQL SERVERS TO RUNTIME;LOAD SCHEDULER TO RUNTIME;'); return false;">
+                            <button type="button" class="dropdown-item" onclick="executeProxySQLCommand('Load Memory to Runtime', 'LOAD MYSQL USERS TO RUNTIME;LOAD MYSQL SERVERS TO RUNTIME;LOAD MYSQL QUERY RULES TO RUNTIME;LOAD MYSQL VARIABLES TO RUNTIME;LOAD ADMIN VARIABLES TO RUNTIME;LOAD PROXYSQL SERVERS TO RUNTIME;LOAD SCHEDULER TO RUNTIME;');">
                                 <i class="fas fa-upload me-2"></i>Load Memory to Runtime
-                            </a>
+                            </button>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="#" onclick="executeProxySQLCommand('Save Memory to Disk', 'SAVE MYSQL USERS TO DISK;SAVE MYSQL SERVERS TO DISK;SAVE MYSQL QUERY RULES TO DISK;SAVE MYSQL VARIABLES TO DISK;SAVE ADMIN VARIABLES TO DISK;SAVE PROXYSQL SERVERS TO DISK;SAVE SCHEDULER TO DISK;'); return false;">
+                            <button type="button" class="dropdown-item" onclick="executeProxySQLCommand('Save Memory to Disk', 'SAVE MYSQL USERS TO DISK;SAVE MYSQL SERVERS TO DISK;SAVE MYSQL QUERY RULES TO DISK;SAVE MYSQL VARIABLES TO DISK;SAVE ADMIN VARIABLES TO DISK;SAVE PROXYSQL SERVERS TO DISK;SAVE SCHEDULER TO DISK;');">
                                 <i class="fas fa-save me-2"></i>Save Memory to Disk
-                            </a>
+                            </button>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="#" onclick="executeProxySQLCommand('Load Disk to Memory', 'LOAD MYSQL USERS FROM DISK;LOAD MYSQL SERVERS FROM DISK;LOAD MYSQL QUERY RULES FROM DISK;LOAD MYSQL VARIABLES FROM DISK;LOAD ADMIN VARIABLES FROM DISK;LOAD PROXYSQL SERVERS FROM DISK;LOAD SCHEDULER FROM DISK;'); return false;">
+                            <button type="button" class="dropdown-item" onclick="executeProxySQLCommand('Load Disk to Memory', 'LOAD MYSQL USERS FROM DISK;LOAD MYSQL SERVERS FROM DISK;LOAD MYSQL QUERY RULES FROM DISK;LOAD MYSQL VARIABLES FROM DISK;LOAD ADMIN VARIABLES FROM DISK;LOAD PROXYSQL SERVERS FROM DISK;LOAD SCHEDULER FROM DISK;');">
                                 <i class="fas fa-download me-2"></i>Load Disk to Memory
-                            </a>
+                            </button>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="#" onclick="executeProxySQLCommand('Load Runtime to Memory', 'LOAD MYSQL USERS TO MEMORY;LOAD MYSQL SERVERS TO MEMORY;LOAD MYSQL QUERY RULES TO MEMORY;LOAD MYSQL VARIABLES TO MEMORY;LOAD ADMIN VARIABLES TO MEMORY;LOAD PROXYSQL SERVERS TO MEMORY;LOAD SCHEDULER TO MEMORY;'); return false;">
+                            <button type="button" class="dropdown-item" onclick="executeProxySQLCommand('Load Runtime to Memory', 'LOAD MYSQL USERS TO MEMORY;LOAD MYSQL SERVERS TO MEMORY;LOAD MYSQL QUERY RULES TO MEMORY;LOAD MYSQL VARIABLES TO MEMORY;LOAD ADMIN VARIABLES TO MEMORY;LOAD PROXYSQL SERVERS TO MEMORY;LOAD SCHEDULER TO MEMORY;');">
                                 <i class="fas fa-arrow-down me-2"></i>Load Runtime to Memory
-                            </a>
+                            </button>
                         </li>
                         {% endif %}
                     </ul>
@@ -230,9 +230,9 @@
                         {% for item in session['servers'] %}
                             {% if item == session['server'] %}
                                 <li>
-                                    <a class="dropdown-item active" href="#">
+                                    <span class="dropdown-item active" aria-current="true">
                                         <i class="fas fa-check-circle text-success me-2"></i>{{ item }}
-                                    </a>
+                                    </span>
                                 </li>
                             {% else %}
                                 <li>
@@ -248,24 +248,26 @@
 
                 {% if session.get('role') != 'readonly' %}
                 <li class="nav-item me-2">
-                    <a class="nav-link" href="/settings/edit/" title="Settings">
+                    <a class="nav-link" href="/settings/edit/" title="Settings" aria-label="Settings">
                         <i class="fas fa-cog"></i>
                     </a>
                 </li>
                 {% endif %}
 
                 <li class="nav-item">
-                    <a class="nav-link" href="/logout" title="Logout">
+                    <a class="nav-link" href="/logout" title="Logout" aria-label="Logout">
                         <i class="fas fa-sign-out-alt"></i>
                     </a>
                 </li>
 
                 {% if session.get('database') and session.get('table') %}
                 <li class="nav-item ms-3">
-                    <span class="current-location">
-                        <i class="fas fa-map-marker-alt me-1"></i>
-                        {{ session['database'] }} / {{ session['table'] }}
-                    </span>
+                    <nav aria-label="breadcrumb">
+                        <span class="current-location">
+                            <i class="fas fa-map-marker-alt me-1"></i>
+                            {{ session['database'] }} / {{ session['table'] }}
+                        </span>
+                    </nav>
                 </li>
                 {% endif %}
             </ul>
@@ -273,8 +275,8 @@
     </div>
 </nav>
 
-<div class="container-fluid mt-5">
+<main class="container-fluid mt-5">
     {% block show_table_info %}{% endblock %}
     {% block show_adhoc_report %}{% endblock %}
-</div>
+</main>
 {% endblock %}

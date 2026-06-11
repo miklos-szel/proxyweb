@@ -323,7 +323,7 @@
     <div class="sql-editor-card">
         <div class="sql-editor-header" onclick="toggleSqlEditor()">
             <h5><i class="fas fa-code"></i> SQL Query Editor
-                <button class="sql-editor-toggle" type="button" id="sqlEditorToggle" aria-expanded="false" aria-controls="sqlEditorCollapse">
+                <button class="sql-editor-toggle" type="button" id="sqlEditorToggle" aria-expanded="false" aria-controls="sqlEditorCollapse" aria-label="Toggle SQL editor">
                     <i class="fas fa-chevron-right"></i>
                 </button>
             </h5>
@@ -352,15 +352,15 @@
                             <ul class="dropdown-menu" aria-labelledby="quickQueriesBtn">
                                 {% for item in session['misc']|sort %}
                                     <li class="dropdown-submenu">
-                                        <a class="dropdown-item has-submenu" href="#" role="button" onclick="return false;">
+                                        <button type="button" class="dropdown-item has-submenu" aria-haspopup="true" aria-expanded="false">
                                             <i class="fas fa-folder me-2"></i>{{ item|title }}
-                                        </a>
+                                        </button>
                                         <ul class="submenu">
                                             {% for subitem in session['misc'][item] %}
                                                 <li>
-                                                    <a class="dropdown-item" href="#" onclick="loadQueryWithInfo('{{ item }}_item_{{ loop.index }}', '{{ item }}_info_{{ loop.index }}'); return false;">
+                                                    <button type="button" class="dropdown-item" onclick="loadQueryWithInfo('{{ item }}_item_{{ loop.index }}', '{{ item }}_info_{{ loop.index }}'); return false;">
                                                         <i class="fas fa-bolt me-2"></i>{{ subitem['title'] }}
-                                                    </a>
+                                                    </button>
                                                 </li>
                                             {% endfor %}
                                         </ul>
@@ -376,9 +376,9 @@
                                 {% if session['history'] and session['history']|length > 0 %}
                                     {% for item in session['history'][-10:]|reverse %}
                                         <li>
-                                            <a class="dropdown-item" href="#" onclick="loadQuery(window['history_item_{{ loop.index }}']); return false;">
+                                            <button type="button" class="dropdown-item" onclick="loadQuery(window['history_item_{{ loop.index }}']); return false;">
                                                 <i class="fas fa-clock me-2"></i>{{ loop.index }}. {{ item|truncate(60, True) }}
-                                            </a>
+                                            </button>
                                         </li>
                                     {% endfor %}
                                 {% else %}
@@ -468,7 +468,7 @@
     </script>
 
     <div>
-        <table id="proxywebtable" class="table table-hover table-striped mb-0">
+        <table id="proxywebtable" class="table table-hover table-striped mb-0" aria-label="{{ session['table'] }} table">
             <thead class="sticky-header">
                 <tr>
                     {% for column_name in content['column_names'] %}
