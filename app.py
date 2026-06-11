@@ -114,6 +114,29 @@ def _atomic_write(path, content):
         raise
 
 
+def _validate_config(yaml_str):
+    """Validate YAML syntax and required config shape; raises ValueError on failure."""
+    mdb.validate_yaml(yaml_str)
+    mdb.validate_config_shape(yaml.safe_load(yaml_str))
+
+
+def _backup_and_write_config(yaml_content):
+    """Back up the current config file to <config>.bak, then write the new content atomically."""
+    with open(config, "r") as src, open(config + ".bak", "w") as dest:
+        dest.write(src.read())
+    _atomic_write(config, yaml_content)
+
+
+def _log_api_request(endpoint, params):
+    """Emit the standard debug block for an /api/* mutation request."""
+    logging.debug("=" * 80)
+    logging.debug(f"API REQUEST: {endpoint}")
+    logging.debug("=" * 80)
+    for key, value in params.items():
+        logging.debug(f"{key}: {value}")
+    logging.debug("=" * 80)
+
+
 # Per-request connection/cursor container. gunicorn runs with --threads, so
 # sharing a module-level dict here would let concurrent requests swap each
 # other's cursors and connections mid-call. ``g.db`` is populated in
@@ -204,14 +227,14 @@ def close_db(exc):
         if cur is not None:
             try:
                 cur.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug(f"close_db: ignoring cursor close error: {e}")
         conn = server_info.get('conn')
         if conn is not None:
             try:
                 conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug(f"close_db: ignoring connection close error: {e}")
 
 
 @app.before_request
@@ -436,14 +459,8 @@ def render_settings(action):
             config_file_content = f.read()
     if action == 'save':
         raw = request.form["settings"]
-        mdb.validate_yaml(raw)
-        mdb.validate_config_shape(yaml.safe_load(raw))
-
-        # back it up first
-        with open(config, "r") as src, open(config + ".bak", "w") as dest:
-            dest.write(src.read())
-
-        _atomic_write(config, raw)
+        _validate_config(raw)
+        _backup_and_write_config(raw)
         message = "success"
     return render_template("settings.html", config_file_content=config_file_content, message=message)
 
@@ -470,16 +487,12 @@ def settings_ui_save():
 
         # Validate before touching the existing config
         try:
-            mdb.validate_yaml(yaml_config)
-            mdb.validate_config_shape(yaml.safe_load(yaml_config))
+            _validate_config(yaml_config)
         except Exception as ve:
             logging.error(f"settings_ui_save validation failed: {ve}")
             return jsonify({'success': False, 'error': str(ve)}), 400
 
-        # Back up current config, then write
-        with open(config, "r") as src, open(config + ".bak", "w") as dest:
-            dest.write(src.read())
-        _atomic_write(config, yaml_config)
+        _backup_and_write_config(yaml_config)
 
         return jsonify({'success': True, 'message': 'Settings saved successfully'})
     except Exception as e:
@@ -549,15 +562,8 @@ def settings_import():
         yaml_content = request.form.get('yaml_content', '')
 
         # Validate YAML syntax and required shape before touching the existing config
-        mdb.validate_yaml(yaml_content)
-        mdb.validate_config_shape(yaml.safe_load(yaml_content))
-
-        # Back up current config
-        with open(config, "r") as src, open(config + ".bak", "w") as dest:
-            dest.write(src.read())
-
-        # Write new config
-        _atomic_write(config, yaml_content)
+        _validate_config(yaml_content)
+        _backup_and_write_config(yaml_content)
 
         return jsonify({'success': True, 'message': 'Configuration imported successfully'})
     except Exception as e:
@@ -632,10 +638,7 @@ def update_config_skip_variables():
             config_data['global'] = {}
         config_data['global']['config_diff_skip_variable'] = skip_variables
 
-        # Back up current config, then write
-        with open(config, "r") as src, open(config + ".bak", "w") as dest:
-            dest.write(src.read())
-        _atomic_write(config, mdb.dict_to_yaml(config_data))
+        _backup_and_write_config(mdb.dict_to_yaml(config_data))
 
         logging.info(f"Updated config_diff_skip_variable: {skip_variables}")
         return jsonify({'success': True})
@@ -685,16 +688,10 @@ def api_update_row():
         if mdb.get_read_only(server) or table.startswith('runtime_') or session.get('role') == 'readonly':
             return jsonify({'success': False, 'error': 'table is read-only'}), 403
 
-        logging.debug("=" * 80)
-        logging.debug("API REQUEST: /api/update_row")
-        logging.debug("=" * 80)
-        logging.debug(f"Server: {server}")
-        logging.debug(f"Database: {database}")
-        logging.debug(f"Table: {table}")
-        logging.debug(f"PK Values: {pk_values}")
-        logging.debug(f"Column Names: {column_names}")
-        logging.debug(f"Row Data: {row_data}")
-        logging.debug("=" * 80)
+        _log_api_request('/api/update_row', {
+            'Server': server, 'Database': database, 'Table': table,
+            'PK Values': pk_values, 'Column Names': column_names, 'Row Data': row_data,
+        })
 
         result = mdb.update_row(g.db, server, database, table, pk_values, column_names, row_data)
         logging.debug(f"Update result: {result}")
@@ -737,14 +734,10 @@ def api_delete_row():
         if mdb.get_read_only(server) or table.startswith('runtime_') or session.get('role') == 'readonly':
             return jsonify({'success': False, 'error': 'table is read-only'}), 403
 
-        logging.debug("=" * 80)
-        logging.debug("API REQUEST: /api/delete_row")
-        logging.debug("=" * 80)
-        logging.debug(f"Server: {server}")
-        logging.debug(f"Database: {database}")
-        logging.debug(f"Table: {table}")
-        logging.debug(f"PK Values: {pk_values}")
-        logging.debug("=" * 80)
+        _log_api_request('/api/delete_row', {
+            'Server': server, 'Database': database, 'Table': table,
+            'PK Values': pk_values,
+        })
 
         result = mdb.delete_row(g.db, server, database, table, pk_values)
         logging.debug(f"Delete result: {result}")
@@ -782,15 +775,10 @@ def api_insert_row():
         if mdb.get_read_only(server) or table.startswith('runtime_') or session.get('role') == 'readonly':
             return jsonify({'success': False, 'error': 'table is read-only'}), 403
 
-        logging.debug("=" * 80)
-        logging.debug("API REQUEST: /api/insert_row")
-        logging.debug("=" * 80)
-        logging.debug(f"Server: {server}")
-        logging.debug(f"Database: {database}")
-        logging.debug(f"Table: {table}")
-        logging.debug(f"Column Names: {column_names}")
-        logging.debug(f"Row Data: {row_data}")
-        logging.debug("=" * 80)
+        _log_api_request('/api/insert_row', {
+            'Server': server, 'Database': database, 'Table': table,
+            'Column Names': column_names, 'Row Data': row_data,
+        })
 
         result = mdb.insert_row(g.db, server, database, table, column_names, row_data)
         logging.debug(f"Insert result: {result}")
