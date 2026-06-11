@@ -43,7 +43,8 @@
         word-break: break-word;
     }
 
-    .timestamp-cell {
+    /* td-qualified so it outranks Bootstrap's .table > :not(caption) > * > * color rule */
+    .history-table td.timestamp-cell {
         white-space: nowrap;
         font-size: 0.875rem;
         color: var(--secondary-color);
