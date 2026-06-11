@@ -19,14 +19,10 @@
         justify-content: space-between;
     }
 
-    .history-header h4 {
-        margin: 0;
-        font-weight: 600;
-        color: #333;
+    .history-header .page-title {
         display: flex;
         align-items: center;
         gap: 0.5rem;
-        font-size: 1.1rem;
     }
 
     .history-table td {
@@ -65,10 +61,10 @@
 
 <div class="history-container">
     <div class="history-header">
-        <h4>
+        <h1 class="page-title">
             <i class="fas fa-history"></i>
             Query History &mdash; {{ server }}
-        </h4>
+        </h1>
         <div class="d-flex align-items-center gap-2">
             <span class="badge bg-secondary">{{ history|length }} queries</span>
             {% if not session.get('read_only') and session.get('role') != 'readonly' and history|length > 0 %}
@@ -140,14 +136,10 @@ function clearHistory() {
 
 document.addEventListener('DOMContentLoaded', function() {
     if (document.getElementById('historyTable')) {
+        // Shared defaults (lengthMenu, language) come from base.html
         $('#historyTable').DataTable({
             order: [[0, 'asc']],
-            pageLength: 25,
-            lengthMenu: [10, 25, 50, 100],
-            language: {
-                search: '<i class="fas fa-search"></i>',
-                searchPlaceholder: 'Search queries...'
-            }
+            pageLength: 25
         });
     }
 });

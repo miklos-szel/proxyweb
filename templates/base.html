@@ -37,23 +37,28 @@
     <script type="text/javascript" charset="utf8" src="https://cdn.datatables.net/1.13.7/js/dataTables.bootstrap5.min.js"></script>
 
     <script>
+        // Shared DataTables defaults so every table behaves the same;
+        // page inits only override what is specific to them.
+        $.extend(true, $.fn.dataTable.defaults, {
+            "lengthMenu": [[25, 50, 100, -1], [25, 50, 100, "All"]],
+            "autoWidth": false,
+            "language": {
+                "search": "",
+                "searchPlaceholder": "Search...",
+                "lengthMenu": "Show _MENU_ entries"
+            }
+        });
+
         $(document).ready(function () {
             // Initialize DataTables
             if ($('#proxywebtable').length) {
                 var dtConfig = {
-                    "lengthMenu": [[25, 50, 100, -1], [25, 50, 100, "All"]],
                     "pageLength": 100,
                     "responsive": false,
-                    "autoWidth": false,
                     "info": false,
                     "paging": true,
                     "searching": true,
-                    "dom": '<"dt-toolbar"l<"dt-toolbar-center"p>f>t<"dt-toolbar dt-toolbar-bottom"l<"dt-toolbar-center"p>f>',
-                    "language": {
-                        "search": "",
-                        "searchPlaceholder": "Search...",
-                        "lengthMenu": "Show _MENU_ entries"
-                    }
+                    "dom": '<"dt-toolbar"l<"dt-toolbar-center"p>f>t<"dt-toolbar dt-toolbar-bottom"l<"dt-toolbar-center"p>f>'
                 };
 
                 {% if content is defined and content['order'] == "true" %}
@@ -140,12 +145,10 @@
                 setupKeyboardShortcuts();
             }
 
-            if ($('#adhoc_results').length) {
-                $('#adhoc_results').DataTable({
-                    "lengthMenu": [[-1, 100, 50, 25], ["All", 100, 50, 25]],
-                    "pageLength": 25,
+            // Class selector: adhoc report pages can render several result tables
+            if ($('.adhoc-results').length) {
+                $('.adhoc-results').DataTable({
                     "responsive": true,
-                    "autoWidth": false,
                     "searching": false,
                     "paging": false,
                     "info": false,
@@ -1385,26 +1388,6 @@
         }
     </script>
 
-    <style>
-        body {
-            padding-top: 60px; /* Account for smaller fixed navbar */
-        }
-
-        /* Ensure editing fields are always properly sized */
-        #proxywebtable td input.form-control,
-        #proxywebtable td textarea.form-control,
-        #proxywebtable td select.form-select {
-            width: 100%;
-            min-width: 150px;
-            max-width: 500px;
-            font-size: 0.9rem;
-        }
-
-        #proxywebtable td textarea.form-control {
-            min-height: 80px;
-            resize: vertical;
-        }
-    </style>
 </head>
 <body>
     {% block content %}{% endblock %}
@@ -1450,7 +1433,7 @@
                 </div>
                 <div class="modal-body bg-white">
                     <p class="mb-3"><strong>This will execute the following SQL commands:</strong></p>
-                    <pre id="modalSqlCommands" style="background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 0.375rem; padding: 1rem; max-height: 400px; overflow-y: auto; font-size: 0.9rem; line-height: 1.6; color: #212529;"></pre>
+                    <pre id="modalSqlCommands" class="modal-sql-pre"></pre>
                 </div>
                 <div class="modal-footer bg-light">
                     <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
@@ -1489,6 +1472,6 @@
             </div>
         </div>
     </div>
-{% if app_version %}<a href="{{ changelog_url }}" target="_blank" rel="noopener" style="position:fixed;bottom:4px;right:8px;font-size:10px;color:#ccc;text-decoration:none;">v{{ app_version }}</a>{% endif %}
+{% if app_version %}<a href="{{ changelog_url }}" target="_blank" rel="noopener" class="version-link">v{{ app_version }}</a>{% endif %}
 </body>
 </html>

@@ -31,6 +31,12 @@
         gap: 0.75rem;
     }
 
+    .report-subtitle {
+        margin: 0.5rem 0 0 0;
+        color: #64748b;
+        font-size: 0.95rem;
+    }
+
     .summary-cards {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -170,9 +176,13 @@
     }
 
     .loading-state i {
-        font-size: 3rem;
         animation: spin 1s linear infinite;
         margin-bottom: 1rem;
+    }
+
+    .loading-state p {
+        margin: 0;
+        font-size: 1.05rem;
     }
 
     @keyframes spin {
@@ -516,59 +526,7 @@
         border-top: 1px solid #e0e0e0;
     }
 
-    .action-btn {
-        padding: 0.5rem 1rem;
-        border: none;
-        border-radius: 6px;
-        font-weight: 600;
-        font-size: 0.85rem;
-        cursor: pointer;
-        transition: all 0.2s;
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-    }
-
-    .action-btn:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-
-    .action-btn-runtime {
-        background: #10b981;
-        color: white;
-    }
-
-    .action-btn-runtime:hover {
-        background: #059669;
-    }
-
-    .action-btn-disk {
-        background: #8b5cf6;
-        color: white;
-    }
-
-    .action-btn-disk:hover {
-        background: #7c3aed;
-    }
-
-    .action-btn-load-disk {
-        background: #f59e0b;
-        color: white;
-    }
-
-    .action-btn-load-disk:hover {
-        background: #d97706;
-    }
-
-    .action-btn-refresh {
-        background: #3b82f6;
-        color: white;
-    }
-
-    .action-btn-refresh:hover {
-        background: #2563eb;
-    }
+    /* Button styling shared via .btn-action* classes in custom.css */
 
     .global-actions {
         padding: 1rem 0;
@@ -602,7 +560,7 @@
             flex-direction: column;
         }
 
-        .action-btn {
+        .btn-action {
             width: 100%;
             justify-content: center;
         }
@@ -612,11 +570,11 @@
 <div class="config-diff-container">
     <div class="report-card fade-in">
         <div class="report-header">
-            <h3 class="report-title">
+            <h1 class="report-title">
                 <i class="fas fa-code-compare"></i>
                 Configuration Diff
-            </h3>
-            <p style="margin: 0.5rem 0 0 0; color: #64748b; font-size: 0.95rem;">Compare ProxySQL configurations across Disk, Memory, and Runtime layers</p>
+            </h1>
+            <p class="report-subtitle">Compare ProxySQL configurations across Disk, Memory, and Runtime layers</p>
         </div>
 
         <div class="summary-cards">
@@ -641,8 +599,8 @@
 
         <div class="diff-content" id="diff-content">
             <div class="loading-state">
-                <i class="fas fa-spinner"></i>
-                <p style="margin: 0; font-size: 1.05rem;">Loading configuration diff...</p>
+                <i class="fas fa-spinner fa-3x"></i>
+                <p>Loading configuration diff...</p>
             </div>
         </div>
     </div>
@@ -684,8 +642,8 @@ function loadConfigDiff() {
     const container = document.getElementById('diff-content');
     container.innerHTML = `
         <div class="loading-state">
-            <i class="fas fa-spinner"></i>
-            <p style="margin: 0; font-size: 1.05rem;">Loading configuration diff...</p>
+            <i class="fas fa-spinner fa-3x"></i>
+            <p>Loading configuration diff...</p>
         </div>
     `;
 
@@ -742,23 +700,23 @@ function displayDiff(diffData) {
     // Build global actions
     let html = `
         <div class="global-actions">
-            <button class="action-btn action-btn-runtime" onclick="executeGlobalCommand('LOAD TO RUNTIME')">
+            <button class="btn-action btn-action-runtime" onclick="executeGlobalCommand('LOAD TO RUNTIME')">
                 <i class="fas fa-play-circle"></i>
                 Load All to Runtime
             </button>
-            <button class="action-btn action-btn-disk" onclick="executeGlobalCommand('SAVE TO DISK')">
+            <button class="btn-action btn-action-disk" onclick="executeGlobalCommand('SAVE TO DISK')">
                 <i class="fas fa-save"></i>
                 Save All to Disk
             </button>
-            <button class="action-btn action-btn-load-disk" onclick="executeGlobalCommand('LOAD FROM DISK')">
+            <button class="btn-action btn-action-load-disk" onclick="executeGlobalCommand('LOAD FROM DISK')">
                 <i class="fas fa-download"></i>
                 Load All from Disk
             </button>
-            <button class="action-btn action-btn-refresh" onclick="loadConfigDiff()">
+            <button class="btn-action btn-action-refresh" id="refresh-diff-btn" onclick="loadConfigDiff()">
                 <i class="fas fa-sync-alt"></i>
                 Refresh Diff
             </button>
-            <button class="action-btn action-btn-refresh" onclick="showSkipVariablesModal()" style="background: #64748b;">
+            <button class="btn-action btn-action-secondary" onclick="showSkipVariablesModal()">
                 <i class="fas fa-cog"></i>
                 Skip Variables (${window.configDiffSkipVariables.length})
             </button>
@@ -802,17 +760,17 @@ function displayDiff(diffData) {
         if (component) {
             html += `
                 <div class="action-buttons">
-                    <button class="action-btn action-btn-runtime"
+                    <button class="btn-action btn-action-runtime"
                             onclick="executeTableCommand('${table.table_name}', 'LOAD TO RUNTIME')">
                         <i class="fas fa-play-circle"></i>
                         Load to Runtime
                     </button>
-                    <button class="action-btn action-btn-disk"
+                    <button class="btn-action btn-action-disk"
                             onclick="executeTableCommand('${table.table_name}', 'SAVE TO DISK')">
                         <i class="fas fa-save"></i>
                         Save to Disk
                     </button>
-                    <button class="action-btn action-btn-load-disk"
+                    <button class="btn-action btn-action-load-disk"
                             onclick="executeTableCommand('${table.table_name}', 'LOAD FROM DISK')">
                         <i class="fas fa-download"></i>
                         Load from Disk

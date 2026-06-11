@@ -1,6 +1,7 @@
 /* ProxyWeb Custom Styles */
 
 :root {
+    --navbar-offset: 60px; /* Height of the fixed navbar; body padding and sticky headers derive from it */
     --primary-color: #475569;
     --primary-dark: #334155;
     --primary-light: #64748b;
@@ -22,7 +23,19 @@ body {
     color: #334155;
     line-height: 1.75;
     font-size: 15px;
-    padding-top: 70px; /* Space for fixed navbar */
+    padding-top: var(--navbar-offset); /* Space for fixed navbar */
+}
+
+/* App icon used in the navbar brand and page headers */
+.app-icon {
+    height: 28px;
+    width: 28px;
+}
+
+.app-icon-link {
+    display: flex;
+    align-items: center;
+    text-decoration: none;
 }
 
 .navbar-brand {
@@ -257,6 +270,20 @@ body {
     box-shadow: 0 0 0 3px rgba(71, 85, 105, 0.1);
 }
 
+/* Standard page heading: one per page, lives inside the page's header bar */
+.page-title {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #333;
+}
+
+/* SQL editor textarea (monospace family comes from .font-monospace) */
+#sql {
+    font-size: 0.95rem;
+    line-height: 1.6;
+}
+
 .form-label {
     font-weight: 600;
     color: var(--dark-color);
@@ -355,6 +382,21 @@ pre {
     min-width: 156px;
     max-width: 156px;
     border-right: 1px solid #000000 !important;
+}
+
+/* Ensure inline-editing fields in the main table are always properly sized */
+#proxywebtable td input.form-control,
+#proxywebtable td textarea.form-control,
+#proxywebtable td select.form-select {
+    width: 100%;
+    min-width: 150px;
+    max-width: 500px;
+    font-size: 0.9rem;
+}
+
+#proxywebtable td textarea.form-control {
+    min-height: 80px;
+    resize: vertical;
 }
 
 /* Edit controls - sticky on left */
@@ -576,6 +618,65 @@ pre {
     .dataTables_info {
         margin-bottom: 0.5rem;
     }
+}
+
+/* Config action buttons (config diff page) - themed via CSS variables */
+.btn-action {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: white;
+}
+
+.btn-action:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    color: white;
+}
+
+.btn-action-runtime { background: var(--success-color); }
+.btn-action-runtime:hover { background: #6a9588; }
+
+.btn-action-disk { background: var(--primary-color); }
+.btn-action-disk:hover { background: var(--primary-dark); }
+
+.btn-action-load-disk { background: var(--warning-color); }
+.btn-action-load-disk:hover { background: #c19362; }
+
+.btn-action-refresh { background: var(--info-color); }
+.btn-action-refresh:hover { background: #5d8ba0; }
+
+.btn-action-secondary { background: var(--secondary-color); }
+.btn-action-secondary:hover { background: var(--primary-dark); }
+
+/* SQL preview inside the ProxySQL command confirmation modal */
+.modal-sql-pre {
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    padding: 1rem;
+    max-height: 400px;
+    overflow-y: auto;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: #212529;
+}
+
+/* Unobtrusive version link pinned to the bottom-right corner */
+.version-link {
+    position: fixed;
+    bottom: 4px;
+    right: 8px;
+    font-size: 10px;
+    color: #ccc;
+    text-decoration: none;
 }
 
 /* Fixed top-right region where showNotification() toasts stack */

@@ -298,7 +298,7 @@ function addServer(serverName = '', serverData = null) {
         <div class="form-group">
             <label for="server_${serverIndex}_name">Server Name</label>
             <input type="text" id="server_${serverIndex}_name" name="server_${serverIndex}_name"
-                   class="form-control-ui" placeholder="proxysql" value="${serverName || ''}" />
+                   class="form-control" placeholder="proxysql" value="${serverName || ''}" />
         </div>
 
         <div class="form-group">
@@ -435,14 +435,14 @@ function addDSN(serverIndex, dsnData = null, dsnIndex = null) {
                 <div class="form-group">
                     <label for="server_${serverIndex}_dsn_${index}_host">Host</label>
                     <input type="text" id="server_${serverIndex}_dsn_${index}_host" name="server_${serverIndex}_dsn_${index}_host"
-                           class="form-control-ui" placeholder="host.docker.internal" />
+                           class="form-control" placeholder="host.docker.internal" />
                 </div>
             </div>
             <div class="col-md-6">
                 <div class="form-group">
                     <label for="server_${serverIndex}_dsn_${index}_port">Port</label>
                     <input type="text" id="server_${serverIndex}_dsn_${index}_port" name="server_${serverIndex}_dsn_${index}_port"
-                           class="form-control-ui" placeholder="16032" />
+                           class="form-control" placeholder="16032" />
                 </div>
             </div>
         </div>
@@ -452,14 +452,14 @@ function addDSN(serverIndex, dsnData = null, dsnIndex = null) {
                 <div class="form-group">
                     <label for="server_${serverIndex}_dsn_${index}_user">User</label>
                     <input type="text" id="server_${serverIndex}_dsn_${index}_user" name="server_${serverIndex}_dsn_${index}_user"
-                           class="form-control-ui" placeholder="radmin" />
+                           class="form-control" placeholder="radmin" />
                 </div>
             </div>
             <div class="col-md-6">
                 <div class="form-group">
                     <label for="server_${serverIndex}_dsn_${index}_passwd">Password</label>
                     <input type="password" id="server_${serverIndex}_dsn_${index}_passwd" name="server_${serverIndex}_dsn_${index}_passwd"
-                           class="form-control-ui" placeholder="********" />
+                           class="form-control" placeholder="********" />
                 </div>
             </div>
         </div>
@@ -467,7 +467,7 @@ function addDSN(serverIndex, dsnData = null, dsnIndex = null) {
         <div class="form-group">
             <label for="server_${serverIndex}_dsn_${index}_db">Database</label>
             <input type="text" id="server_${serverIndex}_dsn_${index}_db" name="server_${serverIndex}_dsn_${index}_db"
-                   class="form-control-ui" placeholder="main" />
+                   class="form-control" placeholder="main" />
         </div>
     `;
 
@@ -532,7 +532,7 @@ function addHideTable(section, value = '') {
     const item = document.createElement('div');
     item.className = 'array-item';
     item.innerHTML = `
-        <input type="text" name="${section}_hide_tables_${index}" class="form-control-ui"
+        <input type="text" name="${section}_hide_tables_${index}" class="form-control"
                placeholder="table_name" value="${value}" style="padding-right: 40px;" />
         <button type="button" class="array-item-remove" onclick="this.parentElement.remove()">
             <i class="fas fa-times"></i>
@@ -584,19 +584,19 @@ function addMiscCommand(type, data = null) {
         <div class="form-group">
             <label for="misc_${type}_${index}_title">Title</label>
             <input type="text" id="misc_${type}_${index}_title" name="misc_${type}_${index}_title"
-                   class="form-control-ui" placeholder="Command Title" />
+                   class="form-control" placeholder="Command Title" />
         </div>
 
         <div class="form-group">
             <label for="misc_${type}_${index}_info">Info</label>
             <textarea id="misc_${type}_${index}_info" name="misc_${type}_${index}_info"
-                      class="form-control-ui" placeholder="Description (use \\n for new lines)" rows="2"></textarea>
+                      class="form-control" placeholder="Description (use \\n for new lines)" rows="2"></textarea>
         </div>
 
         <div class="form-group">
             <label for="misc_${type}_${index}_sql">SQL Command</label>
             <textarea id="misc_${type}_${index}_sql" name="misc_${type}_${index}_sql"
-                      class="form-control-ui" placeholder="SQL command or query" rows="3"></textarea>
+                      class="form-control" placeholder="SQL command or query" rows="3"></textarea>
         </div>
 
         <button type="button" class="array-item-remove" onclick="removeMiscCommand(this, '${type}')">

@@ -240,7 +240,7 @@
 
     .sticky-header th {
         position: sticky !important;
-        top: 60px;
+        top: var(--navbar-offset);
         z-index: 10;
         background-color: #f8f9fa !important;
         border-bottom: 2px solid #dee2e6;
@@ -256,14 +256,10 @@
         border-bottom: 1px solid #e0e0e0;
     }
 
-    .table-header h4 {
-        margin: 0;
-        font-weight: 600;
-        color: #333;
+    .table-header .page-title {
         display: flex;
         align-items: center;
         gap: 0.5rem;
-        font-size: 1.1rem;
     }
 
     .alert-custom {
@@ -396,7 +392,7 @@
                 <form action="/{{ session['server'] }}/{{ session['database'] }}/{{ session['table'] }}/sql/" method="post">
                     <input type="hidden" name="_csrf_token" value="{{ session.csrf_token }}">
                     <div class="mb-4">
-                        <textarea class="form-control font-monospace" name="sql" id="sql" rows="8" placeholder="Enter your SQL query here..." style="font-family: 'Courier New', monospace; font-size: 0.95rem; line-height: 1.6;"></textarea>
+                        <textarea class="form-control font-monospace" name="sql" id="sql" rows="8" placeholder="Enter your SQL query here..."></textarea>
                     </div>
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-primary">
@@ -432,10 +428,10 @@
 
 <div class="table-container">
     <div class="table-header">
-        <h4>
+        <h1 class="page-title">
             <i class="fas fa-table"></i>
             {{ session['table'] }} Table
-        </h4>
+        </h1>
         <div class="table-stats">
             <div class="stat-item">
                 <i class="fas fa-database"></i>
