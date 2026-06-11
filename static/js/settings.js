@@ -9,6 +9,7 @@ let nextServerIndex = 0;  // monotonically increasing; never decremented
 let nextDsnIndex = {};    // per serverIndex; never decremented
 let nextMiscIndex = {};   // per misc type; never decremented
 let miscCount = {}; // Dynamic misc section counters
+let formDirty = false; // True once the user edits anything not yet saved
 
 /**
  * Initialize the settings page
@@ -16,7 +17,35 @@ let miscCount = {}; // Dynamic misc section counters
 document.addEventListener('DOMContentLoaded', function() {
     loadConfig();
     setupFormHandlers();
+    setupDirtyTracking();
 });
+
+/**
+ * Warn before leaving the page with unsaved edits. The flag is set by user
+ * input on either editor and cleared on save, reset, and import.
+ */
+function setupDirtyTracking() {
+    ['settings-form', 'settings-raw'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('input', () => { formDirty = true; });
+            el.addEventListener('change', () => { formDirty = true; });
+        }
+    });
+
+    // Submitting the raw YAML form is a save — don't block the navigation
+    const rawForm = document.querySelector('#raw-yaml form');
+    if (rawForm) {
+        rawForm.addEventListener('submit', () => { formDirty = false; });
+    }
+
+    window.addEventListener('beforeunload', function(e) {
+        if (formDirty) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
+}
 
 /**
  * Fetches the current settings from the server and applies them to the UI.
@@ -656,20 +685,21 @@ function setupFormHandlers() {
 function saveSettings() {
     const form = document.getElementById('settings-form');
     const formData = new FormData(form);
+    const submitBtn = form.querySelector('button[type="submit"]');
 
-    // Show loading state
-    showSaveStatus('info', 'Saving...', 'Please wait while we save your settings');
+    setButtonLoading(submitBtn, true);
 
     fetch('/settings/ui_save/', {
         method: 'POST',
         headers: {
-            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || {}).content || '',
+            'X-CSRF-Token': getCsrfToken(),
         },
         body: formData
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
+            formDirty = false;
             showSaveStatus('success', 'Success!', 'Your settings have been saved successfully');
         } else {
             showSaveStatus('error', 'Error', data.error || 'Failed to save settings');
@@ -677,50 +707,23 @@ function saveSettings() {
     })
     .catch(error => {
         showSaveStatus('error', 'Error', 'Failed to save settings: ' + error.message);
+    })
+    .finally(() => {
+        setButtonLoading(submitBtn, false);
     });
 }
 
 /**
- * Display a save status banner with an appropriate icon, title, and message.
- *
- * Updates the visible status area to reflect `type` (`success`, `error`, or other for info),
- * sets the icon and color, and places `title` and `message` text into the banner.
- * For `success` and `error` types the banner is automatically hidden after 5 seconds;
- * `info` type remains visible until hidden by other UI actions.
+ * Show a save status message. Thin wrapper around the shared toast helper
+ * in base.html (kept under its old name so all call sites stay unchanged).
  *
  * @param {string} type - One of `'success'`, `'error'`, or any other value interpreted as `'info'`.
- * @param {string} title - Short title text shown in the status banner.
- * @param {string} message - Detailed message text shown in the status banner.
+ * @param {string} title - Short title text.
+ * @param {string} message - Detailed message text.
  */
 function showSaveStatus(type, title, message) {
-    const statusDiv = document.getElementById('saveStatus');
-    const icon = document.getElementById('saveStatusIcon');
-    const titleEl = document.getElementById('saveStatusTitle');
-    const msgEl = document.getElementById('saveStatusMessage');
-
-    // Set icon based on type
-    if (type === 'success') {
-        icon.className = 'fas fa-check-circle';
-        icon.style.color = 'var(--success-color)';
-    } else if (type === 'error') {
-        icon.className = 'fas fa-exclamation-circle';
-        icon.style.color = 'var(--danger-color)';
-    } else {
-        icon.className = 'fas fa-spinner fa-spin';
-        icon.style.color = 'var(--info-color)';
-    }
-
-    titleEl.textContent = title;
-    msgEl.textContent = message;
-
-    statusDiv.className = `save-status show ${type}`;
-
-    // Auto-hide after 5 seconds for success/error messages
-    if (type !== 'info') {
-        setTimeout(() => {
-            statusDiv.classList.remove('show');
-        }, 5000);
-    }
+    const toastType = type === 'success' ? 'success' : type === 'error' ? 'error' : 'info';
+    showNotification(title + ' — ' + message, toastType);
 }
 
 /**
@@ -793,18 +796,20 @@ function importConfig() {
     const formData = new FormData();
     formData.append('yaml_content', yamlContent);
 
-    showSaveStatus('info', 'Importing...', 'Please wait while we import your configuration');
+    const importBtn = document.getElementById('importConfirmBtn');
+    setButtonLoading(importBtn, true);
 
     fetch('/settings/import/', {
         method: 'POST',
         headers: {
-            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || {}).content || '',
+            'X-CSRF-Token': getCsrfToken(),
         },
         body: formData
     })
     .then(response => response.json())
         .then(data => {
             if (data.success) {
+                formDirty = false;
                 showSaveStatus('success', 'Import Complete', 'Configuration has been imported successfully');
                 closeImportModal();
 
@@ -814,21 +819,30 @@ function importConfig() {
                 }, 1500);
             } else {
                 showSaveStatus('error', 'Import Failed', data.error || 'Failed to import configuration');
+                setButtonLoading(importBtn, false);
             }
         })
         .catch(error => {
             showSaveStatus('error', 'Import Failed', 'Failed to import configuration: ' + error.message);
+            setButtonLoading(importBtn, false);
         });
 }
 
 /**
  * Restore the form to the originally loaded configuration after user confirmation.
  *
- * Prompts the user to confirm; if confirmed, reloads the original configuration into the form and displays a success status message.
+ * Asks for confirmation via the shared modal; if confirmed, reloads the original
+ * configuration into the form and displays a success status message.
  */
 function resetForm() {
-    if (confirm('Are you sure you want to reset all changes? This will reload the original configuration.')) {
-        loadConfig();
-        showSaveStatus('success', 'Reset Complete', 'Form has been reset to original values');
-    }
+    confirmAction(
+        'Reset Settings Form',
+        'Are you sure you want to reset all changes? This will reload the original configuration.',
+        'Reset',
+        function() {
+            loadConfig();
+            formDirty = false;
+            showSaveStatus('success', 'Reset Complete', 'Form has been reset to original values');
+        }
+    );
 }

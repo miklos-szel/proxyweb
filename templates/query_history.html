@@ -68,7 +68,7 @@
         <div class="d-flex align-items-center gap-2">
             <span class="badge bg-secondary">{{ history|length }} queries</span>
             {% if not session.get('read_only') and session.get('role') != 'readonly' and history|length > 0 %}
-                <button class="btn btn-outline-danger btn-sm" onclick="clearHistory()">
+                <button class="btn btn-outline-danger btn-sm" onclick="clearHistory(this)">
                     <i class="fas fa-trash me-1"></i>Clear History
                 </button>
             {% endif %}
@@ -119,19 +119,34 @@ function copySQL(btn) {
     copyWithFeedback(btn, btn.getAttribute('data-sql') || '');
 }
 
-function clearHistory() {
+function clearHistory(button) {
     const server = {{ server|tojson }};
-    if (!confirm('Clear all query history for ' + server + '?')) return;
-    fetch('/api/clear_query_history', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': getCsrfToken()
-        },
-        body: JSON.stringify({server: server})
-    }).then(r => r.json()).then(data => {
-        if (data.success) location.reload();
-    });
+    confirmAction(
+        'Clear Query History',
+        'Clear all query history for ' + server + '? This cannot be undone.',
+        'Clear History',
+        function() {
+            setButtonLoading(button, true);
+            fetch('/api/clear_query_history', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': getCsrfToken()
+                },
+                body: JSON.stringify({server: server})
+            }).then(r => r.json()).then(data => {
+                if (data.success) {
+                    location.reload();
+                } else {
+                    showNotification('Failed to clear history: ' + (data.error || 'unknown error'), 'error');
+                    setButtonLoading(button, false);
+                }
+            }).catch(error => {
+                showNotification('Failed to clear history: ' + error.message, 'error');
+                setButtonLoading(button, false);
+            });
+        }
+    );
 }
 
 document.addEventListener('DOMContentLoaded', function() {

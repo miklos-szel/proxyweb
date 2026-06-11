@@ -616,7 +616,7 @@
 
         function editRow(button) {
             if (currentlyEditing) {
-                alert('Please finish editing the current row first.');
+                showNotification('Please finish editing the current row first.', 'info');
                 return;
             }
 
@@ -736,6 +736,7 @@
 
         function saveRow(button) {
             const row = button.closest('tr');
+            if (row.dataset.saving === 'true') return;
             const cells = row.querySelectorAll('td:not(.edit-controls)');
             const allHeaderCells = row.closest('table').querySelectorAll('thead th');
             const headerCells = Array.from(allHeaderCells).filter(th => !th.classList.contains('actions-header'));
@@ -803,6 +804,12 @@
             const pkValues = {};
             storedColNames.forEach((col, i) => { pkValues[col] = storedRowData[i]; });
 
+            // Guard against double-submit while the request is in flight
+            row.dataset.saving = 'true';
+            setButtonLoading(button, true);
+            const cancelBtn = row.querySelector('.btn-secondary');
+            if (cancelBtn) cancelBtn.disabled = true;
+
             // Send update to server
             fetch('/api/update_row', {
                 method: 'POST',
@@ -841,6 +848,7 @@
                     document.removeEventListener('keydown', row.keydownHandler);
                     row.keydownHandler = null;
                 }
+                delete row.dataset.saving;
                 row.classList.remove('editing');
                 restoreEditControls(row);
                 currentlyEditing = false;
@@ -907,6 +915,7 @@
 
             // Show the Bootstrap confirmation modal and execute on confirm
             bindModalConfirm(document.getElementById('deleteRowModal'), 'confirmDeleteRow', function() {
+                setButtonLoading(button, true);
                 fetch('/api/delete_row', {
                     method: 'POST',
                     headers: {
@@ -935,6 +944,9 @@
                 })
                 .catch(error => {
                     showNotification('Error: ' + error, 'error');
+                })
+                .finally(() => {
+                    setButtonLoading(button, false);
                 });
             });
         }
@@ -1043,6 +1055,7 @@
 
         function saveNewRow(button) {
             const row = button.closest('tr');
+            if (row.dataset.saving === 'true') return;
             const cells = row.querySelectorAll('td:not(.edit-controls)');
             const allHeaderCells = row.closest('table').querySelectorAll('thead th');
             const headerCells = Array.from(allHeaderCells).filter(th => !th.classList.contains('actions-header'));
@@ -1115,6 +1128,12 @@
                 return;
             }
 
+            // Guard against double-submit while the request is in flight
+            row.dataset.saving = 'true';
+            setButtonLoading(button, true);
+            const cancelBtn = row.querySelector('.btn-icon-secondary');
+            if (cancelBtn) cancelBtn.disabled = true;
+
             // Send to server
             fetch('/api/insert_row', {
                 method: 'POST',
@@ -1138,10 +1157,16 @@
                     setTimeout(() => location.reload(), 1000);
                 } else {
                     showNotification('Error adding row: ' + data.error, 'error');
+                    delete row.dataset.saving;
+                    setButtonLoading(button, false);
+                    if (cancelBtn) cancelBtn.disabled = false;
                 }
             })
             .catch(error => {
                 showNotification('Error: ' + error, 'error');
+                delete row.dataset.saving;
+                setButtonLoading(button, false);
+                if (cancelBtn) cancelBtn.disabled = false;
             });
         }
 

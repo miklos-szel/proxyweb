@@ -274,39 +274,6 @@
         transform: scale(1.1);
     }
 
-    /* Save Status */
-    .save-status {
-        position: fixed;
-        top: 100px;
-        right: 2rem;
-        background: white;
-        border-radius: var(--border-radius);
-        padding: 1.5rem 2rem;
-        box-shadow: var(--box-shadow-lg);
-        border-left: 4px solid var(--primary-color);
-        min-width: 300px;
-        z-index: 1000;
-        display: none;
-    }
-
-    .save-status.show {
-        display: block;
-        animation: slideIn 0.3s ease;
-    }
-
-    .save-status.success {
-        border-left-color: var(--success-color);
-    }
-
-    .save-status.error {
-        border-left-color: var(--danger-color);
-    }
-
-    @keyframes slideIn {
-        from { transform: translateX(400px); opacity: 0; }
-        to { transform: translateX(0); opacity: 1; }
-    }
-
     /* Import/Export */
     .import-export-bar {
         background: white;
@@ -450,17 +417,6 @@
             <button type="button" class="btn btn-outline-primary" id="btn-raw-yaml" onclick="switchMode('raw')">
                 <i class="fas fa-code"></i> Raw YAML
             </button>
-        </div>
-
-        <!-- Success Message Display -->
-        <div id="saveStatus" class="save-status">
-            <div style="display: flex; align-items: center; gap: 1rem;">
-                <i id="saveStatusIcon" class="fas fa-check-circle" style="font-size: 2rem; color: var(--success-color);"></i>
-                <div>
-                    <strong id="saveStatusTitle">Success!</strong>
-                    <p id="saveStatusMessage" style="margin: 0; font-size: 0.9rem; color: var(--secondary-color);"></p>
-                </div>
-            </div>
         </div>
 
         <!-- UI Editor Mode -->
@@ -674,7 +630,7 @@
         <textarea id="importYamlContent" class="form-control" style="min-height: 300px;" placeholder="Paste YAML here..."></textarea>
         <div style="margin-top: 1.5rem; display: flex; gap: 1rem; justify-content: flex-end;">
             <button type="button" class="btn btn-outline-secondary" onclick="closeImportModal()">Cancel</button>
-            <button type="button" class="btn btn-primary" onclick="importConfig()">
+            <button type="button" class="btn btn-primary" id="importConfirmBtn" onclick="importConfig()">
                 <i class="fas fa-upload"></i> Import
             </button>
         </div>
