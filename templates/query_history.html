@@ -117,17 +117,10 @@
 </div>
 
 <script>
+// Delegates to the shared clipboard helper in base.html, which also works
+// on plain-HTTP origins where navigator.clipboard is unavailable.
 function copySQL(btn) {
-    const sql = btn.getAttribute('data-sql');
-    navigator.clipboard.writeText(sql).then(() => {
-        const icon = btn.querySelector('i');
-        icon.classList.replace('fa-copy', 'fa-check');
-        btn.classList.replace('btn-outline-secondary', 'btn-success');
-        setTimeout(() => {
-            icon.classList.replace('fa-check', 'fa-copy');
-            btn.classList.replace('btn-success', 'btn-outline-secondary');
-        }, 1500);
-    });
+    copyWithFeedback(btn, btn.getAttribute('data-sql') || '');
 }
 
 function clearHistory() {

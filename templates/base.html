@@ -489,23 +489,52 @@
             });
         }
 
-        // Copy the SQL stored on a copy button to the clipboard and flash a
-        // check-mark icon for ~1.5s. Mirrors templates/query_history.html.
-        function copyRowSql(button) {
-            const sql = button.getAttribute('data-sql') || '';
-            if (!sql) return;
-            writeToClipboard(sql).then(() => {
+        // Copy text to the clipboard and flash the button's copy icon to a
+        // check mark for ~1.5s. Shared by row copy buttons and query history;
+        // classList.replace() is a no-op for whichever class pair is absent.
+        function copyWithFeedback(button, text) {
+            if (!text) return;
+            writeToClipboard(text).then(() => {
                 const icon = button.querySelector('i');
                 if (!icon) return;
                 icon.classList.replace('fa-copy', 'fa-check');
                 button.classList.replace('btn-icon-secondary', 'btn-icon-success');
+                button.classList.replace('btn-outline-secondary', 'btn-success');
                 setTimeout(() => {
                     icon.classList.replace('fa-check', 'fa-copy');
                     button.classList.replace('btn-icon-success', 'btn-icon-secondary');
+                    button.classList.replace('btn-success', 'btn-outline-secondary');
                 }, 1500);
             }).catch(err => {
                 console.error('Clipboard write failed:', err);
             });
+        }
+
+        // Copy the SQL stored on a row copy button to the clipboard.
+        function copyRowSql(button) {
+            copyWithFeedback(button, button.getAttribute('data-sql') || '');
+        }
+
+        // Attach a document-level Enter/Escape handler scoped to `row`:
+        // Enter clicks the save button (Shift+Enter passes through so
+        // textareas keep newline entry), Escape clicks the cancel button.
+        // Stored on row.keydownHandler so save/cancel paths can detach it.
+        function attachRowKeydown(row, saveSelector, cancelSelector) {
+            const keydownHandler = function(e) {
+                if (!row.contains(e.target)) return;
+
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const saveBtn = row.querySelector(saveSelector);
+                    if (saveBtn) saveBtn.click();
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    const cancelBtn = row.querySelector(cancelSelector);
+                    if (cancelBtn) cancelBtn.click();
+                }
+            };
+            row.keydownHandler = keydownHandler;
+            document.addEventListener('keydown', keydownHandler);
         }
 
         // Debounce function to limit how often a function is called
@@ -661,24 +690,7 @@
             document.querySelectorAll('.edit-btn').forEach(btn => btn.disabled = true);
 
             // Add keyboard event listener for Enter/Esc
-            const keydownHandler = function(e) {
-                // Check if the event target is within the row being edited
-                if (!row.contains(e.target)) return;
-
-                if (e.key === 'Enter' && !e.shiftKey) {
-                    // Shift+Enter allows newlines in textareas, plain Enter saves
-                    e.preventDefault();
-                    const saveBtn = row.querySelector('.btn-success');
-                    if (saveBtn) saveBtn.click();
-                } else if (e.key === 'Escape') {
-                    e.preventDefault();
-                    const cancelBtn = row.querySelector('.btn-secondary');
-                    if (cancelBtn) cancelBtn.click();
-                }
-            };
-
-            row.keydownHandler = keydownHandler;
-            document.addEventListener('keydown', keydownHandler);
+            attachRowKeydown(row, '.btn-success', '.btn-secondary');
         }
 
         function cancelEdit(button) {
@@ -890,22 +902,8 @@
             const pkValues = {};
             storedColNames.forEach((col, i) => { pkValues[col] = storedRowData[i]; });
 
-            // Show the Bootstrap confirmation modal
-            const modal = new bootstrap.Modal(document.getElementById('deleteRowModal'));
-            const modalElement = document.getElementById('deleteRowModal');
-            modal.show();
-
-            // Set up the confirm button click handler (remove old listeners first)
-            const confirmBtn = document.getElementById('confirmDeleteRow');
-            const newConfirmBtn = confirmBtn.cloneNode(true);
-            confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
-
-            // Function to execute the deletion
-            const executeDelete = function() {
-                // Hide the modal
-                modal.hide();
-
-                // Execute the deletion
+            // Show the Bootstrap confirmation modal and execute on confirm
+            bindModalConfirm(document.getElementById('deleteRowModal'), 'confirmDeleteRow', function() {
                 fetch('/api/delete_row', {
                     method: 'POST',
                     headers: {
@@ -935,25 +933,7 @@
                 .catch(error => {
                     showNotification('Error: ' + error, 'error');
                 });
-            };
-
-            // Attach click handler
-            newConfirmBtn.addEventListener('click', executeDelete);
-
-            // Add keyboard handler for Enter key
-            const keydownHandler = function(e) {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    executeDelete();
-                }
-            };
-
-            modalElement.addEventListener('keydown', keydownHandler);
-
-            // Clean up event listener when modal is closed
-            modalElement.addEventListener('hidden.bs.modal', function() {
-                modalElement.removeEventListener('keydown', keydownHandler);
-            }, { once: true });
+            });
         }
 
         function createNewRowTemplate(table) {
@@ -1055,24 +1035,7 @@
             }
 
             // Add keyboard event listener for Enter/Esc
-            const keydownHandler = function(e) {
-                // Check if the event target is within the new row
-                if (!newRow.contains(e.target)) return;
-
-                if (e.key === 'Enter' && !e.shiftKey) {
-                    // Shift+Enter allows newlines in textareas, plain Enter saves
-                    e.preventDefault();
-                    const saveBtn = newRow.querySelector('.btn-icon-success');
-                    if (saveBtn) saveBtn.click();
-                } else if (e.key === 'Escape') {
-                    e.preventDefault();
-                    const cancelBtn = newRow.querySelector('.btn-icon-secondary');
-                    if (cancelBtn) cancelBtn.click();
-                }
-            };
-
-            newRow.keydownHandler = keydownHandler;
-            document.addEventListener('keydown', keydownHandler);
+            attachRowKeydown(newRow, '.btn-icon-success', '.btn-icon-secondary');
         }
 
         function saveNewRow(button) {
@@ -1192,29 +1155,32 @@
         function showNotification(message, type) {
             // Create notification element
             const notification = document.createElement('div');
-            notification.className = `alert alert-${type === 'success' ? 'success' : 'danger'} notification-toast`;
-            notification.style.position = 'fixed';
-            notification.style.top = '20px';
-            notification.style.right = '20px';
-            notification.style.zIndex = '9999';
-            notification.style.minWidth = '300px';
-            notification.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+            const alertClass = type === 'success' ? 'alert-success'
+                             : type === 'info' ? 'alert-info'
+                             : 'alert-danger';
+            notification.className = `alert ${alertClass} notification-toast`;
             // Build via DOM nodes so server-returned text (which can include
             // mysql error output echoing user SQL) is inserted as text, never HTML.
             const wrapper = document.createElement('div');
             wrapper.className = 'd-flex align-items-center';
             const icon = document.createElement('i');
-            icon.className = `fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'} me-2`;
+            const iconName = type === 'success' ? 'check-circle'
+                           : type === 'info' ? 'info-circle'
+                           : 'exclamation-circle';
+            icon.className = `fas fa-${iconName} me-2`;
             const msgSpan = document.createElement('span');
             msgSpan.textContent = message;
             const closeBtn = document.createElement('button');
             closeBtn.type = 'button';
             closeBtn.className = 'btn-close ms-auto';
+            closeBtn.setAttribute('aria-label', 'Close');
             closeBtn.addEventListener('click', function () { notification.remove(); });
             wrapper.append(icon, msgSpan, closeBtn);
             notification.appendChild(wrapper);
 
-            document.body.appendChild(notification);
+            // The aria-live toast region lets screen readers announce updates.
+            const region = document.getElementById('toast-region');
+            (region || document.body).appendChild(notification);
 
             // Different timeouts based on type:
             // - error/danger (warnings): 5 seconds
@@ -1226,6 +1192,66 @@
                     notification.remove();
                 }
             }, timeout);
+        }
+
+        // Toggle a button's loading state: disabled with a spinner while an
+        // async request is in flight, original content restored afterwards.
+        function setButtonLoading(button, isLoading) {
+            if (!button) return;
+            if (isLoading) {
+                if (button.dataset.loading === 'true') return;
+                button.dataset.loading = 'true';
+                button.dataset.originalHtml = button.innerHTML;
+                const label = button.textContent.trim();
+                button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>' + (label ? ' ' + escapeHtmlAttr(label) : '');
+                button.disabled = true;
+            } else {
+                if (button.dataset.loading !== 'true') return;
+                delete button.dataset.loading;
+                button.innerHTML = button.dataset.originalHtml || button.innerHTML;
+                delete button.dataset.originalHtml;
+                button.disabled = false;
+            }
+        }
+
+        // Show a Bootstrap modal and run onConfirm when its confirm button is
+        // clicked or Enter is pressed. The confirm button node is replaced to
+        // drop listeners from a previous invocation, and the keydown handler
+        // is removed when the modal closes.
+        function bindModalConfirm(modalElement, confirmBtnId, onConfirm) {
+            const modal = new bootstrap.Modal(modalElement);
+            modal.show();
+
+            const confirmBtn = document.getElementById(confirmBtnId);
+            const newConfirmBtn = confirmBtn.cloneNode(true);
+            confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+
+            const runConfirm = function () {
+                modal.hide();
+                onConfirm();
+            };
+            newConfirmBtn.addEventListener('click', runConfirm);
+
+            const keydownHandler = function (e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    runConfirm();
+                }
+            };
+            modalElement.addEventListener('keydown', keydownHandler);
+            modalElement.addEventListener('hidden.bs.modal', function () {
+                modalElement.removeEventListener('keydown', keydownHandler);
+            }, { once: true });
+        }
+
+        // Generic confirmation dialog backed by #confirmActionModal, for
+        // confirmations that don't have a dedicated modal of their own.
+        function confirmAction(title, body, confirmLabel, onConfirm) {
+            const modalElement = document.getElementById('confirmActionModal');
+            document.getElementById('confirmActionTitle').textContent = title;
+            document.getElementById('confirmActionBody').textContent = body;
+            document.getElementById('confirmActionBtnLabel').textContent = confirmLabel;
+            bindModalConfirm(modalElement, 'confirmActionBtn', onConfirm);
         }
 
         // Initialize Bootstrap tooltips
@@ -1320,21 +1346,8 @@
             document.getElementById('modalCommandTitle').textContent = title;
             document.getElementById('modalSqlCommands').textContent = formattedSql;
 
-            // Show the modal
-            const modal = new bootstrap.Modal(document.getElementById('proxysqlCommandModal'));
-            const modalElement = document.getElementById('proxysqlCommandModal');
-            modal.show();
-
-            // Set up the confirm button click handler (remove old listeners first)
-            const confirmBtn = document.getElementById('confirmProxySQLCommand');
-            const newConfirmBtn = confirmBtn.cloneNode(true);
-            confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
-
-            // Function to execute the command
-            const executeCommand = function() {
-                // Hide the modal
-                modal.hide();
-
+            // Show the confirmation modal and execute on confirm
+            bindModalConfirm(document.getElementById('proxysqlCommandModal'), 'confirmProxySQLCommand', function() {
                 // Execute the SQL command via AJAX (no loading notification)
                 fetch('/api/execute_proxysql_command', {
                     method: 'POST',
@@ -1368,25 +1381,7 @@
                     console.error('Error executing ProxySQL command:', error.message);
                     showNotification(title + ' failed: ' + error.message, 'error');
                 });
-            };
-
-            // Attach click handler
-            newConfirmBtn.addEventListener('click', executeCommand);
-
-            // Add keyboard handler for Enter key
-            const keydownHandler = function(e) {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    executeCommand();
-                }
-            };
-
-            modalElement.addEventListener('keydown', keydownHandler);
-
-            // Clean up event listener when modal is closed
-            modalElement.addEventListener('hidden.bs.modal', function() {
-                modalElement.removeEventListener('keydown', keydownHandler);
-            }, { once: true });
+            });
         }
     </script>
 
@@ -1415,6 +1410,32 @@
     {% block content %}{% endblock %}
     {% block settings %}{% endblock %}
     {% block error %}{% endblock %}
+
+    <!-- Toast notifications land here; aria-live lets screen readers announce them -->
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="false"></div>
+
+    <!-- Generic Confirmation Modal (for confirmations without a dedicated modal) -->
+    <div class="modal fade" id="confirmActionModal" tabindex="-1" aria-labelledby="confirmActionTitle" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-light">
+                    <h5 class="modal-title" id="confirmActionTitle"></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-0" id="confirmActionBody"></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-1"></i> Cancel
+                    </button>
+                    <button type="button" class="btn btn-danger" id="confirmActionBtn">
+                        <i class="fas fa-check me-1"></i> <span id="confirmActionBtnLabel">Confirm</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- ProxySQL Command Confirmation Modal -->
     <div class="modal fade" id="proxysqlCommandModal" tabindex="-1" aria-labelledby="proxysqlCommandModalLabel" aria-hidden="true">
