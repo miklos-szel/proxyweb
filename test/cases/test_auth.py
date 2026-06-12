@@ -186,6 +186,26 @@ class TestReadOnlyUser(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn("Read-only user cannot execute", resp.text)
 
+    def test_readonly_sql_with_cte_blocked(self):
+        """A WITH-prefixed statement must not pass the read-only gate.
+
+        Guards a read-only-gate bypass: _is_read_only_sql() classified any
+        single statement beginning with WITH as read-only, but a leading CTE
+        can front a mutation — `WITH x AS (SELECT 1) DELETE FROM t` is valid
+        in both SQLite (ProxySQL admin) and MySQL — and the statement was
+        then executed via execute_adhoc_query. WITH is now conservatively
+        rejected until a trailing-verb parser exists.
+        """
+        s = self._ro_session()
+        s.get(f"/{SERVER}/{DATABASE}/global_variables/")
+        resp = s.post_form(
+            f"/{SERVER}/{DATABASE}/global_variables/sql/",
+            data={"sql": "WITH x AS (SELECT 1) "
+                         "DELETE FROM global_variables WHERE 1=0"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Read-only user cannot execute", resp.text)
+
     def test_readonly_sql_comment_in_literal_smuggling_blocked(self):
         """Comment-in-string-literal must not smuggle a mutation past the gate.
 

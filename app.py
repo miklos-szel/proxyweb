@@ -255,21 +255,26 @@ def _split_sql_statements(sql):
 
 
 def _is_read_only_sql(sql):
-    """Return True only for a single read-only (SELECT/WITH) statement.
+    """Return True only for a single read-only SELECT statement.
 
     Used to gate ad-hoc SQL execution for read-only users and read-only
     servers, and to decide whether a statement is rendered as a result set.
     Comments are stripped (respecting string literals) first; the input must
-    contain exactly one non-empty statement that begins with SELECT or WITH.
+    contain exactly one non-empty statement that begins with SELECT.
     This is intentionally stricter than a bare ``SELECT ... FROM`` regex: it
     rejects ``SELECT 1; DELETE ...`` multi-statement smuggling — including the
     ``SELECT 'a/*'; DELETE; SELECT '*/b'`` comment-in-literal variant — and no
     longer requires a FROM clause.
+
+    ``WITH``-prefixed statements are deliberately rejected: a leading CTE can
+    front a mutation (``WITH x AS (SELECT 1) DELETE FROM ...`` is valid in
+    both SQLite and MySQL), so until we have a parser that finds the trailing
+    verb, WITH is conservatively treated as a potential write.
     """
     statements = _split_sql_statements(sql)
     if len(statements) != 1:
         return False
-    return re.match(r'^\s*(SELECT|WITH)\b', statements[0], re.I) is not None
+    return re.match(r'^\s*SELECT\b', statements[0], re.I) is not None
 
 
 def login_required(f):

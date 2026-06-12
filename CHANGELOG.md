@@ -9,6 +9,11 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
 ## [Unreleased]
 
 ### Security
+- The read-only SQL gate no longer classifies `WITH …` statements as
+  read-only: a leading CTE can front a mutation
+  (`WITH x AS (SELECT 1) DELETE FROM t` is valid in both SQLite and MySQL),
+  so WITH-prefixed input is conservatively rejected for read-only users and
+  read-only servers until a trailing-verb parser exists.
 - The ad-hoc SQL form (`/<server>/<db>/<table>/sql/`) now blocks non-SELECT
   statements on **read-only servers**, not just for the read-only *role*.
   Previously the editor was only hidden in the UI, so an admin could POST a
