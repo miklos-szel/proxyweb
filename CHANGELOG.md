@@ -41,6 +41,11 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
   the log.
 
 ### Fixed
+- The Quick Queries dropdown no longer sporadically grows a horizontal
+  scrollbar: `.dropdown-menu` used `overflow-x: visible`, which CSS computes
+  as `auto` when `overflow-y` is non-visible, so the 2px `translateX`
+  item-hover effect spawned a scrollbar. Now `overflow-x: hidden`; submenus
+  are unaffected because they are repositioned onto `<body>`.
 - Settings UI checkboxes (global read-only, per-server read-only override,
   `TEMPLATES_AUTO_RELOAD`) are parsed with a shared normaliser accepting the
   browser-submitted `on` (plus `true`/`1`/`yes`); previously only the literal
@@ -54,6 +59,14 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
   instead of being rejected by validation on save.
 
 ### Changed
+- The per-row **Copy SQL** button is now limited to the tables it was designed
+  for — the Disk / Memory / Runtime config tables (databases `disk` and
+  `main`). Stats, monitor and stats_history views no longer render the button
+  or an empty actions column, since their rows aren't pasteable ProxySQL
+  config.
+- **Export YAML** on the settings page downloads as a timestamped
+  `config-<yyyymmdd-hhmmss>.yml` (filename provided by the server) instead of
+  always `config.yml`.
 - `_backup_and_write_config` validates the new YAML before touching anything
   and writes the `.bak` backup via `_atomic_write` too — this also closes a
   gap where the skip-variables endpoint wrote the config without validation.
@@ -66,6 +79,16 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
   blocks; hardened connection cleanup on error paths in `mdb.py`.
 
 ### Added
+- **Dump Database** under the Misc menu (admin-only): `GET /<server>/dump/`
+  streams a data-only `mysqldump` of ProxySQL's `main` database — excluding
+  the read-only `runtime_*` tables — as a downloadable attachment named
+  `proxysql_<server>_<yyyymmdd-hhmmss>.sql`. Runs the dump via argv-list
+  subprocess with `MYSQL_PWD` in the env and a 60 s timeout; flags are kept
+  portable across MySQL and MariaDB `mysqldump` builds. Readonly users get
+  403 and don't see the menu item.
+- Integration tests for the new/changed behaviour: `test_dump.py`
+  (`TestDumpDatabaseDownload`, `TestDumpDatabaseAccessControl`),
+  `TestCopySqlScopedToConfigDatabases`, and `TestExportTimestampedFilename`.
 - Regression tests: CSRF rejection for token-less/wrong-token POSTs, the
   read-only-server SQL-form block, and HTML escaping of stored cell values.
 - Regression test `TestCheckboxOnValueSaved` for the browser-style checkbox

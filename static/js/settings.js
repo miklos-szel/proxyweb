@@ -754,7 +754,8 @@ function showSaveStatus(type, title, message) {
 /**
  * Fetches the server-side configuration as YAML and initiates a browser download.
  *
- * If the export succeeds, a file named `config.yml` is downloaded containing the YAML.
+ * If the export succeeds, a timestamped file (e.g. `config-20260612-143205.yml`,
+ * name generated server-side) is downloaded containing the YAML.
  * On failure, a UI error status is shown.
  */
 function exportConfig() {
@@ -762,15 +763,16 @@ function exportConfig() {
         .then(jsonOrThrow)
         .then(data => {
             if (data.success) {
+                const filename = data.filename || 'config.yml';
                 const blob = new Blob([data.yaml], { type: 'text/yaml' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = 'config.yml';
+                a.download = filename;
                 a.click();
                 URL.revokeObjectURL(url);
 
-                showSaveStatus('success', 'Export Complete', 'Configuration has been exported to config.yml');
+                showSaveStatus('success', 'Export Complete', 'Configuration has been exported to ' + filename);
             } else {
                 showSaveStatus('error', 'Export Failed', data.error || 'Failed to export configuration');
             }

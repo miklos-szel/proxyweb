@@ -185,6 +185,15 @@
             return database === 'main' && !tableName.startsWith('runtime_') && !isReadOnly;
         }
 
+        // Copy SQL is only meaningful for ProxySQL config tables — the ones
+        // reachable from the Disk, Memory, and Runtime menus (databases
+        // 'disk' and 'main'; runtime_* tables live in 'main'). Stats/monitor
+        // rows aren't pasteable config, so they get no copy button.
+        function copySqlEnabled() {
+            const database = '{{ session.get('database', '') }}';
+            return database === 'main' || database === 'disk';
+        }
+
         // Helper function to check if rows can be added
         function canAddRows() {
             const database = '{{ session.get('database', '') }}';
@@ -276,19 +285,24 @@
         }
 
         async function enableInlineEditing() {
+            const tableIsEditable = isTableEditable();
+
+            // Tables that are neither editable nor copy-eligible (stats,
+            // monitor, …) get no actions column and no row controls at all,
+            // so there is nothing to set up (and no schema to fetch).
+            if (!tableIsEditable && !copySqlEnabled()) return;
+
             // First, load the table schema
             await loadTableSchema();
 
             const table = document.getElementById('proxywebtable');
             if (!table) return;
 
-            const tableIsEditable = isTableEditable();
-
             // Check if table has a variable_name column
             const headerCells = table.querySelectorAll('thead th');
             const hasVariableNameColumn = Array.from(headerCells).some(th => th.textContent.trim() === 'variable_name');
 
-            // Add header cell for actions column at the beginning (always — copy button lives here too)
+            // Add header cell for actions column at the beginning (copy button lives here too)
             const thead = table.querySelector('thead tr');
             if (thead && !thead.querySelector('th.actions-header')) {
                 const actionsHeader = document.createElement('th');
@@ -402,15 +416,16 @@
 
         // Build the action-buttons markup used by both the initial row render
         // (enableInlineEditing) and the post-edit restore (restoreEditControls).
-        // Editable rows get Edit+Delete+Copy; read-only rows get Copy only.
+        // Editable rows get Edit+Delete+Copy; read-only config rows get Copy
+        // only; non-config rows (copySqlEnabled() false) get no copy button.
         function buildControlsHtml(columnNames, rowData, tableIsEditable) {
             const generatedSql = buildRowSql(columnNames, rowData, tableName);
-            const copyButtonHtml = `
+            const copyButtonHtml = copySqlEnabled() ? `
                         <button type="button" class="btn btn-icon btn-icon-secondary copy-btn" onclick="copyRowSql(this)"
                                 data-sql="${escapeHtmlAttr(generatedSql)}"
                                 data-bs-toggle="tooltip" data-bs-placement="top" title="Copy SQL" aria-label="Copy row SQL">
                             <i class="fas fa-copy"></i>
-                        </button>`;
+                        </button>` : '';
             const editDeleteHtml = tableIsEditable ? `
                         <button type="button" class="btn btn-icon edit-btn" onclick="editRow(this)"
                                 data-bs-toggle="tooltip" data-bs-placement="top" title="Edit row" aria-label="Edit row">

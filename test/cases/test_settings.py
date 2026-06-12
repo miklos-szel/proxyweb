@@ -414,5 +414,24 @@ class TestYamlValueEscaping(unittest.TestCase):
                          "adhoc title with comma+quotes did not round-trip intact")
 
 
+class TestExportTimestampedFilename(unittest.TestCase):
+    """Config export must advertise a timestamped download filename.
+
+    Bug guarded: the settings Export YAML button always saved the download
+    as a hardcoded 'config.yml'. The route now returns a 'filename' field
+    (config-<yyyymmdd-hhmmss>.yml) that the frontend uses for the download.
+    """
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+
+    def test_export_json_includes_timestamped_filename(self):
+        body = self.s.get("/settings/export/").json()
+        self.assertTrue(body.get("success"), f"export failed: {body.get('error')}")
+        self.assertRegex(body.get("filename", ""),
+                         r"^config-\d{8}-\d{6}\.yml$")
+
+
 if __name__ == "__main__":
     unittest.main()

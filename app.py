@@ -21,7 +21,8 @@ import hmac
 import logging
 import secrets
 from collections import defaultdict
-from flask import Flask, g, render_template, request, session, url_for, flash, redirect, jsonify, abort
+from datetime import datetime
+from flask import Flask, g, render_template, request, session, url_for, flash, redirect, jsonify, abort, Response
 from functools import wraps
 import re
 import errno
@@ -622,7 +623,8 @@ def settings_export():
     try:
         config_data = mdb.get_config(config)
         yaml_content = mdb.dict_to_yaml(config_data)
-        return jsonify({'success': True, 'yaml': yaml_content})
+        filename = f"config-{datetime.now().strftime('%Y%m%d-%H%M%S')}.yml"
+        return jsonify({'success': True, 'yaml': yaml_content, 'filename': filename})
     except Exception as e:
         logging.exception(f"Error exporting config: {e}")
         return jsonify({'success': False, 'error': _redacted_error()})
@@ -691,6 +693,41 @@ def get_config_diff(server):
     except Exception as e:
         logging.exception(f"Error getting config diff: {e}")
         return jsonify({'success': False, 'error': _redacted_error()})
+
+
+@app.route('/<server>/dump/', methods=['GET'])
+@login_required
+def dump_database(server):
+    """
+    Download a data-only mysqldump of the server's `main` database
+    (runtime_* tables excluded) as a timestamped .sql attachment.
+
+    Admin-only: readonly users get 403. Unknown servers get 404.
+
+    Parameters:
+        server (str): Identifier of the ProxySQL server to dump.
+
+    Returns:
+        flask.Response: The dump as an `application/sql` attachment named
+        `proxysql_<server>_<yyyymmdd-hhmmss>.sql`, or a redirect to the
+        main page with a flashed error if the dump fails.
+    """
+    if session.get('role') == 'readonly':
+        abort(403)
+    if server not in mdb.get_servers():
+        abort(404)
+    try:
+        sql_text = mdb.dump_database(g.db, server)
+    except Exception as e:
+        logging.exception(f"Error dumping database for server {server}: {e}")
+        flash(f'Database dump failed: {_redacted_error()}', 'danger')
+        return redirect(url_for('render_list_dbs'))
+    filename = f"proxysql_{server}_{datetime.now().strftime('%Y%m%d-%H%M%S')}.sql"
+    return Response(
+        sql_text,
+        mimetype='application/sql',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+    )
 
 
 @app.route('/api/update_config_skip_variables', methods=['POST'])

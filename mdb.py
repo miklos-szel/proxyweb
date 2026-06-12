@@ -1273,6 +1273,82 @@ def execute_change(db, server, sql):
         return str(e)
 
 
+def dump_database(db, server):
+    """
+    Dump the data of every non-runtime table in ProxySQL's `main` database
+    via the mysqldump CLI and return it as SQL text.
+
+    runtime_* tables are excluded by passing the surviving table names as
+    explicit positional arguments to mysqldump. The table list is taken
+    straight from `SHOW TABLES FROM main` (not the hide_tables-filtered UI
+    list) so a backup is never silently missing data.
+
+    Parameters:
+        db: Mutable container used to establish or hold a database connection.
+        server (str): Name of the server from configuration to target.
+
+    Returns:
+        str: The mysqldump output (data-only INSERT statements).
+
+    Raises:
+        ValueError: If the table list cannot be fetched or mysqldump fails.
+    """
+    try:
+        db_connect(db, server=server)
+        cur = db['cnf']['servers'][server]['cur']
+        cur.execute("SHOW TABLES FROM main")
+        tables = [row['tables'] for row in cur.fetchall()
+                  if not row['tables'].startswith('runtime_')]
+        cur.close()
+    except (mysql.connector.Error, mysql.connector.Warning) as e:
+        raise ValueError(e)
+
+    if not tables:
+        raise ValueError("no tables found to dump in database 'main'")
+
+    dsn = get_config()['servers'][server]['dsn'][0]
+    cmd = [
+        'mysqldump',
+        '-h', str(dsn['host']),
+        '-P', str(dsn['port']),
+        '-u', str(dsn['user']),
+        '--skip-comments',
+        '--skip-set-charset',
+        '--skip-tz-utc',
+        '--compact',
+        '--no-tablespaces',
+        '--no-create-info',
+        '--no-create-db',
+        '--skip-triggers',
+        # no --network-timeout: MariaDB's mysqldump (used on arm64 images)
+        # doesn't support it, and the subprocess timeout below covers hangs.
+        'main',
+    ] + tables
+    # MYSQL_PWD keeps the password off argv (and out of ps/proc).
+    env = os.environ.copy()
+    env['MYSQL_PWD'] = str(dsn['passwd'])
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            env=env,
+            timeout=60,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        logging.error("mysqldump timed out after 60s for server %s", server)
+        raise ValueError("mysqldump timed out")
+
+    if proc.returncode != 0:
+        error_msg = proc.stderr.decode('utf-8', errors='replace').strip() \
+            or f"mysqldump exited with status {proc.returncode}"
+        logging.error(f"mysqldump error: {error_msg}")
+        raise ValueError(error_msg)
+
+    return proc.stdout.decode('utf-8', errors='replace')
+
+
 def extract_default_value(column_def):
     """
     Extract the DEFAULT clause value from a SQL column definition string.

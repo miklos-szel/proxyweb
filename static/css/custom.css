@@ -102,7 +102,11 @@ body {
     margin-top: 0.25rem;
     max-height: 90vh;
     overflow-y: auto;
-    overflow-x: visible;  /* Allow submenu to overflow horizontally */
+    /* `visible` would compute to `auto` here (overflow-y is non-visible) and
+       the 2px translateX item-hover effect would then spawn a horizontal
+       scrollbar. Clipping is safe: Quick Queries submenus escape it by being
+       moved to <body> (see show_table_info.html). */
+    overflow-x: hidden;
     z-index: 1050;
     scroll-behavior: smooth;
 }
