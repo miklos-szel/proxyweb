@@ -32,6 +32,10 @@ logging.basicConfig(level=_LOG_LEVEL, format='%(asctime)s - %(levelname)s - %(me
 
 HISTORY_DIR = os.path.join(os.path.dirname(__file__), 'data', 'history')
 
+# Servers (e.g. ProxySQL 3.x admin) that rejected SET @@session.autocommit —
+# the rejection happens on every connection, so warn only once per server.
+_autocommit_warned = set()
+
 
 def _valid_history_server(server):
     """
@@ -578,7 +582,13 @@ def db_connect(db, server, buffered=False, dictionary=True):
             # socket is still up the connection is usable.
             msg = str(err).lower()
             if "unknown global variable" in msg and "@@session.autocommit" in msg:
-                logging.warning("Server %s does not support SET @@session.autocommit, skipping: %s", server, err)
+                # Expected on every connection to a ProxySQL 3.x admin —
+                # warn only once per server so the log isn't flooded.
+                if server not in _autocommit_warned:
+                    _autocommit_warned.add(server)
+                    logging.warning("Server %s does not support SET @@session.autocommit, skipping: %s", server, err)
+                else:
+                    logging.debug("Server %s does not support SET @@session.autocommit, skipping: %s", server, err)
                 if not conn.is_connected():
                     raise
             else:

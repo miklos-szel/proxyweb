@@ -302,13 +302,13 @@
             const headerCells = table.querySelectorAll('thead th');
             const hasVariableNameColumn = Array.from(headerCells).some(th => th.textContent.trim() === 'variable_name');
 
-            // Add header cell for actions column at the beginning (copy button lives here too)
+            // Add header cell for actions column at the beginning (copy button lives here too).
+            // Non-editable tables only ever show the copy button, so the
+            // column gets a narrow 'compact' variant (width set in custom.css).
             const thead = table.querySelector('thead tr');
             if (thead && !thead.querySelector('th.actions-header')) {
                 const actionsHeader = document.createElement('th');
-                actionsHeader.className = 'actions-header';
-                actionsHeader.style.width = '156px';
-                actionsHeader.style.minWidth = '156px';
+                actionsHeader.className = tableIsEditable ? 'actions-header' : 'actions-header compact';
                 actionsHeader.textContent = '';
                 thead.insertBefore(actionsHeader, thead.firstChild);
             }
@@ -366,7 +366,7 @@
                 });
 
                 const controlsCell = document.createElement('td');
-                controlsCell.className = 'edit-controls';
+                controlsCell.className = tableIsEditable ? 'edit-controls' : 'edit-controls compact';
                 controlsCell.style.whiteSpace = 'nowrap';
                 controlsCell.innerHTML = buildControlsHtml(columnNames, rowData, tableIsEditable);
                 row.insertBefore(controlsCell, row.firstChild);

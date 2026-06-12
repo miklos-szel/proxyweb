@@ -417,6 +417,15 @@ pre {
     border-right: 1px solid #000000 !important;
 }
 
+/* Non-editable tables (disk/runtime/read-only) only show the copy button,
+   so the actions column shrinks to fit a single icon button */
+.table thead th.actions-header.compact,
+.table td.edit-controls.compact {
+    width: 76px;
+    min-width: 76px;
+    max-width: 76px;
+}
+
 /* Action buttons container - always visible for sticky left column */
 .table td.edit-controls .action-buttons {
     display: inline-flex;
