@@ -278,17 +278,26 @@ def dict_to_yaml(data, indent=0, prev_key=None):
 
 
 
+def _yaml_double_quote(value):
+    """Wrap a string in YAML double quotes, escaping ``\\`` and ``"`` so the
+    result round-trips. Without escaping, a value that requires quoting and
+    also contains a quote/backslash (e.g. ``SELECT a, "b"`` or ``c:\\path``)
+    would emit invalid YAML and the whole config save would be rejected."""
+    escaped = value.replace('\\', '\\\\').replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def format_yaml_value(value):
     """
     Format a Python value into a YAML-friendly scalar string.
-    
+
     Converts common Python scalar types to a YAML-safe string representation:
     - None becomes an empty quoted string `""`.
     - booleans become `true` or `false`.
     - integers and floats are converted via `str`.
-    - strings are returned unquoted unless they contain characters that require quoting, in which case they are wrapped in double quotes.
+    - strings are returned unquoted unless they contain characters that require quoting, in which case they are wrapped in double quotes (with `\\` and `"` escaped).
     - lists and other types are stringified and wrapped in double quotes.
-    
+
     Returns:
         A string containing the YAML-friendly representation of `value`.
     """
@@ -303,14 +312,16 @@ def format_yaml_value(value):
         # '-' is dropped from this list so ordinary hostnames/values like
         # ``my-db-host`` round-trip unquoted; a *leading* dash is still quoted
         # below because it would otherwise read as a YAML sequence indicator.
+        # A double-quote/backslash forces quoting too, so the escaped form is
+        # emitted instead of a corrupt bare scalar.
         special_chars = ['[', ']', ':', '{', '}', ',', '&', '*', '?', '|',
-                         '<', '>', '=', '!', '%', '@', '`', '#']
+                         '<', '>', '=', '!', '%', '@', '`', '#', '"', '\\']
         if value.lstrip().startswith('-') or any(char in value for char in special_chars):
-            return f'"{value}"'
+            return _yaml_double_quote(value)
         return value
     if isinstance(value, list):
-        return f'"{value}"'
-    return f'"{value}"'
+        return _yaml_double_quote(str(value))
+    return _yaml_double_quote(str(value))
 
 
 def validate_yaml(yaml_content):

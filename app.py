@@ -189,9 +189,68 @@ def _redacted_error():
     return 'Internal error — see server logs for details'
 
 
-# Strip SQL comments (block, ``--`` and ``#`` line comments) before classifying
-# a statement, so a leading comment cannot hide the real verb.
-_SQL_COMMENT_RE = re.compile(r'/\*.*?\*/|--[^\n]*|#[^\n]*', re.S)
+def _split_sql_statements(sql):
+    """Split SQL into comment-stripped statements, ignoring ``;`` and comment
+    markers that fall inside string literals.
+
+    Walks the input character by character tracking quote state (``'``, ``"``,
+    `````` `````) so that a comment delimiter or semicolon inside a quoted
+    string (e.g. ``SELECT 'a/*'; DELETE ...``) is *not* mistaken for a real
+    comment or statement separator. This matters because the classification
+    gate must see the same statement boundaries the database will: a naive
+    regex strip lets ``/* */`` markers inside string literals swallow the
+    ``;`` separators and merge a smuggled mutation into one apparent SELECT.
+
+    Returns the list of non-empty statements with comments replaced by spaces.
+    """
+    statements = []
+    buf = []
+    quote = None  # active string delimiter, or None outside any string
+    i, n = 0, len(sql)
+    while i < n:
+        c = sql[i]
+        if quote is not None:
+            buf.append(c)
+            if c == '\\' and quote in ("'", '"') and i + 1 < n:
+                # backslash escape inside a MySQL string literal
+                buf.append(sql[i + 1])
+                i += 2
+                continue
+            if c == quote:
+                if i + 1 < n and sql[i + 1] == quote:
+                    # doubled delimiter ('' / "" / ``) is an escaped quote
+                    buf.append(sql[i + 1])
+                    i += 2
+                    continue
+                quote = None
+            i += 1
+            continue
+        if c in ("'", '"', '`'):
+            quote = c
+            buf.append(c)
+        elif c == '/' and i + 1 < n and sql[i + 1] == '*':
+            end = sql.find('*/', i + 2)
+            i = (end + 2) if end != -1 else n
+            buf.append(' ')
+            continue
+        elif c == '-' and i + 1 < n and sql[i + 1] == '-':
+            end = sql.find('\n', i + 2)
+            i = end if end != -1 else n
+            buf.append(' ')
+            continue
+        elif c == '#':
+            end = sql.find('\n', i + 1)
+            i = end if end != -1 else n
+            buf.append(' ')
+            continue
+        elif c == ';':
+            statements.append(''.join(buf))
+            buf = []
+        else:
+            buf.append(c)
+        i += 1
+    statements.append(''.join(buf))
+    return [s for s in statements if s.strip()]
 
 
 def _is_read_only_sql(sql):
@@ -199,13 +258,14 @@ def _is_read_only_sql(sql):
 
     Used to gate ad-hoc SQL execution for read-only users and read-only
     servers, and to decide whether a statement is rendered as a result set.
-    Comments are stripped first; the input must contain exactly one non-empty
-    statement that begins with SELECT or WITH. This is intentionally stricter
-    than a bare ``SELECT ... FROM`` regex: it rejects ``SELECT 1; DELETE ...``
-    multi-statement smuggling and no longer requires a FROM clause.
+    Comments are stripped (respecting string literals) first; the input must
+    contain exactly one non-empty statement that begins with SELECT or WITH.
+    This is intentionally stricter than a bare ``SELECT ... FROM`` regex: it
+    rejects ``SELECT 1; DELETE ...`` multi-statement smuggling — including the
+    ``SELECT 'a/*'; DELETE; SELECT '*/b'`` comment-in-literal variant — and no
+    longer requires a FROM clause.
     """
-    stripped = _SQL_COMMENT_RE.sub(' ', sql)
-    statements = [s for s in stripped.split(';') if s.strip()]
+    statements = _split_sql_statements(sql)
     if len(statements) != 1:
         return False
     return re.match(r'^\s*(SELECT|WITH)\b', statements[0], re.I) is not None

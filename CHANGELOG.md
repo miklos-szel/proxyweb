@@ -21,7 +21,11 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
   `SHOW CREATE TABLE` target via `_quote_ident()`.
 - The SELECT/non-SELECT classifier strips SQL comments and requires a single
   `SELECT`/`WITH` statement, rejecting `SELECT 1; DELETE …` multi-statement
-  smuggling (and no longer requiring a `FROM`).
+  smuggling (and no longer requiring a `FROM`). Statement splitting now tracks
+  string literals, so a comment delimiter inside a quoted string
+  (`SELECT 'a/*'; DELETE …; SELECT '*/b'`) can no longer swallow the `;`
+  separators and disguise a mutation as one SELECT — the read-only gate sees
+  the same statement boundaries the database does.
 - JSON API handlers return a redacted error to the client on unexpected
   exceptions instead of echoing `str(e)`; full detail still goes to the log.
 - The config-diff skip-variables modal escapes quotes when interpolating a
@@ -44,6 +48,10 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
   `read_only: false`. `TEMPLATES_AUTO_RELOAD` is stored as a real boolean.
 - Settings-page fetch errors now surface the server's JSON validation message
   (e.g. why a save was rejected) instead of a bare `HTTP 400`.
+- `format_yaml_value` escapes embedded `"` and `\` when it double-quotes a
+  value, so a config value that both requires quoting and contains a quote or
+  backslash (e.g. an adhoc-report SQL `SELECT a, "b"`) produces valid YAML
+  instead of being rejected by validation on save.
 
 ### Changed
 - `_backup_and_write_config` validates the new YAML before touching anything
@@ -61,7 +69,14 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
 - Regression tests: CSRF rejection for token-less/wrong-token POSTs, the
   read-only-server SQL-form block, and HTML escaping of stored cell values.
 - Regression test `TestCheckboxOnValueSaved` for the browser-style checkbox
-  `on` value round-trip through `/settings/ui_save/`.
+  `on` value round-trip through `/settings/ui_save/`, asserting the global and
+  per-server `read_only` booleans land in their respective config blocks.
+- Regression test `TestReadOnlyUser.test_readonly_sql_comment_in_literal_smuggling_blocked`
+  for the comment-in-string-literal read-only-gate bypass.
+- Regression test `TestYamlValueEscaping` for round-tripping config values that
+  contain commas plus double quotes.
+- `PyYAML` added to the test-runner requirements (the new settings tests parse
+  exported YAML).
 
 ## [2.1.5] — 2026-05-26
 

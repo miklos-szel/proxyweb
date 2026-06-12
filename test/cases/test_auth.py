@@ -186,6 +186,30 @@ class TestReadOnlyUser(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn("Read-only user cannot execute", resp.text)
 
+    def test_readonly_sql_comment_in_literal_smuggling_blocked(self):
+        """Comment-in-string-literal must not smuggle a mutation past the gate.
+
+        Guards a read-only-gate bypass: _is_read_only_sql() stripped SQL
+        comments without tracking string literals, so a non-greedy `/* ... */`
+        match across a payload like
+            SELECT 'a/*'; DELETE FROM t; SELECT '*/b'
+        swallowed the `;` separators and made the whole thing look like one
+        SELECT, while render_change executes the original (multi-statement)
+        SQL. The classifier now splits statements respecting quotes, so this
+        input is correctly seen as multiple statements and rejected.
+        """
+        s = self._ro_session()
+        s.get(f"/{SERVER}/{DATABASE}/global_variables/")
+        payload = ("SELECT 'a/*'; "
+                   "DELETE FROM global_variables; "
+                   "SELECT '*/b'")
+        resp = s.post_form(
+            f"/{SERVER}/{DATABASE}/global_variables/sql/",
+            data={"sql": payload},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Read-only user cannot execute", resp.text)
+
 
 class TestDefaultCredentialsHint(unittest.TestCase):
     """Login page shows a credential hint when default passwords are in use."""
