@@ -266,5 +266,70 @@ class TestSettingsUIServer(unittest.TestCase):
         else:
             self.fail(f"Unexpected response status: {resp.status_code}")
 
+class TestCheckboxOnValueSaved(unittest.TestCase):
+    """
+    Regression test for checkbox handling in form_data_to_yaml().
+
+    Bug guarded: the UI checkboxes (global read_only, per-server read_only
+    override, flask TEMPLATES_AUTO_RELOAD) have no value attribute, so the
+    browser submits "on" when checked — but the backend only recognised the
+    string "true", so checking "Read-Only Mode" in the settings UI silently
+    saved read_only: false. Fixed by normalising checkbox values ('on',
+    'true', '1', 'yes', case-insensitive) via mdb._form_checkbox().
+    """
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        resp = self.s.get("/settings/export/")
+        body = resp.json()
+        self.assertTrue(body.get("success"), f"export failed: {body.get('error')}")
+        self._original_yaml = body["yaml"]
+
+    def tearDown(self):
+        if hasattr(self, "_original_yaml"):
+            payload = {"settings": self._original_yaml, "_csrf_token": self.s.csrf_token}
+            self.s.session.post(f"{BASE_URL}/settings/save/", data=payload, timeout=10)
+
+    def test_browser_style_checkbox_on_persists_true(self):
+        """Posting the UI form with checkbox value 'on' must save booleans as true."""
+        form_data = {
+            "global_default_server": SERVER,
+            "global_read_only": "on",          # browser-style checked checkbox
+            "server_count": "1",
+            "server_0_name": SERVER,
+            "server_0_dsn_count": "1",
+            "server_0_dsn_0_host": "proxysql2",
+            "server_0_dsn_0_user": "radmin",
+            "server_0_dsn_0_passwd": "radmin",
+            "server_0_dsn_0_port": "6032",
+            "server_0_dsn_0_db": "main",
+            "server_0_read_only_override": "on",
+            "auth_admin_user": USERNAME,
+            "auth_admin_password": PASSWORD,
+            "flask_SECRET_KEY": "12345678901234567890",
+            "flask_TEMPLATES_AUTO_RELOAD": "on",
+        }
+        resp = self.s.session.post(
+            f"{BASE_URL}/settings/ui_save/",
+            data={**form_data, "_csrf_token": self.s.csrf_token},
+            timeout=10,
+        )
+        self.assertEqual(resp.status_code, 200,
+                         f"ui_save returned {resp.status_code}; body: {resp.text!r}")
+        self.assertTrue(resp.json().get("success"),
+                        f"ui_save failed: {resp.json().get('error')}")
+
+        export = self.s.get("/settings/export/").json()
+        self.assertTrue(export.get("success"), f"export failed: {export.get('error')}")
+        yaml_text = export["yaml"]
+        self.assertIn("read_only: true", yaml_text,
+                      "checked read_only checkbox ('on') was not saved as true")
+        self.assertNotIn("read_only: false", yaml_text,
+                         "a checked read_only checkbox ('on') was saved as false")
+        self.assertIn("TEMPLATES_AUTO_RELOAD: true", yaml_text,
+                      "checked TEMPLATES_AUTO_RELOAD ('on') was not saved as boolean true")
+
+
 if __name__ == "__main__":
     unittest.main()

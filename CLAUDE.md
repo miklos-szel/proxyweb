@@ -199,3 +199,4 @@ Rules:
 | Browser-style UPDATE coverage extended to the other PK declaration styles ProxySQL uses: block-form composite (`mysql_servers`) and inline autoinc (`scheduler`) | `TestCrossPkStyleEditing` |
 | `execute_change` used `subprocess.Popen(cmd, shell=True)` with the password on argv and fragile metachar escaping; rewrote as argv-list `subprocess.run(shell=False)` with `MYSQL_PWD` env var, SQL via stdin, and a 30s timeout | `TestShellMetacharPayloadRoundTrip` |
 | DataTables `search[value]` flowed into a LIKE clause unescaped → searching for `%` or `_` matched every row; fixed by escaping via `ESCAPE '!'` | `TestWildcardSearchEscape` |
+| settings UI checkboxes submit `"on"` but backend only matched `"true"` → checking Read-Only Mode (or TEMPLATES_AUTO_RELOAD / per-server override) silently saved `false`; fixed via `mdb._form_checkbox()` normalization | `TestCheckboxOnValueSaved` |

@@ -15,12 +15,23 @@ const formState = {
 };
 
 /**
- * Reject non-2xx responses so fetch .catch() handlers report HTTP errors
- * instead of choking on the (often HTML) error body during .json().
+ * Reject non-2xx responses so fetch .catch() handlers report HTTP errors.
+ * If the error body is JSON with an `error` field (e.g. server-side
+ * validation failures), include it in the message; otherwise (HTML error
+ * pages from abort()) fall back to the bare status.
  */
-function jsonOrThrow(response) {
+async function jsonOrThrow(response) {
     if (!response.ok) {
-        throw new Error('HTTP ' + response.status);
+        let detail = '';
+        try {
+            const body = await response.json();
+            if (body && body.error) {
+                detail = ': ' + body.error;
+            }
+        } catch (e) {
+            // non-JSON error body — report status only
+        }
+        throw new Error('HTTP ' + response.status + detail);
     }
     return response.json();
 }

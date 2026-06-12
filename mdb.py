@@ -373,6 +373,15 @@ def validate_config_shape(cfg):
                 raise ValueError(f"Missing required key: '{section}.{key}'")
 
 
+def _form_checkbox(value):
+    """
+    Normalize an HTML checkbox value to bool. Browsers submit 'on' for checked
+    boxes without a value attribute; accept the other common truthy spellings
+    too. Unchecked boxes are not submitted at all, so None maps to False.
+    """
+    return str(value).strip().lower() in ('on', 'true', '1', 'yes')
+
+
 def _form_global_section(form_data):
     """Build the 'global' config section from form fields."""
     section = {}
@@ -380,7 +389,7 @@ def _form_global_section(form_data):
         section['default_server'] = form_data['global_default_server']
 
     # Handle read_only - checkbox unchecked means false (checkbox not submitted when unchecked)
-    section['read_only'] = form_data.get('global_read_only', '').lower() == 'true'
+    section['read_only'] = _form_checkbox(form_data.get('global_read_only', ''))
 
     if 'global_sqlite_db_path' in form_data:
         section['sqlite_db_path'] = form_data['global_sqlite_db_path']
@@ -422,7 +431,7 @@ def _form_servers_section(form_data):
         # Optional read_only override
         server_read_only = form_data.get(f'server_{i}_read_only_override')
         if server_read_only:
-            server_config['read_only'] = server_read_only.lower() == 'true'
+            server_config['read_only'] = _form_checkbox(server_read_only)
 
         server_hide_tables = _form_hide_tables(form_data, f'server_{i}')
         if server_hide_tables:
@@ -497,6 +506,12 @@ def form_data_to_yaml(form_data):
                                             'TEMPLATES_AUTO_RELOAD')),
         'misc': misc,
     }
+
+    # TEMPLATES_AUTO_RELOAD is a checkbox — store it as a real boolean instead
+    # of the raw submitted string ('on').
+    if 'TEMPLATES_AUTO_RELOAD' in config['flask']:
+        config['flask']['TEMPLATES_AUTO_RELOAD'] = \
+            _form_checkbox(config['flask']['TEMPLATES_AUTO_RELOAD'])
 
     # Remove empty sections, but always keep 'servers' and 'misc' even when
     # empty so that validate_config_shape() and callers never see a missing key.
@@ -719,7 +734,10 @@ def _query_config_layer(server, query):
         finally:
             query_db['cnf']['servers'][server]['conn'].close()
     except Exception as e:
-        return {'row_count': 0, 'data': [], 'column_order': [], 'error': str(e)}
+        # Log the real error server-side; the dict is sent to the browser via
+        # get_config_diff, so keep connector/SQL details out of it.
+        logging.warning(f"config diff layer query failed on {server}: {e}")
+        return {'row_count': 0, 'data': [], 'column_order': [], 'error': 'layer query failed'}
 
 
 def _calculate_table_differences(disk_data, memory_data, runtime_data):

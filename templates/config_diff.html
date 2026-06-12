@@ -1258,6 +1258,12 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// escapeHtml() does not escape quotes, so it is unsafe inside quoted HTML
+// attributes; use this variant when interpolating into attribute values.
+function escapeAttr(text) {
+    return escapeHtml(text).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function displayError(message) {
     const container = document.getElementById('diff-content');
     container.innerHTML = `
@@ -1273,7 +1279,7 @@ function showSkipVariablesModal() {
     const listHtml = skipVars.map((v, idx) => `
         <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; background: #f8f9fa; border-radius: 4px; margin-bottom: 0.5rem;">
             <code style="flex: 1; font-size: 0.9rem;">${escapeHtml(v)}</code>
-            <button onclick="removeSkipVariable(${idx})" aria-label="Remove ${escapeHtml(v)} from skip list" style="padding: 0.25rem 0.5rem; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer;">
+            <button onclick="removeSkipVariable(${idx})" aria-label="Remove ${escapeAttr(v)} from skip list" style="padding: 0.25rem 0.5rem; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer;">
                 <i class="fas fa-times"></i>
             </button>
         </div>

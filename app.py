@@ -121,19 +121,44 @@ def _validate_config(yaml_str):
 
 
 def _backup_and_write_config(yaml_content):
-    """Back up the current config file to <config>.bak, then write the new content atomically."""
-    with open(config, "r") as src, open(config + ".bak", "w") as dest:
-        dest.write(src.read())
+    """Validate the new content, back up the current config file to
+    <config>.bak, then write the new content — both writes atomic."""
+    _validate_config(yaml_content)
+    with open(config, "r") as src:
+        current_content = src.read()
+    _atomic_write(config + ".bak", current_content)
     _atomic_write(config, yaml_content)
 
 
+# Dict keys matching these substrings (case-insensitive) get their values
+# redacted in API debug logs — row payloads can carry ProxySQL credentials
+# (e.g. mysql_users.password).
+SENSITIVE_KEYS = ('password', 'passwd', 'token', 'secret', 'auth')
+
+
+def _redact_sensitive(value):
+    """Recursively redact dict values whose key looks credential-like."""
+    if isinstance(value, dict):
+        return {k: ('<REDACTED>' if any(s in str(k).lower() for s in SENSITIVE_KEYS)
+                    else _redact_sensitive(v))
+                for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact_sensitive(v) for v in value]
+    return value
+
+
 def _log_api_request(endpoint, params):
-    """Emit the standard debug block for an /api/* mutation request."""
+    """Emit the standard debug block for an /api/* mutation request.
+
+    Single redaction point for all /api/* mutation logs: row data and PK
+    values are dicts keyed by column name, so credential-like columns are
+    masked before anything reaches the log.
+    """
     logging.debug("=" * 80)
     logging.debug(f"API REQUEST: {endpoint}")
     logging.debug("=" * 80)
     for key, value in params.items():
-        logging.debug(f"{key}: {value}")
+        logging.debug(f"{key}: {_redact_sensitive(value)}")
     logging.debug("=" * 80)
 
 

@@ -24,8 +24,31 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
   smuggling (and no longer requiring a `FROM`).
 - JSON API handlers return a redacted error to the client on unexpected
   exceptions instead of echoing `str(e)`; full detail still goes to the log.
+- The config-diff skip-variables modal escapes quotes when interpolating a
+  variable name into the remove button's `aria-label` (new `escapeAttr()`
+  helper) — `escapeHtml()` alone allowed attribute injection via `"` in a
+  skip-variable name.
+- `_query_config_layer` no longer sends raw exception text (which can embed
+  connector/DSN details) to the browser via the config-diff API; it logs the
+  real error and returns a generic `layer query failed` marker.
+- `/api/*` mutation debug logs redact credential-like values (`password`,
+  `passwd`, `token`, `secret`, `auth`) in row payloads and PK values, so
+  editing rows in tables like `mysql_users` no longer writes passwords to
+  the log.
+
+### Fixed
+- Settings UI checkboxes (global read-only, per-server read-only override,
+  `TEMPLATES_AUTO_RELOAD`) are parsed with a shared normaliser accepting the
+  browser-submitted `on` (plus `true`/`1`/`yes`); previously only the literal
+  string `true` counted, so checking **Read-Only Mode** silently saved
+  `read_only: false`. `TEMPLATES_AUTO_RELOAD` is stored as a real boolean.
+- Settings-page fetch errors now surface the server's JSON validation message
+  (e.g. why a save was rejected) instead of a bare `HTTP 400`.
 
 ### Changed
+- `_backup_and_write_config` validates the new YAML before touching anything
+  and writes the `.bak` backup via `_atomic_write` too — this also closes a
+  gap where the skip-variables endpoint wrote the config without validation.
 - Failed inline row saves now revert the edited cells in place instead of
   silently reloading the whole page after a delay.
 - `format_yaml_value` no longer wraps values containing a hyphen in quotes
@@ -37,6 +60,8 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
 ### Added
 - Regression tests: CSRF rejection for token-less/wrong-token POSTs, the
   read-only-server SQL-form block, and HTML escaping of stored cell values.
+- Regression test `TestCheckboxOnValueSaved` for the browser-style checkbox
+  `on` value round-trip through `/settings/ui_save/`.
 
 ## [2.1.5] — 2026-05-26
 
