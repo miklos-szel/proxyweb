@@ -186,6 +186,50 @@ class TestReadOnlyUser(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn("Read-only user cannot execute", resp.text)
 
+    def test_readonly_sql_with_cte_blocked(self):
+        """A WITH-prefixed statement must not pass the read-only gate.
+
+        Guards a read-only-gate bypass: _is_read_only_sql() classified any
+        single statement beginning with WITH as read-only, but a leading CTE
+        can front a mutation — `WITH x AS (SELECT 1) DELETE FROM t` is valid
+        in both SQLite (ProxySQL admin) and MySQL — and the statement was
+        then executed via execute_adhoc_query. WITH is now conservatively
+        rejected until a trailing-verb parser exists.
+        """
+        s = self._ro_session()
+        s.get(f"/{SERVER}/{DATABASE}/global_variables/")
+        resp = s.post_form(
+            f"/{SERVER}/{DATABASE}/global_variables/sql/",
+            data={"sql": "WITH x AS (SELECT 1) "
+                         "DELETE FROM global_variables WHERE 1=0"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Read-only user cannot execute", resp.text)
+
+    def test_readonly_sql_comment_in_literal_smuggling_blocked(self):
+        """Comment-in-string-literal must not smuggle a mutation past the gate.
+
+        Guards a read-only-gate bypass: _is_read_only_sql() stripped SQL
+        comments without tracking string literals, so a non-greedy `/* ... */`
+        match across a payload like
+            SELECT 'a/*'; DELETE FROM t; SELECT '*/b'
+        swallowed the `;` separators and made the whole thing look like one
+        SELECT, while render_change executes the original (multi-statement)
+        SQL. The classifier now splits statements respecting quotes, so this
+        input is correctly seen as multiple statements and rejected.
+        """
+        s = self._ro_session()
+        s.get(f"/{SERVER}/{DATABASE}/global_variables/")
+        payload = ("SELECT 'a/*'; "
+                   "DELETE FROM global_variables; "
+                   "SELECT '*/b'")
+        resp = s.post_form(
+            f"/{SERVER}/{DATABASE}/global_variables/sql/",
+            data={"sql": payload},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Read-only user cannot execute", resp.text)
+
 
 class TestDefaultCredentialsHint(unittest.TestCase):
     """Login page shows a credential hint when default passwords are in use."""
@@ -269,6 +313,56 @@ class TestNoServersRedirect(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 503)
         self.assertIn("No servers configured", resp.text)
+
+
+class TestCsrfProtection(unittest.TestCase):
+    """POST requests without a valid CSRF token are rejected with 403.
+
+    Guards the csrf_protect before_request handler: every POST except /login
+    must carry the per-session token in the _csrf_token form field or the
+    X-CSRF-Token header. Without this test the protection could be removed or
+    broken and the rest of the suite would stay green (it always sends a token).
+    """
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        # Prime session state / token (not sent in the negative cases below).
+        self.s.get(f"/{SERVER}/{DATABASE}/global_variables/")
+
+    def test_json_post_without_token_is_403(self):
+        """A JSON API POST with no X-CSRF-Token header is rejected."""
+        resp = self.s.session.post(
+            f"{BASE_URL}/api/insert_row",
+            json={"server": SERVER, "database": DATABASE,
+                  "table": "mysql_servers", "columnNames": ["hostname"],
+                  "data": {"hostname": "csrf-test"}},
+            headers={"Content-Type": "application/json"},
+            timeout=10,
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_form_post_without_token_is_403(self):
+        """An HTML form POST with no _csrf_token field is rejected."""
+        resp = self.s.session.post(
+            f"{BASE_URL}/{SERVER}/{DATABASE}/global_variables/sql/",
+            data={"sql": "SELECT 1 FROM global_variables LIMIT 1"},
+            timeout=10,
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_post_with_wrong_token_is_403(self):
+        """A POST carrying a non-matching token is rejected."""
+        resp = self.s.session.post(
+            f"{BASE_URL}/api/insert_row",
+            json={"server": SERVER, "database": DATABASE,
+                  "table": "mysql_servers", "columnNames": ["hostname"],
+                  "data": {"hostname": "csrf-test"}},
+            headers={"Content-Type": "application/json",
+                     "X-CSRF-Token": "deadbeef-not-the-real-token"},
+            timeout=10,
+        )
+        self.assertEqual(resp.status_code, 403)
 
 
 class TestDefaultServerFallback(unittest.TestCase):

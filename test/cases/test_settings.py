@@ -3,6 +3,8 @@
 
 import unittest
 
+import yaml
+
 from testlib import (
     ProxyWebSession, BASE_URL, USERNAME, PASSWORD,
     SERVER, PG_SERVER, DATABASE,
@@ -265,6 +267,171 @@ class TestSettingsUIServer(unittest.TestCase):
             pass
         else:
             self.fail(f"Unexpected response status: {resp.status_code}")
+
+class TestCheckboxOnValueSaved(unittest.TestCase):
+    """
+    Regression test for checkbox handling in form_data_to_yaml().
+
+    Bug guarded: the UI checkboxes (global read_only, per-server read_only
+    override, flask TEMPLATES_AUTO_RELOAD) have no value attribute, so the
+    browser submits "on" when checked — but the backend only recognised the
+    string "true", so checking "Read-Only Mode" in the settings UI silently
+    saved read_only: false. Fixed by normalising checkbox values ('on',
+    'true', '1', 'yes', case-insensitive) via mdb._form_checkbox().
+    """
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        resp = self.s.get("/settings/export/")
+        body = resp.json()
+        self.assertTrue(body.get("success"), f"export failed: {body.get('error')}")
+        self._original_yaml = body["yaml"]
+
+    def tearDown(self):
+        if hasattr(self, "_original_yaml"):
+            payload = {"settings": self._original_yaml, "_csrf_token": self.s.csrf_token}
+            self.s.session.post(f"{BASE_URL}/settings/save/", data=payload, timeout=10)
+
+    def test_browser_style_checkbox_on_persists_true(self):
+        """Posting the UI form with checkbox value 'on' must save booleans as true."""
+        form_data = {
+            "global_default_server": SERVER,
+            "global_read_only": "on",          # browser-style checked checkbox
+            "server_count": "1",
+            "server_0_name": SERVER,
+            "server_0_dsn_count": "1",
+            "server_0_dsn_0_host": "proxysql2",
+            "server_0_dsn_0_user": "radmin",
+            "server_0_dsn_0_passwd": "radmin",
+            "server_0_dsn_0_port": "6032",
+            "server_0_dsn_0_db": "main",
+            "server_0_read_only_override": "on",
+            "auth_admin_user": USERNAME,
+            "auth_admin_password": PASSWORD,
+            "flask_SECRET_KEY": "12345678901234567890",
+            "flask_TEMPLATES_AUTO_RELOAD": "on",
+        }
+        resp = self.s.session.post(
+            f"{BASE_URL}/settings/ui_save/",
+            data={**form_data, "_csrf_token": self.s.csrf_token},
+            timeout=10,
+        )
+        self.assertEqual(resp.status_code, 200,
+                         f"ui_save returned {resp.status_code}; body: {resp.text!r}")
+        self.assertTrue(resp.json().get("success"),
+                        f"ui_save failed: {resp.json().get('error')}")
+
+        export = self.s.get("/settings/export/").json()
+        self.assertTrue(export.get("success"), f"export failed: {export.get('error')}")
+        yaml_text = export["yaml"]
+        self.assertIn("read_only: true", yaml_text,
+                      "checked read_only checkbox ('on') was not saved as true")
+        self.assertNotIn("read_only: false", yaml_text,
+                         "a checked read_only checkbox ('on') was saved as false")
+        self.assertIn("TEMPLATES_AUTO_RELOAD: true", yaml_text,
+                      "checked TEMPLATES_AUTO_RELOAD ('on') was not saved as boolean true")
+
+        # Parse the YAML and assert the booleans landed in the right places as
+        # real booleans — the global checkbox and the per-server override are
+        # distinct keys produced by different code paths (_form_global_section
+        # vs _form_servers_section), so verify each independently.
+        cfg = yaml.safe_load(yaml_text)
+        self.assertIs(cfg["global"]["read_only"], True,
+                      "global read_only ('on') did not persist as boolean true")
+        self.assertIs(cfg["servers"][SERVER]["read_only"], True,
+                      "per-server read_only override ('on') did not persist as "
+                      "boolean true under servers[SERVER]")
+        self.assertIs(cfg["flask"]["TEMPLATES_AUTO_RELOAD"], True,
+                      "TEMPLATES_AUTO_RELOAD ('on') did not persist as boolean true")
+
+
+class TestYamlValueEscaping(unittest.TestCase):
+    """
+    Regression test for format_yaml_value() quote/backslash escaping.
+
+    Bug guarded: when a config value needed quoting (because it contained a
+    YAML-significant character such as a comma or colon) format_yaml_value
+    emitted f'"{value}"' WITHOUT escaping embedded double-quotes or
+    backslashes. A value like an adhoc-report SQL `SELECT a, "b"` produced
+    `"SELECT a, "b""`, which is invalid YAML, so validate_yaml rejected the
+    whole save and the user could not persist a legitimate value. Fixed by
+    escaping `\\` and `"` when double-quoting.
+    """
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        resp = self.s.get("/settings/export/")
+        body = resp.json()
+        self.assertTrue(body.get("success"), f"export failed: {body.get('error')}")
+        self._original_yaml = body["yaml"]
+
+    def tearDown(self):
+        if hasattr(self, "_original_yaml"):
+            payload = {"settings": self._original_yaml, "_csrf_token": self.s.csrf_token}
+            self.s.session.post(f"{BASE_URL}/settings/save/", data=payload, timeout=10)
+
+    def test_value_with_comma_and_quotes_round_trips(self):
+        """An adhoc-report SQL containing both a comma and double quotes must
+        save (not 500/400 on invalid YAML) and round-trip byte-for-byte."""
+        tricky_sql = 'SELECT id, "weird name" FROM global_variables WHERE x IN (1, 2)'
+        form_data = {
+            "global_default_server": SERVER,
+            "server_count": "1",
+            "server_0_name": SERVER,
+            "server_0_dsn_count": "1",
+            "server_0_dsn_0_host": "proxysql2",
+            "server_0_dsn_0_user": "radmin",
+            "server_0_dsn_0_passwd": "radmin",
+            "server_0_dsn_0_port": "6032",
+            "server_0_dsn_0_db": "main",
+            "auth_admin_user": USERNAME,
+            "auth_admin_password": PASSWORD,
+            "flask_SECRET_KEY": "12345678901234567890",
+            "misc_adhoc_report_count": "1",
+            "misc_adhoc_report_0_title": "Tricky, \"quoted\" report",
+            "misc_adhoc_report_0_info": "info, with comma",
+            "misc_adhoc_report_0_sql": tricky_sql,
+        }
+        resp = self.s.session.post(
+            f"{BASE_URL}/settings/ui_save/",
+            data={**form_data, "_csrf_token": self.s.csrf_token},
+            timeout=10,
+        )
+        self.assertEqual(resp.status_code, 200,
+                         f"ui_save returned {resp.status_code}; body: {resp.text!r}")
+        self.assertTrue(resp.json().get("success"),
+                        f"ui_save rejected a value with comma+quotes: {resp.json().get('error')}")
+
+        export = self.s.get("/settings/export/").json()
+        self.assertTrue(export.get("success"), f"export failed: {export.get('error')}")
+        cfg = yaml.safe_load(export["yaml"])
+        report = cfg["misc"]["adhoc_report"][0]
+        self.assertEqual(report["sql"], tricky_sql,
+                         "adhoc SQL with comma+quotes did not round-trip intact")
+        self.assertEqual(report["title"], 'Tricky, "quoted" report',
+                         "adhoc title with comma+quotes did not round-trip intact")
+
+
+class TestExportTimestampedFilename(unittest.TestCase):
+    """Config export must advertise a timestamped download filename.
+
+    Bug guarded: the settings Export YAML button always saved the download
+    as a hardcoded 'config.yml'. The route now returns a 'filename' field
+    (config-<yyyymmdd-hhmmss>.yml) that the frontend uses for the download.
+    """
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+
+    def test_export_json_includes_timestamped_filename(self):
+        body = self.s.get("/settings/export/").json()
+        self.assertTrue(body.get("success"), f"export failed: {body.get('error')}")
+        self.assertRegex(body.get("filename", ""),
+                         r"^config-\d{8}-\d{6}\.yml$")
+
 
 if __name__ == "__main__":
     unittest.main()

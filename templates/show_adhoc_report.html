@@ -120,25 +120,6 @@
         color: var(--dark-color);
     }
 
-    .btn-collapse {
-        background: var(--primary-color);
-        border: 2px solid var(--primary-color);
-        color: white;
-        padding: 0.75rem 1.75rem;
-        border-radius: var(--border-radius);
-        font-weight: 600;
-        font-size: 0.95rem;
-        transition: all 0.3s ease;
-    }
-
-    .btn-collapse:hover {
-        background: var(--primary-dark);
-        border-color: var(--primary-dark);
-        color: white;
-        transform: translateY(-1px);
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-
     @media (max-width: 768px) {
         .report-title {
             font-size: 1.4rem;
@@ -163,16 +144,16 @@
 {% for result in adhoc_results %}
     <div class="report-card fade-in">
         <div class="report-header">
-            <h3 class="report-title">
+            <h2 class="report-title">
                 <i class="fas fa-chart-line"></i>
                 {{ result['title'] }}
-            </h3>
+            </h2>
 
             <div class="report-actions">
-                <button class="btn btn-collapse" type="button" data-bs-toggle="collapse" data-bs-target="#info{{ loop.index }}" aria-expanded="false">
+                <button class="btn btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#info{{ loop.index }}" aria-expanded="false">
                     <i class="fas fa-info-circle me-2"></i>Show Info
                 </button>
-                <button class="btn btn-collapse" type="button" data-bs-toggle="collapse" data-bs-target="#sql{{ loop.index }}" aria-expanded="false">
+                <button class="btn btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#sql{{ loop.index }}" aria-expanded="false">
                     <i class="fas fa-code me-2"></i>Show SQL
                 </button>
             </div>
@@ -213,7 +194,7 @@
 
         <div class="report-table">
             <div class="table-responsive">
-                <table id="adhoc_results" class="table table-hover table-striped mb-0">
+                <table class="adhoc-results table table-hover table-striped mb-0" aria-label="{{ result['title'] }}">
                     <thead>
                         <tr>
                             {% for column_name in result['column_names'] %}

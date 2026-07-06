@@ -209,6 +209,78 @@ class TestCopyRowButtonAvailableToReadonlyUser(unittest.TestCase):
         self.assertIn("copyRowSql(this)", resp.text)
 
 
+class TestCopySqlScopedToConfigDatabases(unittest.TestCase):
+    """Copy SQL must only be enabled for disk/memory/runtime tables.
+
+    Bug guarded: every table view — including stats, monitor and
+    stats_history — rendered a per-row Copy SQL button, even though those
+    rows are not pasteable ProxySQL config. The fix gates the button (and
+    the whole actions column) on a ``copySqlEnabled()`` JS helper that only
+    allows databases 'main' (Memory + Runtime menus) and 'disk'.
+
+    The buttons themselves are built client-side, so these assertions stop
+    at 'the gate JS is shipped with the correct database literal' — the
+    same convention as the other classes in this file.
+    """
+
+    # Matches the rendered copySqlEnabled() helper and captures the database
+    # literal Jinja substituted into it for the current page.
+    GATE_FN = re.compile(
+        r"function\s+copySqlEnabled\s*\(\)\s*\{\s*"
+        r"const database = '([^']*)';\s*"
+        r"return database === 'main' \|\| database === 'disk';"
+    )
+    # enableInlineEditing must bail out before adding the actions column
+    # when the table is neither editable nor copy-eligible.
+    SKIP_GUARD = "if (!tableIsEditable && !copySqlEnabled()) return;"
+    # buildControlsHtml must make the copy button conditional on the gate.
+    COPY_TERNARY = "copySqlEnabled() ?"
+
+    CONFIG_PAGES = [
+        (DATABASE, "mysql_servers"),
+        (DATABASE, "runtime_mysql_servers"),
+        ("disk",   "mysql_servers"),
+    ]
+    NON_CONFIG_PAGES = [
+        ("stats",   "stats_mysql_query_digest"),
+        ("monitor", "mysql_server_connect_log"),
+    ]
+
+    def setUp(self):
+        self.pw = ProxyWebSession()
+        self.pw.login(USERNAME, PASSWORD)
+
+    def _gate_database(self, html, where):
+        """Return the database literal rendered into copySqlEnabled()."""
+        self.assertIn(self.SKIP_GUARD, html,
+                      f"{where}: actions-column skip guard missing")
+        self.assertIn(self.COPY_TERNARY, html,
+                      f"{where}: copy button not conditional on copySqlEnabled()")
+        m = self.GATE_FN.search(html)
+        self.assertIsNotNone(m, f"{where}: copySqlEnabled() gate JS missing")
+        return m.group(1)
+
+    def test_config_pages_gate_open(self):
+        """disk/memory/runtime pages render a database the gate allows."""
+        for database, table in self.CONFIG_PAGES:
+            with self.subTest(database=database, table=table):
+                resp = self.pw.get(f"/{SERVER}/{database}/{table}/")
+                self.assertEqual(resp.status_code, 200)
+                rendered = self._gate_database(resp.text, f"{database}/{table}")
+                self.assertEqual(rendered, database)
+                self.assertIn(rendered, ("main", "disk"))
+
+    def test_non_config_pages_gate_closed(self):
+        """stats/monitor pages render a database the gate rejects."""
+        for database, table in self.NON_CONFIG_PAGES:
+            with self.subTest(database=database, table=table):
+                resp = self.pw.get(f"/{SERVER}/{database}/{table}/")
+                self.assertEqual(resp.status_code, 200)
+                rendered = self._gate_database(resp.text, f"{database}/{table}")
+                self.assertEqual(rendered, database)
+                self.assertNotIn(rendered, ("main", "disk"))
+
+
 if __name__ == "__main__":
     import os, sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

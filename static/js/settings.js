@@ -3,12 +3,38 @@
  * Handles form management, dynamic server configuration, and UI interactions
  */
 
-let configData = {};
-let serverCount = 0;
-let nextServerIndex = 0;  // monotonically increasing; never decremented
-let nextDsnIndex = {};    // per serverIndex; never decremented
-let nextMiscIndex = {};   // per misc type; never decremented
-let miscCount = {}; // Dynamic misc section counters
+// All mutable page state in one place
+const formState = {
+    configData: {},
+    serverCount: 0,
+    nextServerIndex: 0,  // monotonically increasing; never decremented
+    nextDsnIndex: {},    // per serverIndex; never decremented
+    nextMiscIndex: {},   // per misc type; never decremented
+    miscCount: {},       // dynamic misc section counters
+    dirty: false,        // true once the user edits anything not yet saved
+};
+
+/**
+ * Reject non-2xx responses so fetch .catch() handlers report HTTP errors.
+ * If the error body is JSON with an `error` field (e.g. server-side
+ * validation failures), include it in the message; otherwise (HTML error
+ * pages from abort()) fall back to the bare status.
+ */
+async function jsonOrThrow(response) {
+    if (!response.ok) {
+        let detail = '';
+        try {
+            const body = await response.json();
+            if (body && body.error) {
+                detail = ': ' + body.error;
+            }
+        } catch (e) {
+            // non-JSON error body — report status only
+        }
+        throw new Error('HTTP ' + response.status + detail);
+    }
+    return response.json();
+}
 
 /**
  * Initialize the settings page
@@ -16,7 +42,35 @@ let miscCount = {}; // Dynamic misc section counters
 document.addEventListener('DOMContentLoaded', function() {
     loadConfig();
     setupFormHandlers();
+    setupDirtyTracking();
 });
+
+/**
+ * Warn before leaving the page with unsaved edits. The flag is set by user
+ * input on either editor and cleared on save, reset, and import.
+ */
+function setupDirtyTracking() {
+    ['settings-form', 'settings-raw'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('input', () => { formState.dirty = true; });
+            el.addEventListener('change', () => { formState.dirty = true; });
+        }
+    });
+
+    // Submitting the raw YAML form is a save — don't block the navigation
+    const rawForm = document.querySelector('#raw-yaml form');
+    if (rawForm) {
+        rawForm.addEventListener('submit', () => { formState.dirty = false; });
+    }
+
+    window.addEventListener('beforeunload', function(e) {
+        if (formState.dirty) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
+}
 
 /**
  * Fetches the current settings from the server and applies them to the UI.
@@ -26,10 +80,10 @@ document.addEventListener('DOMContentLoaded', function() {
  */
 function loadConfig() {
     fetch('/settings/load_ui/')
-        .then(response => response.json())
+        .then(jsonOrThrow)
         .then(data => {
             if (data.success) {
-                configData = data.config;
+                formState.configData = data.config;
                 populateForm(data.config);
             }
         })
@@ -80,9 +134,9 @@ function populateForm(config) {
     // Servers section
     const serversContainer = document.getElementById('servers_container');
     if (serversContainer) serversContainer.innerHTML = '';
-    serverCount = 0;
-    nextServerIndex = 0;
-    nextDsnIndex = {};
+    formState.serverCount = 0;
+    formState.nextServerIndex = 0;
+    formState.nextDsnIndex = {};
     const serverCountInput = document.getElementById('server_count');
     if (serverCountInput) serverCountInput.value = 0;
     if (config.servers) {
@@ -160,8 +214,8 @@ function populateForm(config) {
         Object.keys(misc).forEach(miscType => {
             if (Array.isArray(misc[miscType])) {
                 // Reset counters for this misc type
-                miscCount[miscType] = 0;
-                nextMiscIndex[miscType] = 0;
+                formState.miscCount[miscType] = 0;
+                formState.nextMiscIndex[miscType] = 0;
 
                 // Add each item
                 misc[miscType].forEach(item => {
@@ -239,7 +293,7 @@ function switchMode(mode) {
         btnUiEditor.classList.remove('active');
         // Refresh the textarea with the current saved config
         fetch('/settings/export/')
-            .then(r => r.json())
+            .then(jsonOrThrow)
             .then(data => {
                 if (data.success) {
                     document.getElementById('settings-raw').value = data.yaml;
@@ -272,8 +326,8 @@ function toggleSection(element) {
  */
 function addServer(serverName = '', serverData = null) {
     const container = document.getElementById('servers_container');
-    const serverIndex = nextServerIndex++;
-    serverCount++;
+    const serverIndex = formState.nextServerIndex++;
+    formState.serverCount++;
 
     const serverCard = document.createElement('div');
     serverCard.className = 'server-card';
@@ -298,7 +352,7 @@ function addServer(serverName = '', serverData = null) {
         <div class="form-group">
             <label for="server_${serverIndex}_name">Server Name</label>
             <input type="text" id="server_${serverIndex}_name" name="server_${serverIndex}_name"
-                   class="form-control-ui" placeholder="proxysql" value="${serverName || ''}" />
+                   class="form-control" placeholder="proxysql" value="${serverName || ''}" />
         </div>
 
         <div class="form-group">
@@ -338,7 +392,7 @@ function addServer(serverName = '', serverData = null) {
         serverCountInput.value = '0';
         document.getElementById('settings-form').appendChild(serverCountInput);
     }
-    serverCountInput.value = nextServerIndex;
+    serverCountInput.value = formState.nextServerIndex;
 
     // Add first DSN by default
     addDSN(serverIndex);
@@ -375,7 +429,7 @@ function addServer(serverName = '', serverData = null) {
  * Remove the DOM card for a server and update the UI server count.
  *
  * If a server element with the provided id exists, it is removed from the DOM
- * and the global `serverCount` is decremented; no action is taken if the
+ * and the global `formState.serverCount` is decremented; no action is taken if the
  * element is not found.
  *
  * @param {string} serverId - The DOM id of the server card to remove.
@@ -384,8 +438,8 @@ function removeServer(serverId) {
     const serverCard = document.getElementById(serverId);
     if (serverCard) {
         serverCard.remove();
-        serverCount--;
-        // nextServerIndex is not decremented; server_count input keeps the
+        formState.serverCount--;
+        // formState.nextServerIndex is not decremented; server_count input keeps the
         // highest-ever-assigned index + 1 so the backend's range() covers all
         // remaining entries even when they are non-sequential
     }
@@ -421,9 +475,9 @@ function expandServer(serverId) {
  */
 function addDSN(serverIndex, dsnData = null, dsnIndex = null) {
     const container = document.getElementById(`server_${serverIndex}_dsn_container`);
-    if (!(serverIndex in nextDsnIndex)) nextDsnIndex[serverIndex] = 0;
-    const index = dsnIndex !== null ? dsnIndex : nextDsnIndex[serverIndex];
-    nextDsnIndex[serverIndex] = Math.max(nextDsnIndex[serverIndex], index + 1);
+    if (!(serverIndex in formState.nextDsnIndex)) formState.nextDsnIndex[serverIndex] = 0;
+    const index = dsnIndex !== null ? dsnIndex : formState.nextDsnIndex[serverIndex];
+    formState.nextDsnIndex[serverIndex] = Math.max(formState.nextDsnIndex[serverIndex], index + 1);
 
     const dsnCard = document.createElement('div');
     dsnCard.className = 'dsn-card';
@@ -435,14 +489,14 @@ function addDSN(serverIndex, dsnData = null, dsnIndex = null) {
                 <div class="form-group">
                     <label for="server_${serverIndex}_dsn_${index}_host">Host</label>
                     <input type="text" id="server_${serverIndex}_dsn_${index}_host" name="server_${serverIndex}_dsn_${index}_host"
-                           class="form-control-ui" placeholder="host.docker.internal" />
+                           class="form-control" placeholder="host.docker.internal" />
                 </div>
             </div>
             <div class="col-md-6">
                 <div class="form-group">
                     <label for="server_${serverIndex}_dsn_${index}_port">Port</label>
                     <input type="text" id="server_${serverIndex}_dsn_${index}_port" name="server_${serverIndex}_dsn_${index}_port"
-                           class="form-control-ui" placeholder="16032" />
+                           class="form-control" placeholder="16032" />
                 </div>
             </div>
         </div>
@@ -452,14 +506,14 @@ function addDSN(serverIndex, dsnData = null, dsnIndex = null) {
                 <div class="form-group">
                     <label for="server_${serverIndex}_dsn_${index}_user">User</label>
                     <input type="text" id="server_${serverIndex}_dsn_${index}_user" name="server_${serverIndex}_dsn_${index}_user"
-                           class="form-control-ui" placeholder="radmin" />
+                           class="form-control" placeholder="radmin" />
                 </div>
             </div>
             <div class="col-md-6">
                 <div class="form-group">
                     <label for="server_${serverIndex}_dsn_${index}_passwd">Password</label>
                     <input type="password" id="server_${serverIndex}_dsn_${index}_passwd" name="server_${serverIndex}_dsn_${index}_passwd"
-                           class="form-control-ui" placeholder="********" />
+                           class="form-control" placeholder="********" />
                 </div>
             </div>
         </div>
@@ -467,7 +521,7 @@ function addDSN(serverIndex, dsnData = null, dsnIndex = null) {
         <div class="form-group">
             <label for="server_${serverIndex}_dsn_${index}_db">Database</label>
             <input type="text" id="server_${serverIndex}_dsn_${index}_db" name="server_${serverIndex}_dsn_${index}_db"
-                   class="form-control-ui" placeholder="main" />
+                   class="form-control" placeholder="main" />
         </div>
     `;
 
@@ -509,7 +563,7 @@ function updateDSNCount(serverIndex) {
         document.getElementById('settings-form').appendChild(countInput);
     }
     // Use the monotonic counter so the backend's range() covers non-sequential indices
-    countInput.value = nextDsnIndex[serverIndex] || 0;
+    countInput.value = formState.nextDsnIndex[serverIndex] || 0;
 }
 
 /**
@@ -532,9 +586,9 @@ function addHideTable(section, value = '') {
     const item = document.createElement('div');
     item.className = 'array-item';
     item.innerHTML = `
-        <input type="text" name="${section}_hide_tables_${index}" class="form-control-ui"
+        <input type="text" name="${section}_hide_tables_${index}" class="form-control"
                placeholder="table_name" value="${value}" style="padding-right: 40px;" />
-        <button type="button" class="array-item-remove" onclick="this.parentElement.remove()">
+        <button type="button" class="array-item-remove" onclick="this.parentElement.remove()" aria-label="Remove table pattern">
             <i class="fas fa-times"></i>
         </button>
     `;
@@ -560,11 +614,11 @@ function addMiscCommand(type, data = null) {
     }
 
     // Initialize counters for this type if they don't exist
-    if (!miscCount[type]) miscCount[type] = 0;
-    if (!nextMiscIndex[type]) nextMiscIndex[type] = 0;
+    if (!formState.miscCount[type]) formState.miscCount[type] = 0;
+    if (!formState.nextMiscIndex[type]) formState.nextMiscIndex[type] = 0;
 
-    const index = nextMiscIndex[type]++;
-    miscCount[type]++;
+    const index = formState.nextMiscIndex[type]++;
+    formState.miscCount[type]++;
 
     // Create hidden counter if it doesn't exist
     let counter = document.getElementById(`misc_${type}_count`);
@@ -576,7 +630,7 @@ function addMiscCommand(type, data = null) {
         counter.value = '0';
         document.getElementById('settings-form').appendChild(counter);
     }
-    counter.value = nextMiscIndex[type];
+    counter.value = formState.nextMiscIndex[type];
 
     const item = document.createElement('div');
     item.className = 'array-item';
@@ -584,22 +638,22 @@ function addMiscCommand(type, data = null) {
         <div class="form-group">
             <label for="misc_${type}_${index}_title">Title</label>
             <input type="text" id="misc_${type}_${index}_title" name="misc_${type}_${index}_title"
-                   class="form-control-ui" placeholder="Command Title" />
+                   class="form-control" placeholder="Command Title" />
         </div>
 
         <div class="form-group">
             <label for="misc_${type}_${index}_info">Info</label>
             <textarea id="misc_${type}_${index}_info" name="misc_${type}_${index}_info"
-                      class="form-control-ui" placeholder="Description (use \\n for new lines)" rows="2"></textarea>
+                      class="form-control" placeholder="Description (use \\n for new lines)" rows="2"></textarea>
         </div>
 
         <div class="form-group">
             <label for="misc_${type}_${index}_sql">SQL Command</label>
             <textarea id="misc_${type}_${index}_sql" name="misc_${type}_${index}_sql"
-                      class="form-control-ui" placeholder="SQL command or query" rows="3"></textarea>
+                      class="form-control" placeholder="SQL command or query" rows="3"></textarea>
         </div>
 
-        <button type="button" class="array-item-remove" onclick="removeMiscCommand(this, '${type}')">
+        <button type="button" class="array-item-remove" onclick="removeMiscCommand(this, '${type}')" aria-label="Remove item">
             <i class="fas fa-times"></i>
         </button>
     `;
@@ -619,7 +673,7 @@ function addMiscCommand(type, data = null) {
  *
  * Removes the misc item that contains the given remove button from the DOM
  * and decrements the visible item count for the specified misc `type`.
- * Note: `nextMiscIndex[type]` is intentionally not decremented; the hidden
+ * Note: `formState.nextMiscIndex[type]` is intentionally not decremented; the hidden
  * counter preserves the highest-ever-assigned index + 1 so the backend's
  * range() covers any non-sequential remaining entries.
  *
@@ -628,8 +682,8 @@ function addMiscCommand(type, data = null) {
  */
 function removeMiscCommand(button, type) {
     button.parentElement.remove();
-    miscCount[type]--;
-    // nextMiscIndex[type] is not decremented; the hidden counter keeps the
+    formState.miscCount[type]--;
+    // formState.nextMiscIndex[type] is not decremented; the hidden counter keeps the
     // highest-ever-assigned index + 1 so the backend's range() covers all
     // remaining entries even when they are non-sequential
 }
@@ -656,20 +710,21 @@ function setupFormHandlers() {
 function saveSettings() {
     const form = document.getElementById('settings-form');
     const formData = new FormData(form);
+    const submitBtn = form.querySelector('button[type="submit"]');
 
-    // Show loading state
-    showSaveStatus('info', 'Saving...', 'Please wait while we save your settings');
+    setButtonLoading(submitBtn, true);
 
     fetch('/settings/ui_save/', {
         method: 'POST',
         headers: {
-            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || {}).content || '',
+            'X-CSRF-Token': getCsrfToken(),
         },
         body: formData
     })
-    .then(response => response.json())
+    .then(jsonOrThrow)
     .then(data => {
         if (data.success) {
+            formState.dirty = false;
             showSaveStatus('success', 'Success!', 'Your settings have been saved successfully');
         } else {
             showSaveStatus('error', 'Error', data.error || 'Failed to save settings');
@@ -677,72 +732,47 @@ function saveSettings() {
     })
     .catch(error => {
         showSaveStatus('error', 'Error', 'Failed to save settings: ' + error.message);
+    })
+    .finally(() => {
+        setButtonLoading(submitBtn, false);
     });
 }
 
 /**
- * Display a save status banner with an appropriate icon, title, and message.
- *
- * Updates the visible status area to reflect `type` (`success`, `error`, or other for info),
- * sets the icon and color, and places `title` and `message` text into the banner.
- * For `success` and `error` types the banner is automatically hidden after 5 seconds;
- * `info` type remains visible until hidden by other UI actions.
+ * Show a save status message. Thin wrapper around the shared toast helper
+ * in base.html (kept under its old name so all call sites stay unchanged).
  *
  * @param {string} type - One of `'success'`, `'error'`, or any other value interpreted as `'info'`.
- * @param {string} title - Short title text shown in the status banner.
- * @param {string} message - Detailed message text shown in the status banner.
+ * @param {string} title - Short title text.
+ * @param {string} message - Detailed message text.
  */
 function showSaveStatus(type, title, message) {
-    const statusDiv = document.getElementById('saveStatus');
-    const icon = document.getElementById('saveStatusIcon');
-    const titleEl = document.getElementById('saveStatusTitle');
-    const msgEl = document.getElementById('saveStatusMessage');
-
-    // Set icon based on type
-    if (type === 'success') {
-        icon.className = 'fas fa-check-circle';
-        icon.style.color = 'var(--success-color)';
-    } else if (type === 'error') {
-        icon.className = 'fas fa-exclamation-circle';
-        icon.style.color = 'var(--danger-color)';
-    } else {
-        icon.className = 'fas fa-spinner fa-spin';
-        icon.style.color = 'var(--info-color)';
-    }
-
-    titleEl.textContent = title;
-    msgEl.textContent = message;
-
-    statusDiv.className = `save-status show ${type}`;
-
-    // Auto-hide after 5 seconds for success/error messages
-    if (type !== 'info') {
-        setTimeout(() => {
-            statusDiv.classList.remove('show');
-        }, 5000);
-    }
+    const toastType = type === 'success' ? 'success' : type === 'error' ? 'error' : 'info';
+    showNotification(title + ' — ' + message, toastType);
 }
 
 /**
  * Fetches the server-side configuration as YAML and initiates a browser download.
  *
- * If the export succeeds, a file named `config.yml` is downloaded containing the YAML.
+ * If the export succeeds, a timestamped file (e.g. `config-20260612-143205.yml`,
+ * name generated server-side) is downloaded containing the YAML.
  * On failure, a UI error status is shown.
  */
 function exportConfig() {
     fetch('/settings/export/')
-        .then(response => response.json())
+        .then(jsonOrThrow)
         .then(data => {
             if (data.success) {
+                const filename = data.filename || 'config.yml';
                 const blob = new Blob([data.yaml], { type: 'text/yaml' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = 'config.yml';
+                a.download = filename;
                 a.click();
                 URL.revokeObjectURL(url);
 
-                showSaveStatus('success', 'Export Complete', 'Configuration has been exported to config.yml');
+                showSaveStatus('success', 'Export Complete', 'Configuration has been exported to ' + filename);
             } else {
                 showSaveStatus('error', 'Export Failed', data.error || 'Failed to export configuration');
             }
@@ -793,18 +823,20 @@ function importConfig() {
     const formData = new FormData();
     formData.append('yaml_content', yamlContent);
 
-    showSaveStatus('info', 'Importing...', 'Please wait while we import your configuration');
+    const importBtn = document.getElementById('importConfirmBtn');
+    setButtonLoading(importBtn, true);
 
     fetch('/settings/import/', {
         method: 'POST',
         headers: {
-            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || {}).content || '',
+            'X-CSRF-Token': getCsrfToken(),
         },
         body: formData
     })
-    .then(response => response.json())
+    .then(jsonOrThrow)
         .then(data => {
             if (data.success) {
+                formState.dirty = false;
                 showSaveStatus('success', 'Import Complete', 'Configuration has been imported successfully');
                 closeImportModal();
 
@@ -814,21 +846,30 @@ function importConfig() {
                 }, 1500);
             } else {
                 showSaveStatus('error', 'Import Failed', data.error || 'Failed to import configuration');
+                setButtonLoading(importBtn, false);
             }
         })
         .catch(error => {
             showSaveStatus('error', 'Import Failed', 'Failed to import configuration: ' + error.message);
+            setButtonLoading(importBtn, false);
         });
 }
 
 /**
  * Restore the form to the originally loaded configuration after user confirmation.
  *
- * Prompts the user to confirm; if confirmed, reloads the original configuration into the form and displays a success status message.
+ * Asks for confirmation via the shared modal; if confirmed, reloads the original
+ * configuration into the form and displays a success status message.
  */
 function resetForm() {
-    if (confirm('Are you sure you want to reset all changes? This will reload the original configuration.')) {
-        loadConfig();
-        showSaveStatus('success', 'Reset Complete', 'Form has been reset to original values');
-    }
+    confirmAction(
+        'Reset Settings Form',
+        'Are you sure you want to reset all changes? This will reload the original configuration.',
+        'Reset',
+        function() {
+            loadConfig();
+            formState.dirty = false;
+            showSaveStatus('success', 'Reset Complete', 'Form has been reset to original values');
+        }
+    );
 }

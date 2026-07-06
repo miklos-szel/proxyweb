@@ -69,8 +69,8 @@
     }
 
     .form-floating > .form-control:focus {
-        border-color: #007bff;
-        box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 3px rgba(71, 85, 105, 0.1);
     }
 
     .btn-login {
@@ -80,15 +80,15 @@
         font-weight: 600;
         font-size: 0.95rem;
         margin-top: 0.5rem;
-        background: #007bff;
+        background: var(--primary-color);
         border: none;
-        box-shadow: 0 2px 4px rgba(0, 123, 255, 0.2);
+        box-shadow: 0 2px 4px rgba(71, 85, 105, 0.2);
         transition: all 0.2s ease;
     }
 
     .btn-login:hover {
-        background: #0056b3;
-        box-shadow: 0 4px 8px rgba(0, 123, 255, 0.3);
+        background: var(--primary-dark);
+        box-shadow: 0 4px 8px rgba(71, 85, 105, 0.3);
         transform: translateY(-1px);
     }
 
@@ -103,11 +103,11 @@
     }
 
     .alert-info-custom {
-        background-color: #e8f4fd;
-        border: 1px solid #bee5eb;
-        border-left: 4px solid #17a2b8;
+        background-color: #e8f0f4;
+        border: 1px solid #b0cbd9;
+        border-left: 4px solid var(--info-color);
         border-radius: 8px;
-        color: #0c5460;
+        color: #4a6673;
         padding: 1rem 1.25rem;
         margin-bottom: 1.5rem;
         font-size: 0.9rem;
@@ -119,7 +119,7 @@
     .alert-info-custom i.fa-info-circle {
         font-size: 1.25rem;
         margin-top: 0.15rem;
-        color: #17a2b8;
+        color: var(--info-color);
     }
 
     .alert-info-custom p {
@@ -159,7 +159,7 @@
     }
 </style>
 
-<div class="container login-container">
+<main class="container login-container">
     <div class="login-card fade-in">
         {% if message %}
         <div class="alert alert-danger" role="alert">
@@ -215,5 +215,5 @@
             Secure authentication required to access ProxySQL management
         </div>
     </div>
-</div>
+</main>
 {% endblock %}

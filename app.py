@@ -21,7 +21,8 @@ import hmac
 import logging
 import secrets
 from collections import defaultdict
-from flask import Flask, g, render_template, request, session, url_for, flash, redirect, jsonify, abort
+from datetime import datetime
+from flask import Flask, g, render_template, request, session, url_for, flash, redirect, jsonify, abort, Response
 from functools import wraps
 import re
 import errno
@@ -114,6 +115,54 @@ def _atomic_write(path, content):
         raise
 
 
+def _validate_config(yaml_str):
+    """Validate YAML syntax and required config shape; raises ValueError on failure."""
+    mdb.validate_yaml(yaml_str)
+    mdb.validate_config_shape(yaml.safe_load(yaml_str))
+
+
+def _backup_and_write_config(yaml_content):
+    """Validate the new content, back up the current config file to
+    <config>.bak, then write the new content — both writes atomic."""
+    _validate_config(yaml_content)
+    with open(config, "r") as src:
+        current_content = src.read()
+    _atomic_write(config + ".bak", current_content)
+    _atomic_write(config, yaml_content)
+
+
+# Dict keys matching these substrings (case-insensitive) get their values
+# redacted in API debug logs — row payloads can carry ProxySQL credentials
+# (e.g. mysql_users.password).
+SENSITIVE_KEYS = ('password', 'passwd', 'token', 'secret', 'auth')
+
+
+def _redact_sensitive(value):
+    """Recursively redact dict values whose key looks credential-like."""
+    if isinstance(value, dict):
+        return {k: ('<REDACTED>' if any(s in str(k).lower() for s in SENSITIVE_KEYS)
+                    else _redact_sensitive(v))
+                for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact_sensitive(v) for v in value]
+    return value
+
+
+def _log_api_request(endpoint, params):
+    """Emit the standard debug block for an /api/* mutation request.
+
+    Single redaction point for all /api/* mutation logs: row data and PK
+    values are dicts keyed by column name, so credential-like columns are
+    masked before anything reaches the log.
+    """
+    logging.debug("=" * 80)
+    logging.debug(f"API REQUEST: {endpoint}")
+    logging.debug("=" * 80)
+    for key, value in params.items():
+        logging.debug(f"{key}: {_redact_sensitive(value)}")
+    logging.debug("=" * 80)
+
+
 # Per-request connection/cursor container. gunicorn runs with --threads, so
 # sharing a module-level dict here would let concurrent requests swap each
 # other's cursors and connections mid-call. ``g.db`` is populated in
@@ -129,6 +178,104 @@ if not isinstance(app.config.get('SECRET_KEY'), (str, bytes)):
 
 
 mdb.logging.debug(flask_custom_config)
+
+def _redacted_error():
+    """Generic client-facing error string; full detail goes to the server log.
+
+    mysql.connector, subprocess and requests can embed connection strings or
+    credentials in their messages, so unexpected-exception handlers must not
+    echo ``str(e)`` back to the browser. They log the traceback and return
+    this instead.
+    """
+    return 'Internal error — see server logs for details'
+
+
+def _split_sql_statements(sql):
+    """Split SQL into comment-stripped statements, ignoring ``;`` and comment
+    markers that fall inside string literals.
+
+    Walks the input character by character tracking quote state (``'``, ``"``,
+    `````` `````) so that a comment delimiter or semicolon inside a quoted
+    string (e.g. ``SELECT 'a/*'; DELETE ...``) is *not* mistaken for a real
+    comment or statement separator. This matters because the classification
+    gate must see the same statement boundaries the database will: a naive
+    regex strip lets ``/* */`` markers inside string literals swallow the
+    ``;`` separators and merge a smuggled mutation into one apparent SELECT.
+
+    Returns the list of non-empty statements with comments replaced by spaces.
+    """
+    statements = []
+    buf = []
+    quote = None  # active string delimiter, or None outside any string
+    i, n = 0, len(sql)
+    while i < n:
+        c = sql[i]
+        if quote is not None:
+            buf.append(c)
+            if c == '\\' and quote in ("'", '"') and i + 1 < n:
+                # backslash escape inside a MySQL string literal
+                buf.append(sql[i + 1])
+                i += 2
+                continue
+            if c == quote:
+                if i + 1 < n and sql[i + 1] == quote:
+                    # doubled delimiter ('' / "" / ``) is an escaped quote
+                    buf.append(sql[i + 1])
+                    i += 2
+                    continue
+                quote = None
+            i += 1
+            continue
+        if c in ("'", '"', '`'):
+            quote = c
+            buf.append(c)
+        elif c == '/' and i + 1 < n and sql[i + 1] == '*':
+            end = sql.find('*/', i + 2)
+            i = (end + 2) if end != -1 else n
+            buf.append(' ')
+            continue
+        elif c == '-' and i + 1 < n and sql[i + 1] == '-':
+            end = sql.find('\n', i + 2)
+            i = end if end != -1 else n
+            buf.append(' ')
+            continue
+        elif c == '#':
+            end = sql.find('\n', i + 1)
+            i = end if end != -1 else n
+            buf.append(' ')
+            continue
+        elif c == ';':
+            statements.append(''.join(buf))
+            buf = []
+        else:
+            buf.append(c)
+        i += 1
+    statements.append(''.join(buf))
+    return [s for s in statements if s.strip()]
+
+
+def _is_read_only_sql(sql):
+    """Return True only for a single read-only SELECT statement.
+
+    Used to gate ad-hoc SQL execution for read-only users and read-only
+    servers, and to decide whether a statement is rendered as a result set.
+    Comments are stripped (respecting string literals) first; the input must
+    contain exactly one non-empty statement that begins with SELECT.
+    This is intentionally stricter than a bare ``SELECT ... FROM`` regex: it
+    rejects ``SELECT 1; DELETE ...`` multi-statement smuggling — including the
+    ``SELECT 'a/*'; DELETE; SELECT '*/b'`` comment-in-literal variant — and no
+    longer requires a FROM clause.
+
+    ``WITH``-prefixed statements are deliberately rejected: a leading CTE can
+    front a mutation (``WITH x AS (SELECT 1) DELETE FROM ...`` is valid in
+    both SQLite and MySQL), so until we have a parser that finds the trailing
+    verb, WITH is conservatively treated as a potential write.
+    """
+    statements = _split_sql_statements(sql)
+    if len(statements) != 1:
+        return False
+    return re.match(r'^\s*SELECT\b', statements[0], re.I) is not None
+
 
 def login_required(f):
     """
@@ -171,14 +318,14 @@ def close_db(exc):
         if cur is not None:
             try:
                 cur.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug(f"close_db: ignoring cursor close error: {e}")
         conn = server_info.get('conn')
         if conn is not None:
             try:
                 conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug(f"close_db: ignoring connection close error: {e}")
 
 
 @app.before_request
@@ -342,11 +489,18 @@ def render_change(server, database, table):
     session['sql'] = request.form["sql"]
 
     mdb.logging.debug(session['history'])
-    select = re.search(r'^\s*SELECT\b.*\bFROM\b', session['sql'], re.I | re.S)
-    if not select and session.get('role') == 'readonly':
-        error = "Read-only user cannot execute non-SELECT statements"
-        content = mdb.get_table_metadata(g.db, server, database, table)
-        return render_template("show_table_info.html", content=content, error=error, message="")
+    select = _is_read_only_sql(session['sql'])
+    # Non-SELECT statements are mutations: block them for read-only users and
+    # read-only servers. The SQL editor is hidden in the UI for these cases,
+    # but the form endpoint must enforce it independently of the template.
+    if not select:
+        if session.get('role') == 'readonly':
+            error = "Read-only user cannot execute non-SELECT statements"
+        elif mdb.get_read_only(server):
+            error = "Server is read-only; only SELECT statements are allowed"
+        if error:
+            content = mdb.get_table_metadata(g.db, server, database, table)
+            return render_template("show_table_info.html", content=content, error=error, message="")
     if select:
         content = mdb.execute_adhoc_query(g.db, server, session['sql'])
         content['order'] = 'true'
@@ -358,9 +512,10 @@ def render_change(server, database, table):
         error = ret
     else:
         message = "Success"
-    if session['sql'].replace("\r\n","") not in session['history'] and not error:
-        session['history'].append(session['sql'].replace("\r\n",""))
-        mdb.append_query_history(server, session['sql'].replace("\r\n",""), session.get('role', 'admin'))
+    normalized_sql = session['sql'].replace("\r\n", "\n").strip()
+    if normalized_sql not in session['history'] and not error:
+        session['history'].append(normalized_sql)
+        mdb.append_query_history(server, normalized_sql, session.get('role', 'admin'))
 
     return render_template("show_table_info.html", content=content, error=error, message=message)
 
@@ -395,14 +550,8 @@ def render_settings(action):
             config_file_content = f.read()
     if action == 'save':
         raw = request.form["settings"]
-        mdb.validate_yaml(raw)
-        mdb.validate_config_shape(yaml.safe_load(raw))
-
-        # back it up first
-        with open(config, "r") as src, open(config + ".bak", "w") as dest:
-            dest.write(src.read())
-
-        _atomic_write(config, raw)
+        _validate_config(raw)
+        _backup_and_write_config(raw)
         message = "success"
     return render_template("settings.html", config_file_content=config_file_content, message=message)
 
@@ -429,21 +578,17 @@ def settings_ui_save():
 
         # Validate before touching the existing config
         try:
-            mdb.validate_yaml(yaml_config)
-            mdb.validate_config_shape(yaml.safe_load(yaml_config))
+            _validate_config(yaml_config)
         except Exception as ve:
             logging.error(f"settings_ui_save validation failed: {ve}")
             return jsonify({'success': False, 'error': str(ve)}), 400
 
-        # Back up current config, then write
-        with open(config, "r") as src, open(config + ".bak", "w") as dest:
-            dest.write(src.read())
-        _atomic_write(config, yaml_config)
+        _backup_and_write_config(yaml_config)
 
         return jsonify({'success': True, 'message': 'Settings saved successfully'})
     except Exception as e:
         logging.exception(f"Error saving settings from UI: {e}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 @app.route('/settings/load_ui/', methods=['GET'])
@@ -464,7 +609,7 @@ def settings_load_ui():
         return jsonify({'success': True, 'config': config_data})
     except Exception as e:
         logging.exception(f"Error loading config for UI: {e}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 @app.route('/settings/export/', methods=['GET'])
@@ -483,10 +628,11 @@ def settings_export():
     try:
         config_data = mdb.get_config(config)
         yaml_content = mdb.dict_to_yaml(config_data)
-        return jsonify({'success': True, 'yaml': yaml_content})
+        filename = f"config-{datetime.now().strftime('%Y%m%d-%H%M%S')}.yml"
+        return jsonify({'success': True, 'yaml': yaml_content, 'filename': filename})
     except Exception as e:
         logging.exception(f"Error exporting config: {e}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 @app.route('/settings/import/', methods=['POST'])
@@ -508,20 +654,13 @@ def settings_import():
         yaml_content = request.form.get('yaml_content', '')
 
         # Validate YAML syntax and required shape before touching the existing config
-        mdb.validate_yaml(yaml_content)
-        mdb.validate_config_shape(yaml.safe_load(yaml_content))
-
-        # Back up current config
-        with open(config, "r") as src, open(config + ".bak", "w") as dest:
-            dest.write(src.read())
-
-        # Write new config
-        _atomic_write(config, yaml_content)
+        _validate_config(yaml_content)
+        _backup_and_write_config(yaml_content)
 
         return jsonify({'success': True, 'message': 'Configuration imported successfully'})
     except Exception as e:
         logging.exception(f"Error importing config: {e}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 @app.route('/<server>/config_diff/', methods=['GET', 'POST'])
@@ -558,7 +697,42 @@ def get_config_diff(server):
         return jsonify({'success': True, 'diff': diff_data})
     except Exception as e:
         logging.exception(f"Error getting config diff: {e}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
+
+
+@app.route('/<server>/dump/', methods=['GET'])
+@login_required
+def dump_database(server):
+    """
+    Download a data-only mysqldump of the server's `main` database
+    (runtime_* tables excluded) as a timestamped .sql attachment.
+
+    Admin-only: readonly users get 403. Unknown servers get 404.
+
+    Parameters:
+        server (str): Identifier of the ProxySQL server to dump.
+
+    Returns:
+        flask.Response: The dump as an `application/sql` attachment named
+        `proxysql_<server>_<yyyymmdd-hhmmss>.sql`, or a redirect to the
+        main page with a flashed error if the dump fails.
+    """
+    if session.get('role') == 'readonly':
+        abort(403)
+    if server not in mdb.get_servers():
+        abort(404)
+    try:
+        sql_text = mdb.dump_database(g.db, server)
+    except Exception as e:
+        logging.exception(f"Error dumping database for server {server}: {e}")
+        flash(f'Database dump failed: {_redacted_error()}', 'danger')
+        return redirect(url_for('render_list_dbs'))
+    filename = f"proxysql_{server}_{datetime.now().strftime('%Y%m%d-%H%M%S')}.sql"
+    return Response(
+        sql_text,
+        mimetype='application/sql',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+    )
 
 
 @app.route('/api/update_config_skip_variables', methods=['POST'])
@@ -591,16 +765,13 @@ def update_config_skip_variables():
             config_data['global'] = {}
         config_data['global']['config_diff_skip_variable'] = skip_variables
 
-        # Back up current config, then write
-        with open(config, "r") as src, open(config + ".bak", "w") as dest:
-            dest.write(src.read())
-        _atomic_write(config, mdb.dict_to_yaml(config_data))
+        _backup_and_write_config(mdb.dict_to_yaml(config_data))
 
         logging.info(f"Updated config_diff_skip_variable: {skip_variables}")
         return jsonify({'success': True})
     except Exception as e:
         logging.exception(f"Error updating config skip variables: {e}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 # API Routes for Inline Editing
@@ -644,23 +815,17 @@ def api_update_row():
         if mdb.get_read_only(server) or table.startswith('runtime_') or session.get('role') == 'readonly':
             return jsonify({'success': False, 'error': 'table is read-only'}), 403
 
-        logging.debug("=" * 80)
-        logging.debug("API REQUEST: /api/update_row")
-        logging.debug("=" * 80)
-        logging.debug(f"Server: {server}")
-        logging.debug(f"Database: {database}")
-        logging.debug(f"Table: {table}")
-        logging.debug(f"PK Values: {pk_values}")
-        logging.debug(f"Column Names: {column_names}")
-        logging.debug(f"Row Data: {row_data}")
-        logging.debug("=" * 80)
+        _log_api_request('/api/update_row', {
+            'Server': server, 'Database': database, 'Table': table,
+            'PK Values': pk_values, 'Column Names': column_names, 'Row Data': row_data,
+        })
 
         result = mdb.update_row(g.db, server, database, table, pk_values, column_names, row_data)
         logging.debug(f"Update result: {result}")
         return jsonify(result)
     except Exception as e:
         logging.exception(f"API error in update_row: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 @app.route('/api/delete_row', methods=['POST'])
@@ -696,21 +861,17 @@ def api_delete_row():
         if mdb.get_read_only(server) or table.startswith('runtime_') or session.get('role') == 'readonly':
             return jsonify({'success': False, 'error': 'table is read-only'}), 403
 
-        logging.debug("=" * 80)
-        logging.debug("API REQUEST: /api/delete_row")
-        logging.debug("=" * 80)
-        logging.debug(f"Server: {server}")
-        logging.debug(f"Database: {database}")
-        logging.debug(f"Table: {table}")
-        logging.debug(f"PK Values: {pk_values}")
-        logging.debug("=" * 80)
+        _log_api_request('/api/delete_row', {
+            'Server': server, 'Database': database, 'Table': table,
+            'PK Values': pk_values,
+        })
 
         result = mdb.delete_row(g.db, server, database, table, pk_values)
         logging.debug(f"Delete result: {result}")
         return jsonify(result)
     except Exception as e:
         logging.exception(f"API error in delete_row: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 @app.route('/api/insert_row', methods=['POST'])
@@ -741,22 +902,17 @@ def api_insert_row():
         if mdb.get_read_only(server) or table.startswith('runtime_') or session.get('role') == 'readonly':
             return jsonify({'success': False, 'error': 'table is read-only'}), 403
 
-        logging.debug("=" * 80)
-        logging.debug("API REQUEST: /api/insert_row")
-        logging.debug("=" * 80)
-        logging.debug(f"Server: {server}")
-        logging.debug(f"Database: {database}")
-        logging.debug(f"Table: {table}")
-        logging.debug(f"Column Names: {column_names}")
-        logging.debug(f"Row Data: {row_data}")
-        logging.debug("=" * 80)
+        _log_api_request('/api/insert_row', {
+            'Server': server, 'Database': database, 'Table': table,
+            'Column Names': column_names, 'Row Data': row_data,
+        })
 
         result = mdb.insert_row(g.db, server, database, table, column_names, row_data)
         logging.debug(f"Insert result: {result}")
         return jsonify(result)
     except Exception as e:
         logging.exception(f"API error in insert_row: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 @app.route('/api/get_schema', methods=['GET'])
@@ -784,7 +940,7 @@ def api_get_schema():
         return jsonify({'success': True, 'schema': schema_info})
     except Exception as e:
         logging.exception(f"Schema extraction error: {e}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 _ALLOWED_PROXYSQL_CMD = re.compile(r'^\s*(LOAD|SAVE|SELECT\s+CONFIG)\b', re.IGNORECASE)
@@ -825,7 +981,7 @@ def api_table_data():
             safe_draw = 1
         return jsonify({'draw': safe_draw,
                         'recordsTotal': 0, 'recordsFiltered': 0,
-                        'data': [], 'error': str(e)})
+                        'data': [], 'error': _redacted_error()})
 
 
 @app.route('/api/execute_proxysql_command', methods=['POST'])
@@ -869,7 +1025,7 @@ def api_execute_proxysql_command():
 
     except Exception as e:
         logging.exception(f"API error in execute_proxysql_command: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': _redacted_error()})
 
 
 @app.route('/<server>/query_history/')

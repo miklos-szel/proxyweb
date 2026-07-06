@@ -8,6 +8,104 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
 
 ## [Unreleased]
 
+### Security
+- The read-only SQL gate no longer classifies `WITH …` statements as
+  read-only: a leading CTE can front a mutation
+  (`WITH x AS (SELECT 1) DELETE FROM t` is valid in both SQLite and MySQL),
+  so WITH-prefixed input is conservatively rejected for read-only users and
+  read-only servers until a trailing-verb parser exists.
+- The ad-hoc SQL form (`/<server>/<db>/<table>/sql/`) now blocks non-SELECT
+  statements on **read-only servers**, not just for the read-only *role*.
+  Previously the editor was only hidden in the UI, so an admin could POST a
+  write directly to a `read_only: true` server.
+- Inline row editing escapes cell values through `escapeHtmlAttr()` before
+  injecting them into `<input>`/`<textarea>` markup, and `showNotification`
+  builds DOM nodes with `textContent` instead of `innerHTML` — closes a
+  stored-DOM-XSS path where a value containing HTML executed on Edit.
+- `get_table_schema` and `get_primary_key_columns` backtick-quote the
+  `SHOW CREATE TABLE` target via `_quote_ident()`.
+- The SELECT/non-SELECT classifier strips SQL comments and requires a single
+  `SELECT`/`WITH` statement, rejecting `SELECT 1; DELETE …` multi-statement
+  smuggling (and no longer requiring a `FROM`). Statement splitting now tracks
+  string literals, so a comment delimiter inside a quoted string
+  (`SELECT 'a/*'; DELETE …; SELECT '*/b'`) can no longer swallow the `;`
+  separators and disguise a mutation as one SELECT — the read-only gate sees
+  the same statement boundaries the database does.
+- JSON API handlers return a redacted error to the client on unexpected
+  exceptions instead of echoing `str(e)`; full detail still goes to the log.
+- The config-diff skip-variables modal escapes quotes when interpolating a
+  variable name into the remove button's `aria-label` (new `escapeAttr()`
+  helper) — `escapeHtml()` alone allowed attribute injection via `"` in a
+  skip-variable name.
+- `_query_config_layer` no longer sends raw exception text (which can embed
+  connector/DSN details) to the browser via the config-diff API; it logs the
+  real error and returns a generic `layer query failed` marker.
+- `/api/*` mutation debug logs redact credential-like values (`password`,
+  `passwd`, `token`, `secret`, `auth`) in row payloads and PK values, so
+  editing rows in tables like `mysql_users` no longer writes passwords to
+  the log.
+
+### Fixed
+- The Quick Queries dropdown no longer sporadically grows a horizontal
+  scrollbar: `.dropdown-menu` used `overflow-x: visible`, which CSS computes
+  as `auto` when `overflow-y` is non-visible, so the 2px `translateX`
+  item-hover effect spawned a scrollbar. Now `overflow-x: hidden`; submenus
+  are unaffected because they are repositioned onto `<body>`.
+- Settings UI checkboxes (global read-only, per-server read-only override,
+  `TEMPLATES_AUTO_RELOAD`) are parsed with a shared normaliser accepting the
+  browser-submitted `on` (plus `true`/`1`/`yes`); previously only the literal
+  string `true` counted, so checking **Read-Only Mode** silently saved
+  `read_only: false`. `TEMPLATES_AUTO_RELOAD` is stored as a real boolean.
+- Settings-page fetch errors now surface the server's JSON validation message
+  (e.g. why a save was rejected) instead of a bare `HTTP 400`.
+- `format_yaml_value` escapes embedded `"` and `\` when it double-quotes a
+  value, so a config value that both requires quoting and contains a quote or
+  backslash (e.g. an adhoc-report SQL `SELECT a, "b"`) produces valid YAML
+  instead of being rejected by validation on save.
+
+### Changed
+- The per-row **Copy SQL** button is now limited to the tables it was designed
+  for — the Disk / Memory / Runtime config tables (databases `disk` and
+  `main`). Stats, monitor and stats_history views no longer render the button
+  or an empty actions column, since their rows aren't pasteable ProxySQL
+  config.
+- **Export YAML** on the settings page downloads as a timestamped
+  `config-<yyyymmdd-hhmmss>.yml` (filename provided by the server) instead of
+  always `config.yml`.
+- `_backup_and_write_config` validates the new YAML before touching anything
+  and writes the `.bak` backup via `_atomic_write` too — this also closes a
+  gap where the skip-variables endpoint wrote the config without validation.
+- Failed inline row saves now revert the edited cells in place instead of
+  silently reloading the whole page after a delay.
+- `format_yaml_value` no longer wraps values containing a hyphen in quotes
+  (ordinary hostnames like `my-db-host` round-trip unquoted); a leading dash
+  and `#` are still quoted.
+- Removed debug `console.log` noise from the table view and dead conditional
+  blocks; hardened connection cleanup on error paths in `mdb.py`.
+
+### Added
+- **Dump Database** under the Misc menu (admin-only): `GET /<server>/dump/`
+  streams a data-only `mysqldump` of ProxySQL's `main` database — excluding
+  the read-only `runtime_*` tables — as a downloadable attachment named
+  `proxysql_<server>_<yyyymmdd-hhmmss>.sql`. Runs the dump via argv-list
+  subprocess with `MYSQL_PWD` in the env and a 60 s timeout; flags are kept
+  portable across MySQL and MariaDB `mysqldump` builds. Readonly users get
+  403 and don't see the menu item.
+- Integration tests for the new/changed behaviour: `test_dump.py`
+  (`TestDumpDatabaseDownload`, `TestDumpDatabaseAccessControl`),
+  `TestCopySqlScopedToConfigDatabases`, and `TestExportTimestampedFilename`.
+- Regression tests: CSRF rejection for token-less/wrong-token POSTs, the
+  read-only-server SQL-form block, and HTML escaping of stored cell values.
+- Regression test `TestCheckboxOnValueSaved` for the browser-style checkbox
+  `on` value round-trip through `/settings/ui_save/`, asserting the global and
+  per-server `read_only` booleans land in their respective config blocks.
+- Regression test `TestReadOnlyUser.test_readonly_sql_comment_in_literal_smuggling_blocked`
+  for the comment-in-string-literal read-only-gate bypass.
+- Regression test `TestYamlValueEscaping` for round-tripping config values that
+  contain commas plus double quotes.
+- `PyYAML` added to the test-runner requirements (the new settings tests parse
+  exported YAML).
+
 ## [2.1.5] — 2026-05-26
 
 ### Added

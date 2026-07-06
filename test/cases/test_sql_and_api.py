@@ -43,6 +43,75 @@ class TestSQLExecution(unittest.TestCase):
         self.assertIn("variable_name", resp.text)
 
 
+class TestReadOnlyServerSqlForm(unittest.TestCase):
+    """A server flagged read_only must reject non-SELECT SQL from the form.
+
+    Bug guarded: render_change only checked the readonly *role*; it never
+    called mdb.get_read_only(server). The SQL editor is hidden in the template
+    when the server is read-only, but an admin could still POST a write
+    directly to /<server>/<db>/<table>/sql/ against a read_only: true server.
+    SELECT statements must still be allowed.
+    """
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        resp = self.s.get("/settings/export/")
+        body = resp.json()
+        self.assertTrue(body.get("success"), f"export failed: {body.get('error')}")
+        self._original_yaml = body["yaml"]
+        # Add a per-server read_only: true override on the MySQL ProxySQL server.
+        modified = re.sub(
+            r'(^  %s:\n)' % re.escape(SERVER),
+            r'\1    read_only: true\n',
+            self._original_yaml,
+            count=1,
+            flags=re.M,
+        )
+        self.assertIn("read_only: true", modified, "failed to inject read_only override")
+        self.s.post_form("/settings/save/", {"settings": modified})
+
+    LEAK_RULE_ID = 922
+
+    def tearDown(self):
+        if hasattr(self, "_original_yaml"):
+            # Restore a writable config first, then clean up any row that
+            # leaked through if the read-only block had regressed.
+            self.s.post_form("/settings/save/", {"settings": self._original_yaml})
+            self.s.post_json("/api/delete_row", {
+                "server": SERVER, "database": DATABASE, "table": "mysql_query_rules",
+                "pkValues": {"rule_id": str(self.LEAK_RULE_ID)},
+            })
+
+    def test_non_select_blocked_on_read_only_server(self):
+        """An INSERT via the SQL form must not reach a read_only server.
+
+        The editor is hidden in the UI for read-only servers, so we verify the
+        security property directly: after POSTing the write, the row is absent.
+        """
+        self.s.get(f"/{SERVER}/{DATABASE}/mysql_query_rules/")
+        self.s.post_form(
+            f"/{SERVER}/{DATABASE}/mysql_query_rules/sql/",
+            {"sql": f"INSERT INTO mysql_query_rules (rule_id, active, apply) "
+                    f"VALUES ({self.LEAK_RULE_ID}, 1, 1)"},
+        )
+        data = self.s.get_table_data(SERVER, DATABASE, "mysql_query_rules",
+                                     **{"length": "1000"})
+        ids = {str(row[0]) for row in data.get("data", [])}
+        self.assertNotIn(str(self.LEAK_RULE_ID), ids,
+                         "write reached a read_only server through the SQL form")
+
+    def test_select_allowed_on_read_only_server(self):
+        """SELECT is still permitted against a read_only server and renders rows."""
+        self.s.get(f"/{SERVER}/{DATABASE}/global_variables/")
+        resp = self.s.post_form(
+            f"/{SERVER}/{DATABASE}/global_variables/sql/",
+            {"sql": "SELECT variable_name FROM global_variables LIMIT 1"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("variable_name", resp.text)
+
+
 class TestAPIRowOperations(unittest.TestCase):
     """API endpoints: insert, update, delete a row in mysql_servers."""
 

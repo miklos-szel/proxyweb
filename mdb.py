@@ -32,6 +32,10 @@ logging.basicConfig(level=_LOG_LEVEL, format='%(asctime)s - %(levelname)s - %(me
 
 HISTORY_DIR = os.path.join(os.path.dirname(__file__), 'data', 'history')
 
+# Servers (e.g. ProxySQL 3.x admin) that rejected SET @@session.autocommit —
+# the rejection happens on every connection, so warn only once per server.
+_autocommit_warned = set()
+
 
 def _valid_history_server(server):
     """
@@ -130,6 +134,24 @@ def _quote_ident(name):
     return '`' + name.replace('`', '``') + '`'
 
 
+def _safe_close_conn(db, server):
+    """Close a server connection if one was stored, swallowing any error.
+
+    Error paths must not assume ``db_connect`` got far enough to store a
+    ``conn`` — reaching into ``db['cnf']['servers'][server]['conn']`` blindly
+    can raise KeyError/TypeError and mask the original exception.
+    """
+    try:
+        conn = db.get('cnf', {}).get('servers', {}).get(server, {}).get('conn')
+    except AttributeError:
+        return
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception as e:
+            logging.debug(f"_safe_close_conn: ignoring close error for {server}: {e}")
+
+
 sql_get_databases = "show databases"
 
 def get_config(config="config/config.yml"):
@@ -145,7 +167,7 @@ def get_config(config="config/config.yml"):
     Raises:
         ValueError: If the file cannot be opened or the YAML cannot be parsed.
     """
-    logging.debug("Using file: %s" % (config))
+    logging.debug(f"Using file: {config}")
     try:
         with open(config, 'r') as yml:
             cfg = yaml.safe_load(yml)
@@ -260,17 +282,26 @@ def dict_to_yaml(data, indent=0, prev_key=None):
 
 
 
+def _yaml_double_quote(value):
+    """Wrap a string in YAML double quotes, escaping ``\\`` and ``"`` so the
+    result round-trips. Without escaping, a value that requires quoting and
+    also contains a quote/backslash (e.g. ``SELECT a, "b"`` or ``c:\\path``)
+    would emit invalid YAML and the whole config save would be rejected."""
+    escaped = value.replace('\\', '\\\\').replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def format_yaml_value(value):
     """
     Format a Python value into a YAML-friendly scalar string.
-    
+
     Converts common Python scalar types to a YAML-safe string representation:
     - None becomes an empty quoted string `""`.
     - booleans become `true` or `false`.
     - integers and floats are converted via `str`.
-    - strings are returned unquoted unless they contain characters that require quoting, in which case they are wrapped in double quotes.
+    - strings are returned unquoted unless they contain characters that require quoting, in which case they are wrapped in double quotes (with `\\` and `"` escaped).
     - lists and other types are stringified and wrapped in double quotes.
-    
+
     Returns:
         A string containing the YAML-friendly representation of `value`.
     """
@@ -281,13 +312,20 @@ def format_yaml_value(value):
     if isinstance(value, (int, float)):
         return str(value)
     if isinstance(value, str):
-        # Check if string contains special characters that need quotes
-        if any(char in value for char in ['[', ']', ':', '{', '}', ',', '&', '*', '?', '|', '-', '<', '>', '=', '!', '%', '@', '`']):
-            return f'"{value}"'
+        # Quote when the string contains YAML-significant characters. A bare
+        # '-' is dropped from this list so ordinary hostnames/values like
+        # ``my-db-host`` round-trip unquoted; a *leading* dash is still quoted
+        # below because it would otherwise read as a YAML sequence indicator.
+        # A double-quote/backslash forces quoting too, so the escaped form is
+        # emitted instead of a corrupt bare scalar.
+        special_chars = ['[', ']', ':', '{', '}', ',', '&', '*', '?', '|',
+                         '<', '>', '=', '!', '%', '@', '`', '#', '"', '\\']
+        if value.lstrip().startswith('-') or any(char in value for char in special_chars):
+            return _yaml_double_quote(value)
         return value
     if isinstance(value, list):
-        return f'"{value}"'
-    return f'"{value}"'
+        return _yaml_double_quote(str(value))
+    return _yaml_double_quote(str(value))
 
 
 def validate_yaml(yaml_content):
@@ -350,48 +388,42 @@ def validate_config_shape(cfg):
                 raise ValueError(f"Missing required key: '{section}.{key}'")
 
 
-def form_data_to_yaml(form_data):
+def _form_checkbox(value):
     """
-    Builds a full configuration YAML string from submitted form data.
-    
-    Reads expected form fields and reconstructs the configuration structure (global, servers, auth, flask, misc), normalizing boolean flags, collecting repeated/numbered entries (DSNs, hide_tables, apply/update/adhoc config items), and converting escaped newlines ("\\n") into real newlines for SQL/info blocks. Ensures the resulting config always includes 'servers' and 'misc' keys (possibly empty) and prepends a generated header with a timestamp.
-    
-    Parameters:
-        form_data (dict): Mapping of form field names to string values as submitted by the UI.
-    
-    Returns:
-        str: Complete YAML document (including header comment) representing the reconstructed configuration.
+    Normalize an HTML checkbox value to bool. Browsers submit 'on' for checked
+    boxes without a value attribute; accept the other common truthy spellings
+    too. Unchecked boxes are not submitted at all, so None maps to False.
     """
-    config = {
-        'global': {},
-        'servers': {},
-        'auth': {},
-        'flask': {},
-        'misc': {}
-    }
+    return str(value).strip().lower() in ('on', 'true', '1', 'yes')
 
-    # Process global section
+
+def _form_global_section(form_data):
+    """Build the 'global' config section from form fields."""
+    section = {}
     if 'global_default_server' in form_data:
-        config['global']['default_server'] = form_data['global_default_server']
+        section['default_server'] = form_data['global_default_server']
 
     # Handle read_only - checkbox unchecked means false (checkbox not submitted when unchecked)
-    if 'global_read_only' in form_data:
-        config['global']['read_only'] = form_data['global_read_only'].lower() == 'true'
-    else:
-        config['global']['read_only'] = False
+    section['read_only'] = _form_checkbox(form_data.get('global_read_only', ''))
 
     if 'global_sqlite_db_path' in form_data:
-        config['global']['sqlite_db_path'] = form_data['global_sqlite_db_path']
+        section['sqlite_db_path'] = form_data['global_sqlite_db_path']
 
-    # Process hide_tables
-    hide_tables = []
-    for key, value in form_data.items():
-        if key.startswith('global_hide_tables_') and value:
-            hide_tables.append(value)
+    hide_tables = _form_hide_tables(form_data, 'global')
     if hide_tables:
-        config['global']['hide_tables'] = hide_tables
+        section['hide_tables'] = hide_tables
+    return section
 
-    # Process servers section
+
+def _form_hide_tables(form_data, prefix):
+    """Collect the numbered '<prefix>_hide_tables_N' entries from form fields."""
+    return [value for key, value in form_data.items()
+            if key.startswith(f'{prefix}_hide_tables_') and value]
+
+
+def _form_servers_section(form_data):
+    """Build the 'servers' config section (server cards with DSN lists) from form fields."""
+    servers = {}
     server_count = int(form_data.get('server_count', 0))
     for i in range(server_count):
         server_name = form_data.get(f'server_{i}_name')
@@ -401,116 +433,100 @@ def form_data_to_yaml(form_data):
 
         server_config = {'dsn': []}
 
-        # DSN array
         dsn_count = int(form_data.get(f'server_{i}_dsn_count', 0))
         for j in range(dsn_count):
             dsn = {}
-            if form_data.get(f'server_{i}_dsn_{j}_host'):
-                dsn['host'] = form_data[f'server_{i}_dsn_{j}_host']
-            if form_data.get(f'server_{i}_dsn_{j}_user'):
-                dsn['user'] = form_data[f'server_{i}_dsn_{j}_user']
-            if form_data.get(f'server_{i}_dsn_{j}_passwd'):
-                dsn['passwd'] = form_data[f'server_{i}_dsn_{j}_passwd']
-            if form_data.get(f'server_{i}_dsn_{j}_port'):
-                dsn['port'] = form_data[f'server_{i}_dsn_{j}_port']
-            if form_data.get(f'server_{i}_dsn_{j}_db'):
-                dsn['db'] = form_data[f'server_{i}_dsn_{j}_db']
-
+            for field in ('host', 'user', 'passwd', 'port', 'db'):
+                value = form_data.get(f'server_{i}_dsn_{j}_{field}')
+                if value:
+                    dsn[field] = value
             if dsn:
                 server_config['dsn'].append(dsn)
 
         # Optional read_only override
         server_read_only = form_data.get(f'server_{i}_read_only_override')
         if server_read_only:
-            server_config['read_only'] = server_read_only.lower() == 'true'
+            server_config['read_only'] = _form_checkbox(server_read_only)
 
-        # Optional hide_tables
-        server_hide_tables = []
-        for key, value in form_data.items():
-            if key.startswith(f'server_{i}_hide_tables_') and value:
-                server_hide_tables.append(value)
+        server_hide_tables = _form_hide_tables(form_data, f'server_{i}')
         if server_hide_tables:
             server_config['hide_tables'] = server_hide_tables
 
         if server_config['dsn']:
-            config['servers'][server_name] = server_config
+            servers[server_name] = server_config
+    return servers
 
-    # Process auth section
-    if 'auth_admin_user' in form_data:
-        config['auth']['admin_user'] = form_data['auth_admin_user']
 
-    if 'auth_admin_password' in form_data:
-        config['auth']['admin_password'] = form_data['auth_admin_password']
+def _form_passthrough_section(form_data, prefix, fields):
+    """Copy '<prefix>_<field>' form values straight into a config section."""
+    section = {}
+    for field in fields:
+        key = f'{prefix}_{field}'
+        if key in form_data:
+            section[field] = form_data[key]
+    return section
 
-    if 'auth_readonly_user' in form_data:
-        config['auth']['readonly_user'] = form_data['auth_readonly_user']
 
-    if 'auth_readonly_password' in form_data:
-        config['auth']['readonly_password'] = form_data['auth_readonly_password']
+def _form_misc_items(form_data, misc_type, unescape_newlines):
+    """
+    Collect the numbered title/info/sql blocks for one misc array
+    ('apply_config', 'update_config', 'adhoc_report').
 
-    # Process flask section
-    if 'flask_SECRET_KEY' in form_data:
-        config['flask']['SECRET_KEY'] = form_data['flask_SECRET_KEY']
+    When unescape_newlines is True, '\\n' sequences in info/sql are converted
+    to real newlines (multi-statement commands edited in single-line inputs).
+    """
+    items = []
+    count = int(form_data.get(f'misc_{misc_type}_count', 0))
+    for i in range(count):
+        item = {}
+        if form_data.get(f'misc_{misc_type}_{i}_title'):
+            item['title'] = form_data[f'misc_{misc_type}_{i}_title']
+        for field in ('info', 'sql'):
+            value = form_data.get(f'misc_{misc_type}_{i}_{field}')
+            if value:
+                item[field] = value.replace('\\n', '\n') if unescape_newlines else value
+        if item:
+            items.append(item)
+    return items
 
-    if 'flask_SEND_FILE_MAX_AGE_DEFAULT' in form_data:
-        config['flask']['SEND_FILE_MAX_AGE_DEFAULT'] = form_data['flask_SEND_FILE_MAX_AGE_DEFAULT']
 
-    if 'flask_TEMPLATES_AUTO_RELOAD' in form_data:
-        config['flask']['TEMPLATES_AUTO_RELOAD'] = form_data['flask_TEMPLATES_AUTO_RELOAD']
+def form_data_to_yaml(form_data):
+    """
+    Builds a full configuration YAML string from submitted form data.
 
-    # Process misc section
+    Reads expected form fields and reconstructs the configuration structure (global, servers, auth, flask, misc), normalizing boolean flags, collecting repeated/numbered entries (DSNs, hide_tables, apply/update/adhoc config items), and converting escaped newlines ("\\n") into real newlines for SQL/info blocks. Ensures the resulting config always includes 'servers' and 'misc' keys (possibly empty) and prepends a generated header with a timestamp.
+
+    Parameters:
+        form_data (dict): Mapping of form field names to string values as submitted by the UI.
+
+    Returns:
+        str: Complete YAML document (including header comment) representing the reconstructed configuration.
+    """
     misc = {}
+    for misc_type, unescape in (('apply_config', True),
+                                ('update_config', True),
+                                ('adhoc_report', False)):
+        items = _form_misc_items(form_data, misc_type, unescape)
+        if items:
+            misc[misc_type] = items
 
-    # Apply config array
-    apply_config = []
-    apply_config_count = int(form_data.get('misc_apply_config_count', 0))
-    for i in range(apply_config_count):
-        item = {}
-        if form_data.get(f'misc_apply_config_{i}_title'):
-            item['title'] = form_data[f'misc_apply_config_{i}_title']
-        if form_data.get(f'misc_apply_config_{i}_info'):
-            item['info'] = form_data[f'misc_apply_config_{i}_info'].replace('\\n', '\n')
-        if form_data.get(f'misc_apply_config_{i}_sql'):
-            item['sql'] = form_data[f'misc_apply_config_{i}_sql'].replace('\\n', '\n')
-        if item:
-            apply_config.append(item)
-    if apply_config:
-        misc['apply_config'] = apply_config
+    config = {
+        'global': _form_global_section(form_data),
+        'servers': _form_servers_section(form_data),
+        'auth': _form_passthrough_section(form_data, 'auth',
+                                          ('admin_user', 'admin_password',
+                                           'readonly_user', 'readonly_password')),
+        'flask': _form_passthrough_section(form_data, 'flask',
+                                           ('SECRET_KEY', 'SEND_FILE_MAX_AGE_DEFAULT',
+                                            'TEMPLATES_AUTO_RELOAD')),
+        'misc': misc,
+    }
 
-    # Update config array
-    update_config = []
-    update_config_count = int(form_data.get('misc_update_config_count', 0))
-    for i in range(update_config_count):
-        item = {}
-        if form_data.get(f'misc_update_config_{i}_title'):
-            item['title'] = form_data[f'misc_update_config_{i}_title']
-        if form_data.get(f'misc_update_config_{i}_info'):
-            item['info'] = form_data[f'misc_update_config_{i}_info'].replace('\\n', '\n')
-        if form_data.get(f'misc_update_config_{i}_sql'):
-            item['sql'] = form_data[f'misc_update_config_{i}_sql'].replace('\\n', '\n')
-        if item:
-            update_config.append(item)
-    if update_config:
-        misc['update_config'] = update_config
-
-    # Adhoc report array
-    adhoc_report = []
-    adhoc_report_count = int(form_data.get('misc_adhoc_report_count', 0))
-    for i in range(adhoc_report_count):
-        item = {}
-        if form_data.get(f'misc_adhoc_report_{i}_title'):
-            item['title'] = form_data[f'misc_adhoc_report_{i}_title']
-        if form_data.get(f'misc_adhoc_report_{i}_info'):
-            item['info'] = form_data[f'misc_adhoc_report_{i}_info']
-        if form_data.get(f'misc_adhoc_report_{i}_sql'):
-            item['sql'] = form_data[f'misc_adhoc_report_{i}_sql']
-        if item:
-            adhoc_report.append(item)
-    if adhoc_report:
-        misc['adhoc_report'] = adhoc_report
-
-    if misc:
-        config['misc'] = misc
+    # TEMPLATES_AUTO_RELOAD is a checkbox — store it as a real boolean instead
+    # of the raw submitted string ('on').
+    if 'TEMPLATES_AUTO_RELOAD' in config['flask']:
+        config['flask']['TEMPLATES_AUTO_RELOAD'] = \
+            _form_checkbox(config['flask']['TEMPLATES_AUTO_RELOAD'])
 
     # Remove empty sections, but always keep 'servers' and 'misc' even when
     # empty so that validate_config_shape() and callers never see a missing key.
@@ -566,7 +582,13 @@ def db_connect(db, server, buffered=False, dictionary=True):
             # socket is still up the connection is usable.
             msg = str(err).lower()
             if "unknown global variable" in msg and "@@session.autocommit" in msg:
-                logging.warning("Server %s does not support SET @@session.autocommit, skipping: %s", server, err)
+                # Expected on every connection to a ProxySQL 3.x admin —
+                # warn only once per server so the log isn't flooded.
+                if server not in _autocommit_warned:
+                    _autocommit_warned.add(server)
+                    logging.warning("Server %s does not support SET @@session.autocommit, skipping: %s", server, err)
+                else:
+                    logging.debug("Server %s does not support SET @@session.autocommit, skipping: %s", server, err)
                 if not conn.is_connected():
                     raise
             else:
@@ -574,16 +596,13 @@ def db_connect(db, server, buffered=False, dictionary=True):
         db['cnf']['servers'][server]['conn'] = conn
 
         if conn.is_connected():
-            logging.debug("Connected successfully to %s as %s db=%s" % (
-                config['host'],
-                config['user'],
-                config['db']))
+            logging.debug(f"Connected successfully to {config['host']} as {config['user']} db={config['db']}")
 
         conn.get_warnings = True
 
         db['cnf']['servers'][server]['cur'] = conn.cursor(buffered=buffered,
                                                           dictionary=dictionary)
-        logging.debug("buffered: %s, dictionary: %s" % (buffered, dictionary))
+        logging.debug(f"buffered: {buffered}, dictionary: {dictionary}")
 
     except (mysql.connector.Error, mysql.connector.Warning) as e:
         raise ValueError(e)
@@ -656,6 +675,127 @@ def get_all_dbs_and_tables(db, server):
         raise ValueError(e)
 
 
+def _build_hash_map(data):
+    """
+    Build a mapping from a deterministic serialized representation of each row
+    to the original row, for set-based diffing.
+
+    Parameters:
+        data (iterable): An iterable of JSON-serializable rows (e.g., dicts).
+
+    Returns:
+        dict: Keys are deterministic serializations (stable key order), values
+        are the original row objects.
+    """
+    return {json.dumps(row, sort_keys=True): row for row in data}
+
+
+def _list_config_tables(server, hide_tables):
+    """
+    Return the ProxySQL configuration tables on `server` that should be diffed:
+    base tables only (no runtime_ twins), with hidden and internal tables
+    filtered out.
+    """
+    query_db = {}
+    db_connect(query_db, server=server, dictionary=False)
+    conn = query_db['cnf']['servers'][server]['conn']
+    try:
+        conn.database = 'main'
+        cur = query_db['cnf']['servers'][server]['cur']
+        cur.execute("SHOW TABLES")
+        all_tables = [table[0] for table in cur.fetchall()]
+    finally:
+        conn.close()
+
+    tables_to_diff = []
+    for table in all_tables:
+        # Skip runtime_ tables (they are read via the runtime layer query)
+        if table.startswith('runtime_'):
+            continue
+        if should_hide_table(table, hide_tables):
+            continue
+        # Skip internal tables
+        if table in ['sqlite_sequence']:
+            continue
+        # Only include ProxySQL configuration tables
+        if any(table.startswith(prefix) for prefix in ['mysql_', 'pgsql_', 'admin_', 'global_', 'scheduler', 'restapi']):
+            tables_to_diff.append(table)
+    return tables_to_diff
+
+
+def _query_config_layer(server, query):
+    """
+    Run one layer query (disk/memory/runtime) and return its rows as dicts.
+
+    Returns:
+        dict: {'row_count', 'data', 'column_order'} on success; the same shape
+        with empty values plus an 'error' key when the query fails (a table
+        may not exist in every layer).
+    """
+    query_db = {}
+    try:
+        db_connect(query_db, server=server, dictionary=False)
+        try:
+            cur = query_db['cnf']['servers'][server]['cur']
+            cur.execute(query)
+            rows = cur.fetchall()
+
+            if rows:
+                column_names = [desc[0] for desc in cur.description]
+                dict_rows = [dict(zip(column_names, row)) for row in rows]
+            else:
+                column_names = []
+                dict_rows = []
+
+            return {
+                'row_count': len(dict_rows),
+                'data': dict_rows,
+                'column_order': column_names,
+            }
+        finally:
+            query_db['cnf']['servers'][server]['conn'].close()
+    except Exception as e:
+        # Log the real error server-side; the dict is sent to the browser via
+        # get_config_diff, so keep connector/SQL details out of it.
+        logging.warning(f"config diff layer query failed on {server}: {e}")
+        return {'row_count': 0, 'data': [], 'column_order': [], 'error': 'layer query failed'}
+
+
+def _calculate_table_differences(disk_data, memory_data, runtime_data):
+    """
+    Compare the three layers row-wise and return (differences, has_differences).
+
+    `differences` carries the rows present in only one side of each pair
+    (disk vs memory, memory vs runtime).
+    """
+    disk_map = _build_hash_map(disk_data)
+    memory_map = _build_hash_map(memory_data)
+    runtime_map = _build_hash_map(runtime_data)
+
+    disk_hashes = set(disk_map.keys())
+    memory_hashes = set(memory_map.keys())
+    runtime_hashes = set(runtime_map.keys())
+
+    only_in_disk = [disk_map[h] for h in (disk_hashes - memory_hashes)]
+    only_in_memory = [memory_map[h] for h in (memory_hashes - disk_hashes)]
+    only_in_memory_not_runtime = [memory_map[h] for h in (memory_hashes - runtime_hashes)]
+    only_in_runtime = [runtime_map[h] for h in (runtime_hashes - memory_hashes)]
+
+    differences = {
+        'disk_vs_memory': {
+            'only_in_disk': only_in_disk,
+            'only_in_memory': only_in_memory
+        },
+        'memory_vs_runtime': {
+            'only_in_memory': only_in_memory_not_runtime,
+            'only_in_runtime': only_in_runtime
+        }
+    }
+    has_diffs = bool(only_in_disk or only_in_memory
+                     or only_in_memory_not_runtime or only_in_runtime)
+    return differences, has_diffs
+
+
 def get_config_diff(server=None):
     """
     Compute configuration differences for ProxySQL tables across disk, memory, and runtime layers.
@@ -710,35 +850,7 @@ def get_config_diff(server=None):
             'config_diff_skip_variable': skip_variables
         }
 
-        # Connect to main database to get all tables
-        query_db = {}
-        db_connect(query_db, server=server, dictionary=False)
-        query_db['cnf']['servers'][server]['conn'].database = 'main'
-
-        # Get all tables from main database
-        query_db['cnf']['servers'][server]['cur'].execute("SHOW TABLES")
-        all_tables = [table[0] for table in query_db['cnf']['servers'][server]['cur'].fetchall()]
-
-        # Get base table names (without runtime_ prefix)
-        tables_to_diff = []
-        for table in all_tables:
-            # Skip runtime_ tables (we'll use them for runtime comparison)
-            if table.startswith('runtime_'):
-                continue
-
-            # Skip tables that match hide_patterns
-            if should_hide_table(table, hide_tables):
-                continue
-
-            # Skip internal tables
-            if table in ['sqlite_sequence']:
-                continue
-
-            # Only include ProxySQL configuration tables
-            if any(table.startswith(prefix) for prefix in ['mysql_', 'pgsql_', 'admin_', 'global_', 'scheduler', 'restapi']):
-                tables_to_diff.append(table)
-
-        query_db['cnf']['servers'][server]['conn'].close()
+        tables_to_diff = _list_config_tables(server, hide_tables)
 
         for table_name in tables_to_diff:
             table_diff = {
@@ -760,112 +872,17 @@ def get_config_diff(server=None):
                 'runtime': f"SELECT * FROM main.runtime_{table_name}"
             }
 
-            # Query each layer
             for layer_name, query in queries.items():
-                try:
-                    query_db = {}
-                    db_connect(query_db, server=server, dictionary=False)
+                layer = _query_config_layer(server, query)
+                table_diff['databases'][layer_name] = layer
+                table_diff['stats'][f'{layer_name}_rows'] = layer['row_count']
 
-                    # Query and get results
-                    query_db['cnf']['servers'][server]['cur'].execute(query)
-                    rows = query_db['cnf']['servers'][server]['cur'].fetchall()
-
-                    # Convert rows to dictionaries for comparison
-                    if rows:
-                        column_names = [desc[0] for desc in query_db['cnf']['servers'][server]['cur'].description]
-                        dict_rows = [dict(zip(column_names, row)) for row in rows]
-                    else:
-                        column_names = []
-                        dict_rows = []
-
-                    table_diff['databases'][layer_name] = {
-                        'row_count': len(dict_rows),
-                        'data': dict_rows,
-                        'column_order': column_names
-                    }
-                    table_diff['stats'][f'{layer_name}_rows'] = len(dict_rows)
-
-                    query_db['cnf']['servers'][server]['conn'].close()
-
-                except Exception as e:
-                    # Table might not exist in all layers
-                    try:
-                        query_db['cnf']['servers'][server]['conn'].close()
-                    except Exception:
-                        pass
-                    table_diff['databases'][layer_name] = {
-                        'row_count': 0,
-                        'data': [],
-                        'column_order': [],
-                        'error': str(e)
-                    }
-                    table_diff['stats'][f'{layer_name}_rows'] = 0
-
-            # Calculate differences
-            has_diffs = False
-            disk_data = table_diff['databases'].get('disk', {}).get('data', [])
-            memory_data = table_diff['databases'].get('memory', {}).get('data', [])
-            runtime_data = table_diff['databases'].get('runtime', {}).get('data', [])
-
-            # Build hash to row mapping for each layer
-            def build_hash_map(data):
-                """
-                Build a mapping from a deterministic serialized representation of each row to the original row.
-                
-                Parameters:
-                    data (iterable): An iterable of JSON-serializable rows (e.g., dicts or lists).
-                
-                Returns:
-                    dict: A dictionary whose keys are deterministic serialized representations of each row (stable key order) and whose values are the original row objects.
-                """
-                hash_map = {}
-                for row in data:
-                    row_hash = json.dumps(row, sort_keys=True)
-                    hash_map[row_hash] = row
-                return hash_map
-
-            disk_map = build_hash_map(disk_data)
-            memory_map = build_hash_map(memory_data)
-            runtime_map = build_hash_map(runtime_data)
-
-            disk_hashes = set(disk_map.keys())
-            memory_hashes = set(memory_map.keys())
-            runtime_hashes = set(runtime_map.keys())
-
-            # Find differences between disk and memory
-            only_in_disk = []
-            for row_hash in (disk_hashes - memory_hashes):
-                only_in_disk.append(disk_map[row_hash])
-
-            only_in_memory = []
-            for row_hash in (memory_hashes - disk_hashes):
-                only_in_memory.append(memory_map[row_hash])
-
-            # Find differences between memory and runtime
-            only_in_memory_not_runtime = []
-            for row_hash in (memory_hashes - runtime_hashes):
-                only_in_memory_not_runtime.append(memory_map[row_hash])
-
-            only_in_runtime = []
-            for row_hash in (runtime_hashes - memory_hashes):
-                only_in_runtime.append(runtime_map[row_hash])
-
-            # Store detailed differences
-            table_diff['differences'] = {
-                'disk_vs_memory': {
-                    'only_in_disk': only_in_disk,
-                    'only_in_memory': only_in_memory
-                },
-                'memory_vs_runtime': {
-                    'only_in_memory': only_in_memory_not_runtime,
-                    'only_in_runtime': only_in_runtime
-                }
-            }
-
-            # Determine if there are differences
-            if only_in_disk or only_in_memory or only_in_memory_not_runtime or only_in_runtime:
-                has_diffs = True
-
+            differences, has_diffs = _calculate_table_differences(
+                table_diff['databases'].get('disk', {}).get('data', []),
+                table_diff['databases'].get('memory', {}).get('data', []),
+                table_diff['databases'].get('runtime', {}).get('data', []),
+            )
+            table_diff['differences'] = differences
             table_diff['stats']['has_differences'] = has_diffs
 
             if has_diffs:
@@ -916,7 +933,7 @@ def get_table_content(db, server, database, table):
         content['misc'] = get_config()['misc']
         return content
     except (mysql.connector.Error, mysql.connector.Warning) as e:
-        db['cnf']['servers'][server]['conn'].close()
+        _safe_close_conn(db, server)
         raise ValueError(e)
 
 
@@ -1069,9 +1086,9 @@ def process_table_content(table, content):
         'success_time_us': 'us'
     }
 
-    # Get indices for the target columns
+    # Get indices for the target columns (single pass over the column list)
     col_names = content.get('column_names', [])
-    field_indices = {field: idx for field, unit in time_fields.items() if field in col_names for idx, name in enumerate(col_names) if name == field}
+    field_indices = {name: idx for idx, name in enumerate(col_names) if name in time_fields}
 
     if field_indices:
         new_rows = []
@@ -1108,7 +1125,7 @@ def execute_adhoc_query(db, server, sql):
 
         return content
     except (mysql.connector.Error, mysql.connector.Warning) as e:
-        db['cnf']['servers'][server]['conn'].close()
+        _safe_close_conn(db, server)
         raise ValueError(e)
 
 def execute_adhoc_report(db, server):
@@ -1147,12 +1164,10 @@ def execute_adhoc_report(db, server):
                 result['info'] = item['info']
                 result['column_names'] = [i[0] for i in db['cnf']['servers'][server]['cur'].description]
                 adhoc_results.append(result.copy())
-        else:
-            pass
 
         return adhoc_results
     except (mysql.connector.Error, mysql.connector.Warning) as e:
-        db['cnf']['servers'][server]['conn'].close()
+        _safe_close_conn(db, server)
         raise ValueError(e)
 
 
@@ -1268,6 +1283,82 @@ def execute_change(db, server, sql):
         return str(e)
 
 
+def dump_database(db, server):
+    """
+    Dump the data of every non-runtime table in ProxySQL's `main` database
+    via the mysqldump CLI and return it as SQL text.
+
+    runtime_* tables are excluded by passing the surviving table names as
+    explicit positional arguments to mysqldump. The table list is taken
+    straight from `SHOW TABLES FROM main` (not the hide_tables-filtered UI
+    list) so a backup is never silently missing data.
+
+    Parameters:
+        db: Mutable container used to establish or hold a database connection.
+        server (str): Name of the server from configuration to target.
+
+    Returns:
+        str: The mysqldump output (data-only INSERT statements).
+
+    Raises:
+        ValueError: If the table list cannot be fetched or mysqldump fails.
+    """
+    try:
+        db_connect(db, server=server)
+        cur = db['cnf']['servers'][server]['cur']
+        cur.execute("SHOW TABLES FROM main")
+        tables = [row['tables'] for row in cur.fetchall()
+                  if not row['tables'].startswith('runtime_')]
+        cur.close()
+    except (mysql.connector.Error, mysql.connector.Warning) as e:
+        raise ValueError(e)
+
+    if not tables:
+        raise ValueError("no tables found to dump in database 'main'")
+
+    dsn = get_config()['servers'][server]['dsn'][0]
+    cmd = [
+        'mysqldump',
+        '-h', str(dsn['host']),
+        '-P', str(dsn['port']),
+        '-u', str(dsn['user']),
+        '--skip-comments',
+        '--skip-set-charset',
+        '--skip-tz-utc',
+        '--compact',
+        '--no-tablespaces',
+        '--no-create-info',
+        '--no-create-db',
+        '--skip-triggers',
+        # no --network-timeout: MariaDB's mysqldump (used on arm64 images)
+        # doesn't support it, and the subprocess timeout below covers hangs.
+        'main',
+    ] + tables
+    # MYSQL_PWD keeps the password off argv (and out of ps/proc).
+    env = os.environ.copy()
+    env['MYSQL_PWD'] = str(dsn['passwd'])
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            env=env,
+            timeout=60,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        logging.error("mysqldump timed out after 60s for server %s", server)
+        raise ValueError("mysqldump timed out")
+
+    if proc.returncode != 0:
+        error_msg = proc.stderr.decode('utf-8', errors='replace').strip() \
+            or f"mysqldump exited with status {proc.returncode}"
+        logging.error(f"mysqldump error: {error_msg}")
+        raise ValueError(error_msg)
+
+    return proc.stdout.decode('utf-8', errors='replace')
+
+
 def extract_default_value(column_def):
     """
     Extract the DEFAULT clause value from a SQL column definition string.
@@ -1324,7 +1415,7 @@ def get_table_schema(db, server, database, table_name):
         logging.debug(f"Extracting schema for table: {database}.{table_name} via server: {server}")
 
         # Use SHOW CREATE TABLE to get the full table definition
-        query = f"SHOW CREATE TABLE `{database}`.`{table_name}`"
+        query = f"SHOW CREATE TABLE {_quote_ident(database)}.{_quote_ident(table_name)}"
         db['cnf']['servers'][server]['cur'].execute(query)
         create_table_result = db['cnf']['servers'][server]['cur'].fetchone()
 
@@ -1459,7 +1550,7 @@ def get_primary_key_columns(db, server, database, table_name):
         db_connect(db, server=server, dictionary=True)
 
         # Get the CREATE TABLE statement
-        query = f"SHOW CREATE TABLE `{database}`.`{table_name}`"
+        query = f"SHOW CREATE TABLE {_quote_ident(database)}.{_quote_ident(table_name)}"
         db['cnf']['servers'][server]['cur'].execute(query)
         create_table_result = db['cnf']['servers'][server]['cur'].fetchone()
 

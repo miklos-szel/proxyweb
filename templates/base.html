@@ -37,23 +37,28 @@
     <script type="text/javascript" charset="utf8" src="https://cdn.datatables.net/1.13.7/js/dataTables.bootstrap5.min.js"></script>
 
     <script>
+        // Shared DataTables defaults so every table behaves the same;
+        // page inits only override what is specific to them.
+        $.extend(true, $.fn.dataTable.defaults, {
+            "lengthMenu": [[25, 50, 100, -1], [25, 50, 100, "All"]],
+            "autoWidth": false,
+            "language": {
+                "search": "",
+                "searchPlaceholder": "Search...",
+                "lengthMenu": "Show _MENU_ entries"
+            }
+        });
+
         $(document).ready(function () {
             // Initialize DataTables
             if ($('#proxywebtable').length) {
                 var dtConfig = {
-                    "lengthMenu": [[25, 50, 100, -1], [25, 50, 100, "All"]],
                     "pageLength": 100,
                     "responsive": false,
-                    "autoWidth": false,
                     "info": false,
                     "paging": true,
                     "searching": true,
-                    "dom": '<"dt-toolbar"l<"dt-toolbar-center"p>f>t<"dt-toolbar dt-toolbar-bottom"l<"dt-toolbar-center"p>f>',
-                    "language": {
-                        "search": "",
-                        "searchPlaceholder": "Search...",
-                        "lengthMenu": "Show _MENU_ entries"
-                    }
+                    "dom": '<"dt-toolbar"l<"dt-toolbar-center"p>f>t<"dt-toolbar dt-toolbar-bottom"l<"dt-toolbar-center"p>f>'
                 };
 
                 {% if content is defined and content['order'] == "true" %}
@@ -140,12 +145,10 @@
                 setupKeyboardShortcuts();
             }
 
-            if ($('#adhoc_results').length) {
-                $('#adhoc_results').DataTable({
-                    "lengthMenu": [[-1, 100, 50, 25], ["All", 100, 50, 25]],
-                    "pageLength": 25,
+            // Class selector: adhoc report pages can render several result tables
+            if ($('.adhoc-results').length) {
+                $('.adhoc-results').DataTable({
                     "responsive": true,
-                    "autoWidth": false,
                     "searching": false,
                     "paging": false,
                     "info": false,
@@ -162,31 +165,6 @@
             return meta ? meta.content : '';
         }
 
-        function unEscape(htmlStr) {
-            // Important: Replace &amp; FIRST to avoid double-unescaping
-            htmlStr = htmlStr.replace(/&amp;/g, "&");
-            htmlStr = htmlStr.replace(/&lt;/g, "<");
-            htmlStr = htmlStr.replace(/&gt;/g, ">");
-            htmlStr = htmlStr.replace(/&#34;/g, "\"");
-            htmlStr = htmlStr.replace(/&#39;/g, "'");
-            return htmlStr;
-        }
-    </script>
-
-    <script>
-        {% for item in session.get('misc', {}) %}
-            {% for subitem in session.get('misc', {})[item] %}
-                let {{ item }}_item_{{loop.index}} = {{ subitem.get('sql', '')|tojson }};
-            {% endfor %}
-        {% endfor %}
-    </script>
-
-    <script>
-        {% if session.get('history') %}
-            {% for item in session.get('history', [])[:25]|reverse %}
-                let history_item_{{loop.index}} = {{ item|tojson }};
-            {% endfor %}
-        {% endif %}
     </script>
 
     <script>
@@ -199,11 +177,6 @@
             const tableName = '{{ session.get('table', '') }}';
             const isReadOnly = {{ session.get('read_only', false) | tojson }};
 
-            console.log('[DEBUG isTableEditable] database:', database);
-            console.log('[DEBUG isTableEditable] tableName:', tableName);
-            console.log('[DEBUG isTableEditable] tableName.startsWith("runtime_"):', tableName.startsWith('runtime_'));
-            console.log('[DEBUG isTableEditable] isReadOnly:', isReadOnly);
-            console.log('[DEBUG isTableEditable] returning:', database === 'main' && !tableName.startsWith('runtime_') && !isReadOnly);
 
             // Table can only be edited if:
             // 1. Database is 'main'
@@ -212,17 +185,21 @@
             return database === 'main' && !tableName.startsWith('runtime_') && !isReadOnly;
         }
 
+        // Copy SQL is only meaningful for ProxySQL config tables — the ones
+        // reachable from the Disk, Memory, and Runtime menus (databases
+        // 'disk' and 'main'; runtime_* tables live in 'main'). Stats/monitor
+        // rows aren't pasteable config, so they get no copy button.
+        function copySqlEnabled() {
+            const database = '{{ session.get('database', '') }}';
+            return database === 'main' || database === 'disk';
+        }
+
         // Helper function to check if rows can be added
         function canAddRows() {
             const database = '{{ session.get('database', '') }}';
             const tableName = '{{ session.get('table', '') }}';
             const isReadOnly = {{ session.get('read_only', false) | tojson }};
 
-            console.log('[DEBUG canAddRows] database:', database);
-            console.log('[DEBUG canAddRows] tableName:', tableName);
-            console.log('[DEBUG canAddRows] isReadOnly:', isReadOnly);
-            console.log('[DEBUG canAddRows] tableName.startsWith("runtime_"):', tableName.startsWith('runtime_'));
-            console.log('[DEBUG canAddRows] returning:', database === 'main' && !tableName.startsWith('runtime_') && !isReadOnly);
 
             // Rows can only be added if:
             // 1. Database is 'main'
@@ -241,7 +218,6 @@
                 const data = await response.json();
                 if (data.success) {
                     tableSchema = data.schema;
-                    console.log('Table schema loaded:', tableSchema);
                 } else {
                     console.error('Failed to load schema:', data.error);
                 }
@@ -260,14 +236,12 @@
                 row.classList.contains('d-none') ||
                 row.classList.contains('dtr-inline.collapsed') ||
                 row.classList.contains('child')) {
-                console.log('[DEBUG isValidDataRow] SKIP - row has class:', row.className);
                 return false;
             }
 
             // Skip DataTables empty/loading placeholder rows
             if (row.classList.contains('dataTables_empty') ||
                 row.classList.contains('dataTables_processing')) {
-                console.log('[DEBUG isValidDataRow] SKIP - DataTables placeholder row, class:', row.className);
                 return false;
             }
 
@@ -276,7 +250,6 @@
 
             // Skip if no cells found
             if (!cells || cells.length === 0) {
-                console.log('[DEBUG isValidDataRow] SKIP - no cells found');
                 return false;
             }
 
@@ -291,10 +264,8 @@
             ];
             let hasActualContent = false;
 
-            const cellContents = [];
-            cells.forEach((cell, index) => {
+            cells.forEach((cell) => {
                 const text = cell.textContent.trim();
-                cellContents.push(`Cell ${index}: "${text}"`);
 
                 // Check if this cell has actual content
                 const hasContent = !emptyPlaceholders.includes(text);
@@ -307,21 +278,19 @@
             });
 
             if (!hasActualContent) {
-                console.log('[DEBUG isValidDataRow] SKIP - all cells empty or placeholder');
-                console.log('[DEBUG isValidDataRow] Cell contents:', cellContents.join(', '));
                 return false;
             }
 
-            console.log('[DEBUG isValidDataRow] VALID - row has actual content');
-            console.log('[DEBUG isValidDataRow] Cell contents:', cellContents.join(', '));
             return true;
         }
 
         async function enableInlineEditing() {
-            // Debug logging
-            console.log('[DEBUG enableInlineEditing] Starting...');
-            console.log('[DEBUG] isTableEditable():', isTableEditable());
-            console.log('[DEBUG] canAddRows():', canAddRows());
+            const tableIsEditable = isTableEditable();
+
+            // Tables that are neither editable nor copy-eligible (stats,
+            // monitor, …) get no actions column and no row controls at all,
+            // so there is nothing to set up (and no schema to fetch).
+            if (!tableIsEditable && !copySqlEnabled()) return;
 
             // First, load the table schema
             await loadTableSchema();
@@ -329,47 +298,25 @@
             const table = document.getElementById('proxywebtable');
             if (!table) return;
 
-            const tableIsEditable = isTableEditable();
-            console.log('[DEBUG] tableIsEditable:', tableIsEditable);
-
             // Check if table has a variable_name column
             const headerCells = table.querySelectorAll('thead th');
             const hasVariableNameColumn = Array.from(headerCells).some(th => th.textContent.trim() === 'variable_name');
-            console.log('[DEBUG] hasVariableNameColumn:', hasVariableNameColumn);
 
-            // Add header cell for actions column at the beginning (always — copy button lives here too)
+            // Add header cell for actions column at the beginning (copy button lives here too).
+            // Non-editable tables only ever show the copy button, so the
+            // column gets a narrow 'compact' variant (width set in custom.css).
             const thead = table.querySelector('thead tr');
             if (thead && !thead.querySelector('th.actions-header')) {
                 const actionsHeader = document.createElement('th');
-                actionsHeader.className = 'actions-header';
-                actionsHeader.style.width = '156px';
-                actionsHeader.style.minWidth = '156px';
+                actionsHeader.className = tableIsEditable ? 'actions-header' : 'actions-header compact';
                 actionsHeader.textContent = '';
                 thead.insertBefore(actionsHeader, thead.firstChild);
             }
 
             const rows = table.querySelectorAll('tbody tr');
-            console.log('[DEBUG] Total rows found in DOM:', rows.length);
-
-            // Log all rows found for debugging
-            rows.forEach((row, index) => {
-                console.log(`[DEBUG] Row ${index} classes: "${row.className}"`);
-                console.log(`[DEBUG] Row ${index} has ${row.querySelectorAll('td').length} cells`);
-                const cells = row.querySelectorAll('td');
-                if (cells.length > 0) {
-                    const cellTexts = Array.from(cells).map((cell, i) => `"${cell.textContent.trim()}"`).join(', ');
-                    console.log(`[DEBUG] Row ${index} cell contents: [${cellTexts}]`);
-                }
-            });
 
             // Check if table has valid data rows - filter using our comprehensive check
             const actualDataRows = Array.from(rows).filter(row => isValidDataRow(row));
-            console.log('[DEBUG] actualDataRows count:', actualDataRows.length);
-            console.log('[DEBUG] Total rows in DOM:', rows.length);
-
-            // Log which rows were filtered out
-            const filteredRows = Array.from(rows).filter(row => !isValidDataRow(row));
-            console.log('[DEBUG] Filtered OUT rows count:', filteredRows.length);
 
             // Show the Add Row button for non-empty tables with data (AND meets other criteria)
             if (actualDataRows.length > 0 && !hasVariableNameColumn && canAddRows()) {
@@ -391,34 +338,17 @@
                         addRowContainer.style.display = 'block';
                     }
                 }
-                console.log('[DEBUG] Table is empty (0 data rows), returning early - NO edit buttons will be created');
-                console.log('[DEBUG] Table rows found:', rows.length);
-                console.log('[DEBUG] Actual data rows:', actualDataRows.length);
-                return;
-            }
-
-            console.log('[DEBUG] Table has', actualDataRows.length, 'data rows - creating edit buttons');
-            console.log('[DEBUG] Table rows found:', rows.length);
-            console.log('[DEBUG] Actual data rows:', actualDataRows.length);
-
-            // CRITICAL SAFETY CHECK: If no actual data rows, don't create ANY edit buttons
-            if (actualDataRows.length === 0) {
-                console.log('[DEBUG CRITICAL] Table is completely empty (0 data rows)');
-                console.log('[DEBUG CRITICAL] Returning early - NO edit buttons will be created');
-                console.log('[DEBUG CRITICAL] This is the final safety check to prevent buttons on empty tables');
                 return;
             }
 
             rows.forEach((row, rowIndex) => {
                 // Skip if already processed
                 if (row.querySelector('.edit-controls')) {
-                    console.log(`[DEBUG] Row ${rowIndex} SKIP - already has edit controls`);
                     return;
                 }
 
                 // Use our comprehensive validation function
                 if (!isValidDataRow(row)) {
-                    console.log(`[DEBUG] Row ${rowIndex} SKIP - not a valid data row`);
                     return;
                 }
 
@@ -436,7 +366,7 @@
                 });
 
                 const controlsCell = document.createElement('td');
-                controlsCell.className = 'edit-controls';
+                controlsCell.className = tableIsEditable ? 'edit-controls' : 'edit-controls compact';
                 controlsCell.style.whiteSpace = 'nowrap';
                 controlsCell.innerHTML = buildControlsHtml(columnNames, rowData, tableIsEditable);
                 row.insertBefore(controlsCell, row.firstChild);
@@ -486,15 +416,16 @@
 
         // Build the action-buttons markup used by both the initial row render
         // (enableInlineEditing) and the post-edit restore (restoreEditControls).
-        // Editable rows get Edit+Delete+Copy; read-only rows get Copy only.
+        // Editable rows get Edit+Delete+Copy; read-only config rows get Copy
+        // only; non-config rows (copySqlEnabled() false) get no copy button.
         function buildControlsHtml(columnNames, rowData, tableIsEditable) {
             const generatedSql = buildRowSql(columnNames, rowData, tableName);
-            const copyButtonHtml = `
+            const copyButtonHtml = copySqlEnabled() ? `
                         <button type="button" class="btn btn-icon btn-icon-secondary copy-btn" onclick="copyRowSql(this)"
                                 data-sql="${escapeHtmlAttr(generatedSql)}"
                                 data-bs-toggle="tooltip" data-bs-placement="top" title="Copy SQL" aria-label="Copy row SQL">
                             <i class="fas fa-copy"></i>
-                        </button>`;
+                        </button>` : '';
             const editDeleteHtml = tableIsEditable ? `
                         <button type="button" class="btn btn-icon edit-btn" onclick="editRow(this)"
                                 data-bs-toggle="tooltip" data-bs-placement="top" title="Edit row" aria-label="Edit row">
@@ -576,23 +507,52 @@
             });
         }
 
-        // Copy the SQL stored on a copy button to the clipboard and flash a
-        // check-mark icon for ~1.5s. Mirrors templates/query_history.html.
-        function copyRowSql(button) {
-            const sql = button.getAttribute('data-sql') || '';
-            if (!sql) return;
-            writeToClipboard(sql).then(() => {
+        // Copy text to the clipboard and flash the button's copy icon to a
+        // check mark for ~1.5s. Shared by row copy buttons and query history;
+        // classList.replace() is a no-op for whichever class pair is absent.
+        function copyWithFeedback(button, text) {
+            if (!text) return;
+            writeToClipboard(text).then(() => {
                 const icon = button.querySelector('i');
                 if (!icon) return;
                 icon.classList.replace('fa-copy', 'fa-check');
                 button.classList.replace('btn-icon-secondary', 'btn-icon-success');
+                button.classList.replace('btn-outline-secondary', 'btn-success');
                 setTimeout(() => {
                     icon.classList.replace('fa-check', 'fa-copy');
                     button.classList.replace('btn-icon-success', 'btn-icon-secondary');
+                    button.classList.replace('btn-success', 'btn-outline-secondary');
                 }, 1500);
             }).catch(err => {
                 console.error('Clipboard write failed:', err);
             });
+        }
+
+        // Copy the SQL stored on a row copy button to the clipboard.
+        function copyRowSql(button) {
+            copyWithFeedback(button, button.getAttribute('data-sql') || '');
+        }
+
+        // Attach a document-level Enter/Escape handler scoped to `row`:
+        // Enter clicks the save button (Shift+Enter passes through so
+        // textareas keep newline entry), Escape clicks the cancel button.
+        // Stored on row.keydownHandler so save/cancel paths can detach it.
+        function attachRowKeydown(row, saveSelector, cancelSelector) {
+            const keydownHandler = function(e) {
+                if (!row.contains(e.target)) return;
+
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const saveBtn = row.querySelector(saveSelector);
+                    if (saveBtn) saveBtn.click();
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    const cancelBtn = row.querySelector(cancelSelector);
+                    if (cancelBtn) cancelBtn.click();
+                }
+            };
+            row.keydownHandler = keydownHandler;
+            document.addEventListener('keydown', keydownHandler);
         }
 
         // Debounce function to limit how often a function is called
@@ -628,10 +588,7 @@
                         // Only re-enable inline editing if we haven't processed this table yet
                         const existingControls = table.querySelectorAll('.edit-controls').length;
                         if (existingControls === 0) {
-                            console.log('[DEBUG draw.dt] No edit controls found, re-enabling inline editing');
                             enableInlineEditing();
-                        } else {
-                            console.log(`[DEBUG draw.dt] Found ${existingControls} existing edit controls, skipping`);
                         }
                     }, 100);
                 });
@@ -674,7 +631,7 @@
 
         function editRow(button) {
             if (currentlyEditing) {
-                alert('Please finish editing the current row first.');
+                showNotification('Please finish editing the current row first.', 'info');
                 return;
             }
 
@@ -715,7 +672,7 @@
                     const lines = value.split('\n').length;
                     const rows = Math.min(Math.max(lines, 3), 10); // Min 3 rows, max 10 rows
 
-                    cell.innerHTML = `<textarea class="form-control form-control-sm" rows="${rows}" style="min-width: 300px; min-height: 80px; width: 100%;">${value}</textarea>`;
+                    cell.innerHTML = `<textarea class="form-control form-control-sm" rows="${rows}" style="min-width: 300px; min-height: 80px; width: 100%;">${escapeHtmlAttr(value)}</textarea>`;
 
                     // Auto-resize after a short delay to ensure DOM is ready
                     setTimeout(() => {
@@ -726,7 +683,7 @@
                         }
                     }, 10);
                 } else {
-                    cell.innerHTML = `<input type="${inputType}" class="form-control form-control-sm" value="${value}" style="min-width: 150px;">`;
+                    cell.innerHTML = `<input type="${inputType}" class="form-control form-control-sm" value="${escapeHtmlAttr(value)}" style="min-width: 150px;">`;
                 }
                 cellIndex++;
             });
@@ -751,24 +708,7 @@
             document.querySelectorAll('.edit-btn').forEach(btn => btn.disabled = true);
 
             // Add keyboard event listener for Enter/Esc
-            const keydownHandler = function(e) {
-                // Check if the event target is within the row being edited
-                if (!row.contains(e.target)) return;
-
-                if (e.key === 'Enter' && !e.shiftKey) {
-                    // Shift+Enter allows newlines in textareas, plain Enter saves
-                    e.preventDefault();
-                    const saveBtn = row.querySelector('.btn-success');
-                    if (saveBtn) saveBtn.click();
-                } else if (e.key === 'Escape') {
-                    e.preventDefault();
-                    const cancelBtn = row.querySelector('.btn-secondary');
-                    if (cancelBtn) cancelBtn.click();
-                }
-            };
-
-            row.keydownHandler = keydownHandler;
-            document.addEventListener('keydown', keydownHandler);
+            attachRowKeydown(row, '.btn-success', '.btn-secondary');
         }
 
         function cancelEdit(button) {
@@ -811,6 +751,7 @@
 
         function saveRow(button) {
             const row = button.closest('tr');
+            if (row.dataset.saving === 'true') return;
             const cells = row.querySelectorAll('td:not(.edit-controls)');
             const allHeaderCells = row.closest('table').querySelectorAll('thead th');
             const headerCells = Array.from(allHeaderCells).filter(th => !th.classList.contains('actions-header'));
@@ -830,15 +771,12 @@
             headerCells.forEach((th, index) => {
                 const cell = cells[cellIndex];
                 if (!cell) {
-                    console.log(`No cell at cellIndex ${cellIndex}`);
                     return;
                 }
 
                 const columnName = th.textContent.trim();
-                console.log(`Processing column ${columnName} at cellIndex ${cellIndex}`);
 
                 if (cell.classList.contains('edit-controls')) {
-                    console.log(`Cell is edit-controls, incrementing cellIndex from ${cellIndex} to ${cellIndex + 1}`);
                     cellIndex++;
                     return;
                 }
@@ -850,17 +788,11 @@
                     const value = input ? input.value : cell.textContent.trim();
                     const originalValue = originalValues[valueIndex] || '';
 
-                    // Debug logging
-                    console.log(`  Current value: "${value}"`);
-                    console.log(`  Original value: "${originalValue}"`);
-                    console.log(`  Changed: ${value !== originalValue}`);
-
                     // Only send the value if it has actually changed
                     if (value !== originalValue) {
                         // Convert empty string to null for database
                         const processedValue = value === '' ? null : value;
                         updatedData[columnName] = processedValue;
-                        console.log(`  ✓ Will update ${columnName} = "${processedValue}"`);
                     }
                     cell.textContent = value;
                     valueIndex++;
@@ -887,6 +819,12 @@
             const pkValues = {};
             storedColNames.forEach((col, i) => { pkValues[col] = storedRowData[i]; });
 
+            // Guard against double-submit while the request is in flight
+            row.dataset.saving = 'true';
+            setButtonLoading(button, true);
+            const cancelBtn = row.querySelector('.btn-secondary');
+            if (cancelBtn) cancelBtn.disabled = true;
+
             // Send update to server
             fetch('/api/update_row', {
                 method: 'POST',
@@ -909,18 +847,15 @@
                     showNotification('Row updated successfully!', 'success');
                 } else {
                     showNotification('Error updating row: ' + data.error, 'error');
-                    // Revert on error after showing message
-                    setTimeout(() => {
-                        location.reload();
-                    }, 5000);
+                    // The write failed, so the DB is unchanged — restore the
+                    // displayed cells to their original values rather than
+                    // silently reloading the whole page.
+                    revertRowCells(row);
                 }
             })
             .catch(error => {
                 showNotification('Error: ' + error, 'error');
-                // Revert on error after showing message
-                setTimeout(() => {
-                    location.reload();
-                }, 5000);
+                revertRowCells(row);
             })
             .finally(() => {
                 // Remove keyboard event listener
@@ -928,9 +863,36 @@
                     document.removeEventListener('keydown', row.keydownHandler);
                     row.keydownHandler = null;
                 }
+                delete row.dataset.saving;
                 row.classList.remove('editing');
                 restoreEditControls(row);
                 currentlyEditing = false;
+            });
+        }
+
+        // Restore a row's data cells to the original (pre-edit) values stored
+        // on the row. Used when a save fails so the grid keeps reflecting the
+        // actual DB state without a full page reload.
+        function revertRowCells(row) {
+            const originalValues = JSON.parse(row.dataset.originalValues || '[]');
+            const cells = row.querySelectorAll('td:not(.edit-controls)');
+            const headerCells = Array.from(row.closest('table').querySelectorAll('thead th'))
+                .filter(th => !th.classList.contains('actions-header'));
+            let cellIndex = 0;
+            let valueIndex = 0;
+            headerCells.forEach((th) => {
+                const cell = cells[cellIndex];
+                if (!cell) return;
+                const columnName = th.textContent.trim();
+                if (cell.classList.contains('edit-controls') || columnName === 'variable_name') {
+                    cellIndex++;
+                    return;
+                }
+                if (valueIndex < originalValues.length) {
+                    cell.textContent = originalValues[valueIndex];
+                }
+                valueIndex++;
+                cellIndex++;
             });
         }
 
@@ -966,22 +928,9 @@
             const pkValues = {};
             storedColNames.forEach((col, i) => { pkValues[col] = storedRowData[i]; });
 
-            // Show the Bootstrap confirmation modal
-            const modal = new bootstrap.Modal(document.getElementById('deleteRowModal'));
-            const modalElement = document.getElementById('deleteRowModal');
-            modal.show();
-
-            // Set up the confirm button click handler (remove old listeners first)
-            const confirmBtn = document.getElementById('confirmDeleteRow');
-            const newConfirmBtn = confirmBtn.cloneNode(true);
-            confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
-
-            // Function to execute the deletion
-            const executeDelete = function() {
-                // Hide the modal
-                modal.hide();
-
-                // Execute the deletion
+            // Show the Bootstrap confirmation modal and execute on confirm
+            bindModalConfirm(document.getElementById('deleteRowModal'), 'confirmDeleteRow', function() {
+                setButtonLoading(button, true);
                 fetch('/api/delete_row', {
                     method: 'POST',
                     headers: {
@@ -1010,26 +959,11 @@
                 })
                 .catch(error => {
                     showNotification('Error: ' + error, 'error');
+                })
+                .finally(() => {
+                    setButtonLoading(button, false);
                 });
-            };
-
-            // Attach click handler
-            newConfirmBtn.addEventListener('click', executeDelete);
-
-            // Add keyboard handler for Enter key
-            const keydownHandler = function(e) {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    executeDelete();
-                }
-            };
-
-            modalElement.addEventListener('keydown', keydownHandler);
-
-            // Clean up event listener when modal is closed
-            modalElement.addEventListener('hidden.bs.modal', function() {
-                modalElement.removeEventListener('keydown', keydownHandler);
-            }, { once: true });
+            });
         }
 
         function createNewRowTemplate(table) {
@@ -1060,9 +994,9 @@
                     if (isLongContent) {
                         const lines = defaultValue.split('\n').length;
                         const rows = Math.min(Math.max(lines, 3), 10);
-                        td.innerHTML = `<textarea class="form-control form-control-sm" rows="${rows}" style="min-width: 300px; min-height: 80px; width: 100%;" placeholder="Enter value">${defaultValue}</textarea>`;
+                        td.innerHTML = `<textarea class="form-control form-control-sm" rows="${rows}" style="min-width: 300px; min-height: 80px; width: 100%;" placeholder="Enter value">${escapeHtmlAttr(defaultValue)}</textarea>`;
                     } else {
-                        td.innerHTML = `<input type="text" class="form-control form-control-sm" value="${defaultValue}" placeholder="Enter value" style="min-width: 150px;">`;
+                        td.innerHTML = `<input type="text" class="form-control form-control-sm" value="${escapeHtmlAttr(defaultValue)}" placeholder="Enter value" style="min-width: 150px;">`;
                     }
                 }
                 newRowTemplate.appendChild(td);
@@ -1086,7 +1020,6 @@
 
             // If template doesn't exist or was created before schema was loaded, create/update it
             if (!newRowTemplate || !tableSchema) {
-                console.log('Creating/updating new row template...');
                 // Remove existing template if any
                 if (newRowTemplate) {
                     newRowTemplate.remove();
@@ -1106,7 +1039,6 @@
             firstCell.innerHTML = '<input type="text" class="form-control form-control-sm" placeholder="Enter value" required>';
 
             // Add edit controls
-            const headerCells = table.querySelectorAll('thead th');
             const controlsCell = document.createElement('td');
             controlsCell.className = 'edit-controls';
             controlsCell.innerHTML = `
@@ -1133,28 +1065,12 @@
             }
 
             // Add keyboard event listener for Enter/Esc
-            const keydownHandler = function(e) {
-                // Check if the event target is within the new row
-                if (!newRow.contains(e.target)) return;
-
-                if (e.key === 'Enter' && !e.shiftKey) {
-                    // Shift+Enter allows newlines in textareas, plain Enter saves
-                    e.preventDefault();
-                    const saveBtn = newRow.querySelector('.btn-icon-success');
-                    if (saveBtn) saveBtn.click();
-                } else if (e.key === 'Escape') {
-                    e.preventDefault();
-                    const cancelBtn = newRow.querySelector('.btn-icon-secondary');
-                    if (cancelBtn) cancelBtn.click();
-                }
-            };
-
-            newRow.keydownHandler = keydownHandler;
-            document.addEventListener('keydown', keydownHandler);
+            attachRowKeydown(newRow, '.btn-icon-success', '.btn-icon-secondary');
         }
 
         function saveNewRow(button) {
             const row = button.closest('tr');
+            if (row.dataset.saving === 'true') return;
             const cells = row.querySelectorAll('td:not(.edit-controls)');
             const allHeaderCells = row.closest('table').querySelectorAll('thead th');
             const headerCells = Array.from(allHeaderCells).filter(th => !th.classList.contains('actions-header'));
@@ -1192,26 +1108,17 @@
 
                 // Check if field is required
                 if (!value && columnName !== 'variable_name') {
-                    console.log(`[DEBUG] tableSchema exists: ${!!tableSchema}`);
-                    console.log(`[DEBUG] tableSchema.columns:`, tableSchema ? Object.keys(tableSchema.columns) : 'null');
-                    console.log(`[DEBUG] columnName: ${columnName}`);
-
                     // Check if column has a default value (check for undefined, not just truthiness)
                     const columnSchema = tableSchema && tableSchema.columns[columnName];
-                    console.log(`[DEBUG] columnSchema:`, columnSchema);
 
                     // If no schema available, allow empty (safer - let database enforce)
                     if (!tableSchema || !columnSchema) {
-                        console.log(`[DEBUG] No schema info available, allowing empty value for ${columnName}`);
                         rowData[columnName] = null;
                         cellIndex++;
                         continue;
                     }
 
                     const hasDefault = 'default' in columnSchema && columnSchema.default !== undefined;
-                    console.log(`[DEBUG] hasDefault check: has 'default' property = ${'default' in columnSchema}, value = ${columnSchema.default}, !== undefined = ${columnSchema.default !== undefined}`);
-
-                    console.log(`[DEBUG] Checking column ${columnName}: value="${value}", hasDefault=${hasDefault}, default="${columnSchema.default}"`);
 
                     // If no default, field is required
                     if (!hasDefault) {
@@ -1221,7 +1128,6 @@
                         break;
                     }
                     // If empty and has default, skip this field (don't add to rowData)
-                    console.log(`[DEBUG] Skipping column ${columnName} - using DEFAULT`);
                     cellIndex++;
                     continue;
                 }
@@ -1237,8 +1143,11 @@
                 return;
             }
 
-            console.log('[DEBUG] Final data to send to backend:', rowData);
-            console.log('[DEBUG] Column names to send:', columnNames);
+            // Guard against double-submit while the request is in flight
+            row.dataset.saving = 'true';
+            setButtonLoading(button, true);
+            const cancelBtn = row.querySelector('.btn-icon-secondary');
+            if (cancelBtn) cancelBtn.disabled = true;
 
             // Send to server
             fetch('/api/insert_row', {
@@ -1263,10 +1172,16 @@
                     setTimeout(() => location.reload(), 1000);
                 } else {
                     showNotification('Error adding row: ' + data.error, 'error');
+                    delete row.dataset.saving;
+                    setButtonLoading(button, false);
+                    if (cancelBtn) cancelBtn.disabled = false;
                 }
             })
             .catch(error => {
                 showNotification('Error: ' + error, 'error');
+                delete row.dataset.saving;
+                setButtonLoading(button, false);
+                if (cancelBtn) cancelBtn.disabled = false;
             });
         }
 
@@ -1283,22 +1198,32 @@
         function showNotification(message, type) {
             // Create notification element
             const notification = document.createElement('div');
-            notification.className = `alert alert-${type === 'success' ? 'success' : 'danger'} notification-toast`;
-            notification.style.position = 'fixed';
-            notification.style.top = '20px';
-            notification.style.right = '20px';
-            notification.style.zIndex = '9999';
-            notification.style.minWidth = '300px';
-            notification.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
-            notification.innerHTML = `
-                <div class="d-flex align-items-center">
-                    <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'} me-2"></i>
-                    ${message}
-                    <button type="button" class="btn-close ms-auto" onclick="this.parentElement.parentElement.remove()"></button>
-                </div>
-            `;
+            const alertClass = type === 'success' ? 'alert-success'
+                             : type === 'info' ? 'alert-info'
+                             : 'alert-danger';
+            notification.className = `alert ${alertClass} notification-toast`;
+            // Build via DOM nodes so server-returned text (which can include
+            // mysql error output echoing user SQL) is inserted as text, never HTML.
+            const wrapper = document.createElement('div');
+            wrapper.className = 'd-flex align-items-center';
+            const icon = document.createElement('i');
+            const iconName = type === 'success' ? 'check-circle'
+                           : type === 'info' ? 'info-circle'
+                           : 'exclamation-circle';
+            icon.className = `fas fa-${iconName} me-2`;
+            const msgSpan = document.createElement('span');
+            msgSpan.textContent = message;
+            const closeBtn = document.createElement('button');
+            closeBtn.type = 'button';
+            closeBtn.className = 'btn-close ms-auto';
+            closeBtn.setAttribute('aria-label', 'Close');
+            closeBtn.addEventListener('click', function () { notification.remove(); });
+            wrapper.append(icon, msgSpan, closeBtn);
+            notification.appendChild(wrapper);
 
-            document.body.appendChild(notification);
+            // The aria-live toast region lets screen readers announce updates.
+            const region = document.getElementById('toast-region');
+            (region || document.body).appendChild(notification);
 
             // Different timeouts based on type:
             // - error/danger (warnings): 5 seconds
@@ -1310,6 +1235,66 @@
                     notification.remove();
                 }
             }, timeout);
+        }
+
+        // Toggle a button's loading state: disabled with a spinner while an
+        // async request is in flight, original content restored afterwards.
+        function setButtonLoading(button, isLoading) {
+            if (!button) return;
+            if (isLoading) {
+                if (button.dataset.loading === 'true') return;
+                button.dataset.loading = 'true';
+                button.dataset.originalHtml = button.innerHTML;
+                const label = button.textContent.trim();
+                button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>' + (label ? ' ' + escapeHtmlAttr(label) : '');
+                button.disabled = true;
+            } else {
+                if (button.dataset.loading !== 'true') return;
+                delete button.dataset.loading;
+                button.innerHTML = button.dataset.originalHtml || button.innerHTML;
+                delete button.dataset.originalHtml;
+                button.disabled = false;
+            }
+        }
+
+        // Show a Bootstrap modal and run onConfirm when its confirm button is
+        // clicked or Enter is pressed. The confirm button node is replaced to
+        // drop listeners from a previous invocation, and the keydown handler
+        // is removed when the modal closes.
+        function bindModalConfirm(modalElement, confirmBtnId, onConfirm) {
+            const modal = new bootstrap.Modal(modalElement);
+            modal.show();
+
+            const confirmBtn = document.getElementById(confirmBtnId);
+            const newConfirmBtn = confirmBtn.cloneNode(true);
+            confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+
+            const runConfirm = function () {
+                modal.hide();
+                onConfirm();
+            };
+            newConfirmBtn.addEventListener('click', runConfirm);
+
+            const keydownHandler = function (e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    runConfirm();
+                }
+            };
+            modalElement.addEventListener('keydown', keydownHandler);
+            modalElement.addEventListener('hidden.bs.modal', function () {
+                modalElement.removeEventListener('keydown', keydownHandler);
+            }, { once: true });
+        }
+
+        // Generic confirmation dialog backed by #confirmActionModal, for
+        // confirmations that don't have a dedicated modal of their own.
+        function confirmAction(title, body, confirmLabel, onConfirm) {
+            const modalElement = document.getElementById('confirmActionModal');
+            document.getElementById('confirmActionTitle').textContent = title;
+            document.getElementById('confirmActionBody').textContent = body;
+            document.getElementById('confirmActionBtnLabel').textContent = confirmLabel;
+            bindModalConfirm(modalElement, 'confirmActionBtn', onConfirm);
         }
 
         // Initialize Bootstrap tooltips
@@ -1336,14 +1321,6 @@
         // Set up keyboard shortcuts for table actions
         function setupKeyboardShortcuts() {
             let focusedRow = null;
-
-            // Track which row is being hovered/focused
-            document.addEventListener('mouseover', function(e) {
-                const row = e.target.closest('tbody tr');
-                if (row && isValidDataRow(row)) {
-                    focusedRow = row;
-                }
-            });
 
             // Handle keyboard shortcuts
             document.addEventListener('keydown', function(e) {
@@ -1380,17 +1357,8 @@
                 }
             });
 
-            // Add visual focus indicator
-            const style = document.createElement('style');
-            style.textContent = `
-                tbody tr.keyboard-focused {
-                    outline: 2px solid var(--primary-color);
-                    outline-offset: -2px;
-                }
-            `;
-            document.head.appendChild(style);
-
-            // Update focused row class on hover
+            // Track the hovered row and show the visual focus indicator
+            // (.keyboard-focused style lives in custom.css)
             document.addEventListener('mouseover', function(e) {
                 const row = e.target.closest('tbody tr');
                 if (row && isValidDataRow(row)) {
@@ -1421,21 +1389,8 @@
             document.getElementById('modalCommandTitle').textContent = title;
             document.getElementById('modalSqlCommands').textContent = formattedSql;
 
-            // Show the modal
-            const modal = new bootstrap.Modal(document.getElementById('proxysqlCommandModal'));
-            const modalElement = document.getElementById('proxysqlCommandModal');
-            modal.show();
-
-            // Set up the confirm button click handler (remove old listeners first)
-            const confirmBtn = document.getElementById('confirmProxySQLCommand');
-            const newConfirmBtn = confirmBtn.cloneNode(true);
-            confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
-
-            // Function to execute the command
-            const executeCommand = function() {
-                // Hide the modal
-                modal.hide();
-
+            // Show the confirmation modal and execute on confirm
+            bindModalConfirm(document.getElementById('proxysqlCommandModal'), 'confirmProxySQLCommand', function() {
                 // Execute the SQL command via AJAX (no loading notification)
                 fetch('/api/execute_proxysql_command', {
                     method: 'POST',
@@ -1469,53 +1424,41 @@
                     console.error('Error executing ProxySQL command:', error.message);
                     showNotification(title + ' failed: ' + error.message, 'error');
                 });
-            };
-
-            // Attach click handler
-            newConfirmBtn.addEventListener('click', executeCommand);
-
-            // Add keyboard handler for Enter key
-            const keydownHandler = function(e) {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    executeCommand();
-                }
-            };
-
-            modalElement.addEventListener('keydown', keydownHandler);
-
-            // Clean up event listener when modal is closed
-            modalElement.addEventListener('hidden.bs.modal', function() {
-                modalElement.removeEventListener('keydown', keydownHandler);
-            }, { once: true });
+            });
         }
     </script>
 
-    <style>
-        body {
-            padding-top: 60px; /* Account for smaller fixed navbar */
-        }
-
-        /* Ensure editing fields are always properly sized */
-        #proxywebtable td input.form-control,
-        #proxywebtable td textarea.form-control,
-        #proxywebtable td select.form-select {
-            width: 100%;
-            min-width: 150px;
-            max-width: 500px;
-            font-size: 0.9rem;
-        }
-
-        #proxywebtable td textarea.form-control {
-            min-height: 80px;
-            resize: vertical;
-        }
-    </style>
 </head>
 <body>
     {% block content %}{% endblock %}
     {% block settings %}{% endblock %}
     {% block error %}{% endblock %}
+
+    <!-- Toast notifications land here; aria-live lets screen readers announce them -->
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="false"></div>
+
+    <!-- Generic Confirmation Modal (for confirmations without a dedicated modal) -->
+    <div class="modal fade" id="confirmActionModal" tabindex="-1" aria-labelledby="confirmActionTitle" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-light">
+                    <h5 class="modal-title" id="confirmActionTitle"></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-0" id="confirmActionBody"></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-1"></i> Cancel
+                    </button>
+                    <button type="button" class="btn btn-danger" id="confirmActionBtn">
+                        <i class="fas fa-check me-1"></i> <span id="confirmActionBtnLabel">Confirm</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- ProxySQL Command Confirmation Modal -->
     <div class="modal fade" id="proxysqlCommandModal" tabindex="-1" aria-labelledby="proxysqlCommandModalLabel" aria-hidden="true">
@@ -1530,7 +1473,7 @@
                 </div>
                 <div class="modal-body bg-white">
                     <p class="mb-3"><strong>This will execute the following SQL commands:</strong></p>
-                    <pre id="modalSqlCommands" style="background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 0.375rem; padding: 1rem; max-height: 400px; overflow-y: auto; font-size: 0.9rem; line-height: 1.6; color: #212529;"></pre>
+                    <pre id="modalSqlCommands" class="modal-sql-pre"></pre>
                 </div>
                 <div class="modal-footer bg-light">
                     <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
@@ -1569,6 +1512,6 @@
             </div>
         </div>
     </div>
-{% if app_version %}<a href="{{ changelog_url }}" target="_blank" rel="noopener" style="position:fixed;bottom:4px;right:8px;font-size:10px;color:#ccc;text-decoration:none;">v{{ app_version }}</a>{% endif %}
+{% if app_version %}<a href="{{ changelog_url }}" target="_blank" rel="noopener" class="version-link">v{{ app_version }}</a>{% endif %}
 </body>
 </html>

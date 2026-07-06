@@ -19,14 +19,10 @@
         justify-content: space-between;
     }
 
-    .history-header h4 {
-        margin: 0;
-        font-weight: 600;
-        color: #333;
+    .history-header .page-title {
         display: flex;
         align-items: center;
         gap: 0.5rem;
-        font-size: 1.1rem;
     }
 
     .history-table td {
@@ -47,10 +43,11 @@
         word-break: break-word;
     }
 
-    .timestamp-cell {
+    /* td-qualified so it outranks Bootstrap's .table > :not(caption) > * > * color rule */
+    .history-table td.timestamp-cell {
         white-space: nowrap;
         font-size: 0.875rem;
-        color: #666;
+        color: var(--secondary-color);
     }
 
     .copy-btn {
@@ -65,14 +62,14 @@
 
 <div class="history-container">
     <div class="history-header">
-        <h4>
+        <h1 class="page-title">
             <i class="fas fa-history"></i>
             Query History &mdash; {{ server }}
-        </h4>
+        </h1>
         <div class="d-flex align-items-center gap-2">
             <span class="badge bg-secondary">{{ history|length }} queries</span>
             {% if not session.get('read_only') and session.get('role') != 'readonly' and history|length > 0 %}
-                <button class="btn btn-outline-danger btn-sm" onclick="clearHistory()">
+                <button class="btn btn-outline-danger btn-sm" onclick="clearHistory(this)">
                     <i class="fas fa-trash me-1"></i>Clear History
                 </button>
             {% endif %}
@@ -81,7 +78,7 @@
 
     {% if history|length > 0 %}
     <div class="p-3">
-        <table id="historyTable" class="table table-hover table-striped mb-0 history-table">
+        <table id="historyTable" class="table table-hover table-striped mb-0 history-table" aria-label="Query history">
             <thead>
                 <tr>
                     <th style="width: 50px;">#</th>
@@ -99,7 +96,7 @@
                     <td>{{ entry.user }}</td>
                     <td class="sql-cell" title="{{ entry.sql }}">{{ entry.sql }}</td>
                     <td>
-                        <button class="btn btn-outline-secondary btn-sm copy-btn" onclick="copySQL(this)" data-sql="{{ entry.sql|e }}" title="Copy to clipboard">
+                        <button class="btn btn-outline-secondary btn-sm copy-btn" onclick="copySQL(this)" data-sql="{{ entry.sql|e }}" title="Copy to clipboard" aria-label="Copy SQL to clipboard">
                             <i class="fas fa-copy"></i>
                         </button>
                     </td>
@@ -117,44 +114,48 @@
 </div>
 
 <script>
+// Delegates to the shared clipboard helper in base.html, which also works
+// on plain-HTTP origins where navigator.clipboard is unavailable.
 function copySQL(btn) {
-    const sql = btn.getAttribute('data-sql');
-    navigator.clipboard.writeText(sql).then(() => {
-        const icon = btn.querySelector('i');
-        icon.classList.replace('fa-copy', 'fa-check');
-        btn.classList.replace('btn-outline-secondary', 'btn-success');
-        setTimeout(() => {
-            icon.classList.replace('fa-check', 'fa-copy');
-            btn.classList.replace('btn-success', 'btn-outline-secondary');
-        }, 1500);
-    });
+    copyWithFeedback(btn, btn.getAttribute('data-sql') || '');
 }
 
-function clearHistory() {
+function clearHistory(button) {
     const server = {{ server|tojson }};
-    if (!confirm('Clear all query history for ' + server + '?')) return;
-    fetch('/api/clear_query_history', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': getCsrfToken()
-        },
-        body: JSON.stringify({server: server})
-    }).then(r => r.json()).then(data => {
-        if (data.success) location.reload();
-    });
+    confirmAction(
+        'Clear Query History',
+        'Clear all query history for ' + server + '? This cannot be undone.',
+        'Clear History',
+        function() {
+            setButtonLoading(button, true);
+            fetch('/api/clear_query_history', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': getCsrfToken()
+                },
+                body: JSON.stringify({server: server})
+            }).then(r => r.json()).then(data => {
+                if (data.success) {
+                    location.reload();
+                } else {
+                    showNotification('Failed to clear history: ' + (data.error || 'unknown error'), 'error');
+                    setButtonLoading(button, false);
+                }
+            }).catch(error => {
+                showNotification('Failed to clear history: ' + error.message, 'error');
+                setButtonLoading(button, false);
+            });
+        }
+    );
 }
 
 document.addEventListener('DOMContentLoaded', function() {
     if (document.getElementById('historyTable')) {
+        // Shared defaults (lengthMenu, language) come from base.html
         $('#historyTable').DataTable({
             order: [[0, 'asc']],
-            pageLength: 25,
-            lengthMenu: [10, 25, 50, 100],
-            language: {
-                search: '<i class="fas fa-search"></i>',
-                searchPlaceholder: 'Search queries...'
-            }
+            pageLength: 25
         });
     }
 });

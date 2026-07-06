@@ -240,7 +240,7 @@
 
     .sticky-header th {
         position: sticky !important;
-        top: 60px;
+        top: var(--navbar-offset);
         z-index: 10;
         background-color: #f8f9fa !important;
         border-bottom: 2px solid #dee2e6;
@@ -256,14 +256,10 @@
         border-bottom: 1px solid #e0e0e0;
     }
 
-    .table-header h4 {
-        margin: 0;
-        font-weight: 600;
-        color: #333;
+    .table-header .page-title {
         display: flex;
         align-items: center;
         gap: 0.5rem;
-        font-size: 1.1rem;
     }
 
     .alert-custom {
@@ -327,7 +323,7 @@
     <div class="sql-editor-card">
         <div class="sql-editor-header" onclick="toggleSqlEditor()">
             <h5><i class="fas fa-code"></i> SQL Query Editor
-                <button class="sql-editor-toggle" type="button" id="sqlEditorToggle" aria-expanded="false" aria-controls="sqlEditorCollapse">
+                <button class="sql-editor-toggle" type="button" id="sqlEditorToggle" aria-expanded="false" aria-controls="sqlEditorCollapse" aria-label="Toggle SQL editor">
                     <i class="fas fa-chevron-right"></i>
                 </button>
             </h5>
@@ -356,15 +352,15 @@
                             <ul class="dropdown-menu" aria-labelledby="quickQueriesBtn">
                                 {% for item in session['misc']|sort %}
                                     <li class="dropdown-submenu">
-                                        <a class="dropdown-item has-submenu" href="#" role="button" onclick="return false;">
+                                        <button type="button" class="dropdown-item has-submenu" aria-haspopup="true" aria-expanded="false">
                                             <i class="fas fa-folder me-2"></i>{{ item|title }}
-                                        </a>
+                                        </button>
                                         <ul class="submenu">
                                             {% for subitem in session['misc'][item] %}
                                                 <li>
-                                                    <a class="dropdown-item" href="#" onclick="loadQueryWithInfo('{{ item }}_item_{{ loop.index }}', '{{ item }}_info_{{ loop.index }}'); return false;">
+                                                    <button type="button" class="dropdown-item" onclick="loadQueryWithInfo('{{ item }}_item_{{ loop.index }}', '{{ item }}_info_{{ loop.index }}'); return false;">
                                                         <i class="fas fa-bolt me-2"></i>{{ subitem['title'] }}
-                                                    </a>
+                                                    </button>
                                                 </li>
                                             {% endfor %}
                                         </ul>
@@ -380,9 +376,9 @@
                                 {% if session['history'] and session['history']|length > 0 %}
                                     {% for item in session['history'][-10:]|reverse %}
                                         <li>
-                                            <a class="dropdown-item" href="#" onclick="loadQuery(window['history_item_{{ loop.index }}']); return false;">
+                                            <button type="button" class="dropdown-item" onclick="loadQuery(window['history_item_{{ loop.index }}']); return false;">
                                                 <i class="fas fa-clock me-2"></i>{{ loop.index }}. {{ item|truncate(60, True) }}
-                                            </a>
+                                            </button>
                                         </li>
                                     {% endfor %}
                                 {% else %}
@@ -396,7 +392,7 @@
                 <form action="/{{ session['server'] }}/{{ session['database'] }}/{{ session['table'] }}/sql/" method="post">
                     <input type="hidden" name="_csrf_token" value="{{ session.csrf_token }}">
                     <div class="mb-4">
-                        <textarea class="form-control font-monospace" name="sql" id="sql" rows="8" placeholder="Enter your SQL query here..." style="font-family: 'Courier New', monospace; font-size: 0.95rem; line-height: 1.6;"></textarea>
+                        <textarea class="form-control font-monospace" name="sql" id="sql" rows="8" placeholder="Enter your SQL query here..."></textarea>
                     </div>
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-primary">
@@ -432,10 +428,10 @@
 
 <div class="table-container">
     <div class="table-header">
-        <h4>
+        <h1 class="page-title">
             <i class="fas fa-table"></i>
             {{ session['table'] }} Table
-        </h4>
+        </h1>
         <div class="table-stats">
             <div class="stat-item">
                 <i class="fas fa-database"></i>
@@ -472,7 +468,7 @@
     </script>
 
     <div>
-        <table id="proxywebtable" class="table table-hover table-striped mb-0">
+        <table id="proxywebtable" class="table table-hover table-striped mb-0" aria-label="{{ session['table'] }} table">
             <thead class="sticky-header">
                 <tr>
                     {% for column_name in content['column_names'] %}
@@ -549,12 +545,11 @@ function toggleSqlEditor() {
 
 // Check localStorage immediately when the script loads, before DOMContentLoaded
 (function() {
-    const STORAGE_KEY = 'proxyweb_sql_editor_collapsed';
     const collapseElement = document.getElementById('sqlEditorCollapse');
     const toggleButton = document.getElementById('sqlEditorToggle');
 
     if (collapseElement && toggleButton) {
-        const savedState = localStorage.getItem(STORAGE_KEY);
+        const savedState = localStorage.getItem(SQL_EDITOR_STORAGE_KEY);
 
         // Apply state immediately if it exists
         if (savedState === 'false') {
@@ -569,16 +564,22 @@ function toggleSqlEditor() {
     }
 })();
 
-// Helper functions for loading queries
-function loadQuery(sql) {
-
-    // Hide all submenus immediately
+// Close every Quick Queries submenu and clear trigger highlights,
+// optionally keeping one submenu/trigger pair open.
+function closeAllSubmenus(exceptSubmenu, exceptTrigger) {
     document.querySelectorAll('.submenu').forEach(s => {
-        s.classList.remove('show');
+        if (s !== exceptSubmenu) s.classList.remove('show');
     });
     document.querySelectorAll('.has-submenu').forEach(t => {
-        t.classList.remove('active');
+        if (t !== exceptTrigger) t.classList.remove('active');
     });
+}
+
+// Shared body of loadQuery/loadQueryWithInfo: close menus, fill the SQL
+// textarea, and expand the editor if collapsed. Returns false when there
+// is no SQL to load.
+function loadSqlIntoEditor(sql) {
+    closeAllSubmenus();
 
     // Close any open dropdown
     ['historyBtn', 'quickQueriesBtn'].forEach(id => {
@@ -589,14 +590,13 @@ function loadQuery(sql) {
         }
     });
 
-    // Handle if sql is undefined or null
     if (!sql) {
-        return;
+        return false;
     }
 
     const textarea = document.getElementById('sql');
     if (!textarea) {
-        return;
+        return false;
     }
 
     textarea.value = sql.replace(/;/g, ';\n');
@@ -612,56 +612,22 @@ function loadQuery(sql) {
             toggleButton.classList.add('expanded');
         }
     }
-
+    return true;
 }
 
+// Public: referenced by server-rendered onclick attributes on the
+// Query History dropdown items.
+function loadQuery(sql) {
+    loadSqlIntoEditor(sql);
+}
+
+// Public: referenced by Quick Queries items; also updates the info panel.
 function loadQueryWithInfo(sqlVarName, infoVarName) {
-
-    // Hide all submenus immediately
-    document.querySelectorAll('.submenu').forEach(s => {
-        s.classList.remove('show');
-    });
-    document.querySelectorAll('.has-submenu').forEach(t => {
-        t.classList.remove('active');
-    });
-
-    // Close the main dropdown
-    const dropdownButton = document.getElementById('quickQueriesBtn');
-    if (dropdownButton) {
-        const bsDropdown = bootstrap.Dropdown.getInstance(dropdownButton);
-        if (bsDropdown) {
-            bsDropdown.hide();
-        }
-    }
-
-    // Evaluate variable names from global scope
     const sql = window[sqlVarName];
     const info = window[infoVarName];
 
-    if (!sql) {
+    if (!loadSqlIntoEditor(sql)) {
         return;
-    }
-
-    if (!info) {
-    }
-
-
-    // Load the SQL into textarea (but don't close dropdown again since we already did it above)
-    const textarea = document.getElementById('sql');
-    if (textarea) {
-        textarea.value = sql.replace(/;/g, ';\n');
-        textarea.focus();
-    }
-
-    // Expand the SQL editor if collapsed
-    const collapseElement = document.getElementById('sqlEditorCollapse');
-    if (collapseElement && !collapseElement.classList.contains('show')) {
-        collapseElement.classList.add('show');
-        const toggleButton = document.getElementById('sqlEditorToggle');
-        if (toggleButton) {
-            toggleButton.setAttribute('aria-expanded', 'true');
-            toggleButton.classList.add('expanded');
-        }
     }
 
     // Update the info panel content (but don't show it automatically)
@@ -699,13 +665,12 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    const STORAGE_KEY = 'proxyweb_sql_editor_collapsed';
     const toggleButton = document.getElementById('sqlEditorToggle');
     const collapseElement = document.getElementById('sqlEditorCollapse');
 
     if (toggleButton && collapseElement) {
         // Check if state was already applied by the immediate script
-        const savedState = localStorage.getItem(STORAGE_KEY);
+        const savedState = localStorage.getItem(SQL_EDITOR_STORAGE_KEY);
 
         // Only restore state if we have a saved preference and it wasn't already applied
         if (savedState !== null && savedState !== undefined) {
@@ -730,30 +695,17 @@ document.addEventListener('DOMContentLoaded', function() {
             toggleButton.classList.remove('expanded');
         }
 
-        // Wait for Bootstrap's collapse to initialize, then ensure state is correct
-        setTimeout(function() {
-            if (savedState === 'false') {
-                collapseElement.classList.add('show');
-                toggleButton.classList.add('expanded');
-                toggleButton.setAttribute('aria-expanded', 'true');
-            } else if (savedState === 'true') {
-                collapseElement.classList.remove('show');
-                toggleButton.classList.remove('expanded');
-                toggleButton.setAttribute('aria-expanded', 'false');
-            }
-        }, 50);
-
         // Listen for collapse events and save state
         collapseElement.addEventListener('show.bs.collapse', function() {
             toggleButton.setAttribute('aria-expanded', 'true');
             toggleButton.classList.add('expanded');
-            localStorage.setItem(STORAGE_KEY, 'false');
+            localStorage.setItem(SQL_EDITOR_STORAGE_KEY, 'false');
         });
 
         collapseElement.addEventListener('hide.bs.collapse', function() {
             toggleButton.setAttribute('aria-expanded', 'false');
             toggleButton.classList.remove('expanded');
-            localStorage.setItem(STORAGE_KEY, 'true');
+            localStorage.setItem(SQL_EDITOR_STORAGE_KEY, 'true');
         });
 
         // Handle toggle button click
@@ -764,10 +716,29 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Handle nested dropdown submenus - simplified click-only logic
-    const dropdownSubmenus = document.querySelectorAll('.editor-controls .dropdown-submenu');
+    // Quick Queries nested submenus. The submenu is moved to <body> and
+    // fixed-positioned so it can escape the dropdown's overflow clipping.
+    function openSubmenu(trigger, submenu) {
+        closeAllSubmenus(submenu, trigger);
 
-    dropdownSubmenus.forEach((submenuItem, index) => {
+        if (submenu.parentElement !== document.body) {
+            document.body.appendChild(submenu);
+        }
+
+        // Position after the dropdown has rendered
+        requestAnimationFrame(() => {
+            const dropdownRect = trigger.closest('.dropdown-menu').getBoundingClientRect();
+            const triggerRect = trigger.getBoundingClientRect();
+
+            submenu.style.left = (dropdownRect.right + 5) + 'px'; // Right of parent dropdown + gap
+            submenu.style.top = triggerRect.top + 'px';           // Align with the trigger item
+
+            submenu.classList.add('show');
+            trigger.classList.add('active');
+        });
+    }
+
+    document.querySelectorAll('.editor-controls .dropdown-submenu').forEach(submenuItem => {
         const trigger = submenuItem.querySelector('.has-submenu');
         const submenu = submenuItem.querySelector('.submenu');
 
@@ -775,91 +746,16 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-
-        // Store original parent for cleanup
-        const originalParent = submenu.parentElement;
-
         // Show submenu on hover (desktop)
         submenuItem.addEventListener('mouseenter', function() {
-
-            // Close all other submenus first and remove active class
-            document.querySelectorAll('.submenu').forEach(s => {
-                if (s !== submenu) {
-                    s.classList.remove('show');
-                }
-            });
-            document.querySelectorAll('.has-submenu').forEach(t => {
-                t.classList.remove('active');
-            });
-
-            // Move submenu to body to escape parent overflow context
-            if (submenu.parentElement !== document.body) {
-                document.body.appendChild(submenu);
-            }
-
-            // Use requestAnimationFrame to ensure positioning after dropdown is rendered
-            requestAnimationFrame(() => {
-                // Get the parent dropdown menu position
-                const dropdownMenu = trigger.closest('.dropdown-menu');
-                const dropdownRect = dropdownMenu.getBoundingClientRect();
-                const triggerRect = trigger.getBoundingClientRect();
-
-                // Position submenu to the right of the entire dropdown menu
-                submenu.style.left = (dropdownRect.right + 5) + 'px';  // Right of parent dropdown + 5px gap
-                submenu.style.top = triggerRect.top + 'px';            // Align with top of trigger item
-
-
-                submenu.classList.add('show');
-                trigger.classList.add('active');
-            });
+            openSubmenu(trigger, submenu);
         });
 
-        // Don't close immediately on mouseleave - wait for submenu's own mouseleave
-
-        // Click on trigger - ensure submenu stays open (don't toggle if already shown by hover)
+        // Click on trigger - ensure submenu stays open
         trigger.addEventListener('click', function(e) {
             e.preventDefault();
             e.stopPropagation(); // Prevent dropdown from closing
-
-            const isAlreadyVisible = submenu.classList.contains('show');
-
-            // Close all other submenus first and remove active class
-            document.querySelectorAll('.submenu').forEach(s => {
-                if (s !== submenu) {
-                    s.classList.remove('show');
-                }
-            });
-            document.querySelectorAll('.has-submenu').forEach(t => {
-                if (t !== trigger) {
-                    t.classList.remove('active');
-                }
-            });
-
-            // Move submenu to body to escape parent overflow context
-            if (submenu.parentElement !== document.body) {
-                document.body.appendChild(submenu);
-            }
-
-            // Use requestAnimationFrame to ensure positioning after dropdown is rendered
-            requestAnimationFrame(() => {
-                // Get the parent dropdown menu position
-                const dropdownMenu = trigger.closest('.dropdown-menu');
-                const dropdownRect = dropdownMenu.getBoundingClientRect();
-                const triggerRect = trigger.getBoundingClientRect();
-
-                // Position submenu to the right of the entire dropdown menu
-                submenu.style.left = (dropdownRect.right + 5) + 'px';  // Right of parent dropdown + 5px gap
-                submenu.style.top = triggerRect.top + 'px';            // Align with top of trigger item
-
-
-                // Always ensure this submenu is shown (don't toggle off if already visible)
-                submenu.classList.add('show');
-                trigger.classList.add('active');
-            });
-
-            if (!isAlreadyVisible) {
-            } else {
-            }
+            openSubmenu(trigger, submenu);
         });
 
         // Keep submenu open when hovering over it
@@ -868,27 +764,15 @@ document.addEventListener('DOMContentLoaded', function() {
             trigger.classList.add('active');
         });
 
-        // Hide submenu when mouse leaves the submenu itself
-        submenu.addEventListener('mouseleave', function(e) {
-
-            // Use a longer delay and check if mouse went back to parent or is truly gone
+        // Hide submenu when the mouse has left both the submenu and its
+        // trigger; the delay allows mouse travel across the gap between them
+        submenu.addEventListener('mouseleave', function() {
             setTimeout(() => {
-                // Check if mouse is back on the parent item or still on submenu
-                const mouseStillOnParent = submenuItem.matches(':hover');
-                const mouseStillOnSubmenu = submenu.matches(':hover');
-
-
-                if (!mouseStillOnParent && !mouseStillOnSubmenu) {
+                if (!submenuItem.matches(':hover') && !submenu.matches(':hover')) {
                     submenu.classList.remove('show');
                     trigger.classList.remove('active');
-                } else {
                 }
-            }, 500);  // Longer delay to allow for mouse movement
-        });
-
-        // Prevent submenu items from closing the main dropdown
-        submenu.addEventListener('click', function(e) {
-            // Don't stop propagation here - let the onclick handler work
+            }, 300);
         });
     });
 
@@ -898,17 +782,10 @@ document.addEventListener('DOMContentLoaded', function() {
         const dropdownElement = mainDropdown.nextElementSibling;
         if (dropdownElement) {
             dropdownElement.addEventListener('hidden.bs.dropdown', function() {
-                document.querySelectorAll('.submenu').forEach(submenu => {
-                    submenu.classList.remove('show');
-                });
-                document.querySelectorAll('.has-submenu').forEach(trigger => {
-                    trigger.classList.remove('active');
-                });
+                closeAllSubmenus();
             });
         }
     }
-
-
 });
 </script>
 

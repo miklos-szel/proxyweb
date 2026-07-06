@@ -42,22 +42,23 @@
         padding: 1rem;
     }
 
-    .form-control {
-        border: 1px solid #ddd;
-        border-radius: var(--border-radius);
-        padding: 0.5rem;
+    /* Raw YAML editor textarea (scoped: must not leak onto other inputs) */
+    #settings-raw {
         font-family: 'Courier New', monospace;
         font-size: 0.875rem;
         line-height: 1.5;
         height: auto;
-        min-height: 500px !important;
+        min-height: 500px;
         overflow-y: auto;
         resize: vertical;
     }
 
-    .form-control:focus {
-        border-color: var(--primary-color);
-        box-shadow: 0 0 0 3px rgba(71, 85, 105, 0.1);
+    /* Import modal textarea */
+    #importYamlContent {
+        font-family: 'Courier New', monospace;
+        font-size: 0.875rem;
+        min-height: 300px;
+        resize: vertical;
     }
 
     .btn-group-custom {
@@ -80,29 +81,6 @@
         color: var(--success-color);
         margin-bottom: 0;
         margin-right: 0.5rem;
-    }
-
-    .alert-success-custom .btn.btn-primary.btn-icon {
-        color: white !important;
-        text-decoration: none !important;
-        background: linear-gradient(135deg, #475569 0%, #64748b 100%) !important;
-        box-shadow: 0 4px 6px -1px rgba(71, 85, 105, 0.3) !important;
-        padding: 1rem 2rem !important;
-        border-radius: 0.5rem !important;
-        font-weight: 600 !important;
-        font-size: 1rem !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        gap: 0.5rem !important;
-        min-width: 200px !important;
-        white-space: nowrap !important;
-    }
-
-    .alert-success-custom .btn.btn-primary.btn-icon:hover {
-        background: linear-gradient(135deg, #334155 0%, #475569 100%) !important;
-        box-shadow: 0 10px 15px -3px rgba(71, 85, 105, 0.4) !important;
-        transform: translateY(-1px);
     }
 
     .config-info {
@@ -131,12 +109,6 @@
         color: var(--secondary-color);
         font-size: 0.875rem;
         line-height: 1.4;
-    }
-
-    .btn-icon {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.375rem;
     }
 
     /* Editor Mode Toggle */
@@ -203,22 +175,6 @@
         color: var(--dark-color);
         margin-bottom: 0.5rem;
         font-size: 0.95rem;
-    }
-
-    .form-control-ui {
-        width: 100%;
-        border: 2px solid #e2e8f0;
-        border-radius: var(--border-radius);
-        padding: 0.875rem 1.25rem;
-        font-size: 1rem;
-        transition: all 0.2s ease;
-        background: white;
-    }
-
-    .form-control-ui:focus {
-        border-color: var(--primary-color);
-        box-shadow: 0 0 0 3px rgba(71, 85, 105, 0.1);
-        outline: none;
     }
 
     .checkbox-group {
@@ -318,39 +274,6 @@
         transform: scale(1.1);
     }
 
-    /* Save Status */
-    .save-status {
-        position: fixed;
-        top: 100px;
-        right: 2rem;
-        background: white;
-        border-radius: var(--border-radius);
-        padding: 1.5rem 2rem;
-        box-shadow: var(--box-shadow-lg);
-        border-left: 4px solid var(--primary-color);
-        min-width: 300px;
-        z-index: 1000;
-        display: none;
-    }
-
-    .save-status.show {
-        display: block;
-        animation: slideIn 0.3s ease;
-    }
-
-    .save-status.success {
-        border-left-color: var(--success-color);
-    }
-
-    .save-status.error {
-        border-left-color: var(--danger-color);
-    }
-
-    @keyframes slideIn {
-        from { transform: translateX(400px); opacity: 0; }
-        to { transform: translateX(0); opacity: 1; }
-    }
-
     /* Import/Export */
     .import-export-bar {
         background: white;
@@ -367,6 +290,11 @@
 
     .import-export-bar .btn {
         white-space: nowrap;
+    }
+
+    .import-export-bar > i {
+        font-size: 1.5rem;
+        color: var(--info-color);
     }
 
     /* Collapsible sections */
@@ -441,16 +369,16 @@
 
 <div class="settings-header">
     <div class="container d-flex align-items-center gap-3">
-        <a href="/" style="display:flex;align-items:center;text-decoration:none;">
-            <img src="/static/images/app_icon.png" alt="ProxyWeb" style="height:28px;width:28px;">
+        <a href="/" class="app-icon-link">
+            <img src="/static/images/app_icon.png" alt="ProxyWeb" class="app-icon">
         </a>
-        <h1 style="margin:0;font-size:1.1rem;font-weight:600;">
+        <h1 class="page-title">
             <i class="fas fa-cog"></i> Settings
         </h1>
     </div>
 </div>
 
-<div class="container">
+<main class="container">
     {% if message %}
         <div class="alert alert-success-custom text-center" role="alert">
             <div class="alert-icon">
@@ -458,15 +386,15 @@
             </div>
             <h4 class="alert-heading">Configuration Saved Successfully!</h4>
             <p class="mb-3">Your settings have been saved. Click the button below to return to the main dashboard.</p>
-            <a href="/" class="btn btn-primary btn-icon">
-                <i class="fas fa-arrow-right"></i>
+            <a href="/" class="btn btn-primary btn-lg">
+                <i class="fas fa-arrow-right me-1"></i>
                 Go to Dashboard
             </a>
         </div>
     {% else %}
         <!-- Import/Export Bar -->
         <div class="import-export-bar">
-            <i class="fas fa-download" style="font-size: 1.5rem; color: var(--info-color);"></i>
+            <i class="fas fa-download"></i>
             <div>
                 <strong>Configuration Management</strong>
                 <p style="margin: 0; font-size: 0.9rem; color: var(--secondary-color);">Import, export, or backup your configuration</p>
@@ -489,17 +417,6 @@
             <button type="button" class="btn btn-outline-primary" id="btn-raw-yaml" onclick="switchMode('raw')">
                 <i class="fas fa-code"></i> Raw YAML
             </button>
-        </div>
-
-        <!-- Success Message Display -->
-        <div id="saveStatus" class="save-status">
-            <div style="display: flex; align-items: center; gap: 1rem;">
-                <i id="saveStatusIcon" class="fas fa-check-circle" style="font-size: 2rem; color: var(--success-color);"></i>
-                <div>
-                    <strong id="saveStatusTitle">Success!</strong>
-                    <p id="saveStatusMessage" style="margin: 0; font-size: 0.9rem; color: var(--secondary-color);"></p>
-                </div>
-            </div>
         </div>
 
         <!-- UI Editor Mode -->
@@ -527,7 +444,7 @@
                                 <label for="global_default_server">
                                     <i class="fas fa-server"></i> Default Server
                                 </label>
-                                <input type="text" id="global_default_server" name="global_default_server" class="form-control-ui" placeholder="proxysql" />
+                                <input type="text" id="global_default_server" name="global_default_server" class="form-control" placeholder="proxysql" />
                                 <small style="color: var(--secondary-color); font-size: 0.85rem;">The default server to connect to</small>
                             </div>
 
@@ -579,28 +496,28 @@
                                 <label for="auth_admin_user">
                                     <i class="fas fa-user"></i> Admin Username
                                 </label>
-                                <input type="text" id="auth_admin_user" name="auth_admin_user" class="form-control-ui" placeholder="admin" />
+                                <input type="text" id="auth_admin_user" name="auth_admin_user" class="form-control" placeholder="admin" />
                             </div>
 
                             <div class="form-group">
                                 <label for="auth_admin_password">
                                     <i class="fas fa-lock"></i> Admin Password
                                 </label>
-                                <input type="password" id="auth_admin_password" name="auth_admin_password" class="form-control-ui" placeholder="********" />
+                                <input type="password" id="auth_admin_password" name="auth_admin_password" class="form-control" placeholder="********" />
                             </div>
 
                             <div class="form-group">
                                 <label for="auth_readonly_user">
                                     <i class="fas fa-user-lock"></i> Read-Only Username
                                 </label>
-                                <input type="text" id="auth_readonly_user" name="auth_readonly_user" class="form-control-ui" placeholder="readonly" />
+                                <input type="text" id="auth_readonly_user" name="auth_readonly_user" class="form-control" placeholder="readonly" />
                             </div>
 
                             <div class="form-group">
                                 <label for="auth_readonly_password">
                                     <i class="fas fa-lock"></i> Read-Only Password
                                 </label>
-                                <input type="password" id="auth_readonly_password" name="auth_readonly_password" class="form-control-ui" placeholder="********" />
+                                <input type="password" id="auth_readonly_password" name="auth_readonly_password" class="form-control" placeholder="********" />
                             </div>
                         </div>
                     </div>
@@ -619,14 +536,14 @@
                                 <label for="flask_SECRET_KEY">
                                     <i class="fas fa-key"></i> Secret Key
                                 </label>
-                                <input type="text" id="flask_SECRET_KEY" name="flask_SECRET_KEY" class="form-control-ui" placeholder="12345678901234567890" />
+                                <input type="text" id="flask_SECRET_KEY" name="flask_SECRET_KEY" class="form-control" placeholder="12345678901234567890" />
                             </div>
 
                             <div class="form-group">
                                 <label for="flask_SEND_FILE_MAX_AGE_DEFAULT">
                                     <i class="fas fa-clock"></i> Send File Max Age Default
                                 </label>
-                                <input type="text" id="flask_SEND_FILE_MAX_AGE_DEFAULT" name="flask_SEND_FILE_MAX_AGE_DEFAULT" class="form-control-ui" placeholder="0" />
+                                <input type="text" id="flask_SEND_FILE_MAX_AGE_DEFAULT" name="flask_SEND_FILE_MAX_AGE_DEFAULT" class="form-control" placeholder="0" />
                             </div>
 
                             <div class="form-group">
@@ -701,19 +618,19 @@
             </div>
         </div>
     {% endif %}
-</div>
+</main>
 
 <!-- Import Modal -->
-<div id="importModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 2000; align-items: center; justify-content: center;">
+<div id="importModal" role="dialog" aria-modal="true" aria-labelledby="importModalTitle" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 2000; align-items: center; justify-content: center;">
     <div style="background: white; border-radius: var(--border-radius); padding: 2rem; max-width: 800px; width: 90%; max-height: 80vh; overflow: auto;">
-        <h3 style="margin-top: 0;">
+        <h3 id="importModalTitle" style="margin-top: 0;">
             <i class="fas fa-file-import"></i> Import Configuration
         </h3>
         <p>Paste your YAML configuration below:</p>
         <textarea id="importYamlContent" class="form-control" style="min-height: 300px;" placeholder="Paste YAML here..."></textarea>
         <div style="margin-top: 1.5rem; display: flex; gap: 1rem; justify-content: flex-end;">
             <button type="button" class="btn btn-outline-secondary" onclick="closeImportModal()">Cancel</button>
-            <button type="button" class="btn btn-primary" onclick="importConfig()">
+            <button type="button" class="btn btn-primary" id="importConfirmBtn" onclick="importConfig()">
                 <i class="fas fa-upload"></i> Import
             </button>
         </div>
