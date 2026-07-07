@@ -623,7 +623,7 @@
 
   <!-- HERO -->
   <section class="hero">
-    <div class="hero-badge">Open Source &middot; GPL-3.0 &middot; MySQL &amp; PostgreSQL</div>
+    <div class="hero-badge">v2.2.1 &middot; New: Prod-server highlight &middot; MySQL &amp; PostgreSQL</div>
     <h1>A web interface for<br>ProxySQL management</h1>
     <p>
       Manage ProxySQL for <strong>MySQL and PostgreSQL</strong> backends. Browse tables, edit rows inline, run SQL queries, compare Disk/Memory/Runtime configs, and manage multiple instances &mdash; all from your browser.
@@ -715,6 +715,24 @@
         <div class="feature-label">Operations</div>
         <h3>Copy row as SQL</h3>
         <p>One click copies any row as the INSERT (or SET, for global variables) that would recreate it. Works on Disk, Memory, and Runtime tables &mdash; runtime_ rows copy as statements pasteable against the Memory table.</p>
+      </div>
+
+      <div class="feature-card fade-up">
+        <div class="feature-label">Safety</div>
+        <h3>Prod-server highlight</h3>
+        <p>Optional red border around the header whenever the selected server's name contains &ldquo;prod&rdquo; &mdash; a visual guard against running changes on production. Off by default, one checkbox to enable.</p>
+      </div>
+
+      <div class="feature-card fade-up">
+        <div class="feature-label">Operations</div>
+        <h3>Database dump</h3>
+        <p>Download a data-only dump of ProxySQL's main database as a timestamped .sql file straight from the Misc menu. Admin-only, runtime_ tables excluded.</p>
+      </div>
+
+      <div class="feature-card fade-up">
+        <div class="feature-label">Security</div>
+        <h3>Hardened read-only mode</h3>
+        <p>The read-only SQL gate parses statement boundaries the way the database does &mdash; tracking string literals and comments, rejecting CTE-fronted mutations &mdash; and applies to read-only servers, not just read-only users.</p>
       </div>
     </div>
   </section>

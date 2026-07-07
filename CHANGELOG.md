@@ -8,6 +8,8 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
 
 ## [Unreleased]
 
+## [2.2.1] — 2026-07-07
+
 ### Security
 - The read-only SQL gate no longer classifies `WITH …` statements as
   read-only: a leading CTE can front a mutation
@@ -285,7 +287,8 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
 
 See the git history for earlier milestones.
 
-[Unreleased]: https://github.com/miklos-szel/proxyweb/compare/v2.1.5...HEAD
+[Unreleased]: https://github.com/miklos-szel/proxyweb/compare/v2.2.1...HEAD
+[2.2.1]: https://github.com/miklos-szel/proxyweb/compare/v2.1.5...v2.2.1
 [2.1.5]: https://github.com/miklos-szel/proxyweb/compare/v2.1.4...v2.1.5
 [2.1.4]: https://github.com/miklos-szel/proxyweb/compare/v2.1.3...v2.1.4
 [2.1.3]: https://github.com/miklos-szel/proxyweb/compare/2.1.2...v2.1.3
