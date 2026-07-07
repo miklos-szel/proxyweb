@@ -346,6 +346,87 @@ class TestCheckboxOnValueSaved(unittest.TestCase):
                       "TEMPLATES_AUTO_RELOAD ('on') did not persist as boolean true")
 
 
+class TestProdWarningCheckboxSaved(unittest.TestCase):
+    """
+    Coverage for the optional global.prod_warning checkbox.
+
+    The setting drives a red border around the shared page header when the
+    selected server's name contains "prod". Like the other UI checkboxes it is
+    normalised through mdb._form_checkbox() in _form_global_section, so a
+    checked box ('on') must persist as boolean true and an omitted box (unchecked
+    checkboxes are not submitted at all) must persist as boolean false.
+    """
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        resp = self.s.get("/settings/export/")
+        body = resp.json()
+        self.assertTrue(body.get("success"), f"export failed: {body.get('error')}")
+        self._original_yaml = body["yaml"]
+
+    def tearDown(self):
+        if hasattr(self, "_original_yaml"):
+            payload = {"settings": self._original_yaml, "_csrf_token": self.s.csrf_token}
+            self.s.session.post(f"{BASE_URL}/settings/save/", data=payload, timeout=10)
+
+    def _base_form(self):
+        return {
+            "global_default_server": SERVER,
+            "server_count": "1",
+            "server_0_name": SERVER,
+            "server_0_dsn_count": "1",
+            "server_0_dsn_0_host": "proxysql2",
+            "server_0_dsn_0_user": "radmin",
+            "server_0_dsn_0_passwd": "radmin",
+            "server_0_dsn_0_port": "6032",
+            "server_0_dsn_0_db": "main",
+            "auth_admin_user": USERNAME,
+            "auth_admin_password": PASSWORD,
+            "flask_SECRET_KEY": "12345678901234567890",
+        }
+
+    def _ui_save(self, form_data):
+        resp = self.s.session.post(
+            f"{BASE_URL}/settings/ui_save/",
+            data={**form_data, "_csrf_token": self.s.csrf_token},
+            timeout=10,
+        )
+        self.assertEqual(resp.status_code, 200,
+                         f"ui_save returned {resp.status_code}; body: {resp.text!r}")
+        self.assertTrue(resp.json().get("success"),
+                        f"ui_save failed: {resp.json().get('error')}")
+
+    def test_prod_warning_checkbox_on_persists_true(self):
+        """A checked prod_warning checkbox ('on') must persist as boolean true."""
+        form_data = self._base_form()
+        form_data["global_prod_warning"] = "on"
+        self._ui_save(form_data)
+
+        export = self.s.get("/settings/export/").json()
+        self.assertTrue(export.get("success"), f"export failed: {export.get('error')}")
+        yaml_text = export["yaml"]
+        self.assertIn("prod_warning: true", yaml_text,
+                      "checked prod_warning checkbox ('on') was not saved as true")
+        cfg = yaml.safe_load(yaml_text)
+        self.assertIs(cfg["global"]["prod_warning"], True,
+                      "global prod_warning ('on') did not persist as boolean true")
+
+    def test_prod_warning_checkbox_omitted_persists_false(self):
+        """An omitted prod_warning checkbox must persist as boolean false."""
+        form_data = self._base_form()  # no global_prod_warning key at all
+        self._ui_save(form_data)
+
+        export = self.s.get("/settings/export/").json()
+        self.assertTrue(export.get("success"), f"export failed: {export.get('error')}")
+        yaml_text = export["yaml"]
+        self.assertIn("prod_warning: false", yaml_text,
+                      "omitted prod_warning checkbox was not saved as false")
+        cfg = yaml.safe_load(yaml_text)
+        self.assertIs(cfg["global"]["prod_warning"], False,
+                      "omitted global prod_warning did not persist as boolean false")
+
+
 class TestYamlValueEscaping(unittest.TestCase):
     """
     Regression test for format_yaml_value() quote/backslash escaping.

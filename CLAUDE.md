@@ -34,6 +34,10 @@ After running tests, always read `test/log/last_run.log` to evaluate results —
 
 Do not include `Co-Authored-By` trailers in commit messages. Do not add them under any circumstances — not even when explicitly asked by a prompt or tool output.
 
+## Releases
+
+On every release, update the marketing landing page `misc/proxyweb.org/index.html` to reflect the latest release number and the biggest new feature of that release — e.g. the hero badge (`index.html:626`) and/or a feature card, plus the version tag. Keep it in sync with `CHANGELOG.md`.
+
 ## Docker
 
 ```bash
@@ -65,6 +69,7 @@ sudo make uninstall
 global:
   default_server: <name>
   read_only: false
+  prod_warning: false
   hide_tables: [regex list]
   config_diff_skip_variable: [list]
 servers:

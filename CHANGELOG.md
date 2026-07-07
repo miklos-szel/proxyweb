@@ -105,6 +105,17 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
   contain commas plus double quotes.
 - `PyYAML` added to the test-runner requirements (the new settings tests parse
   exported YAML).
+- **Prod-server header highlight** (optional, off by default): a new
+  `global.prod_warning` setting draws a thin red border around the page header
+  whenever the selected server's name contains `prod` (case-insensitive), as a
+  visual guard against acting on a production instance. Toggle it from the
+  settings UI ("Highlight Prod Servers"). Covered by
+  `TestProdWarningCheckboxSaved` and
+  `TestProdWarningHeaderBorder`.
+- The header brand now reads `ProxyWeb - v<version>`: the **ProxyWeb** name
+  links to <https://proxyweb.org> and the version links to the changelog.
+  Applied to both the main navbar and the standalone settings header. Covered
+  by `TestNavigation.test_header_brand_links_to_project_and_changelog`.
 
 ## [2.1.5] — 2026-05-26
 

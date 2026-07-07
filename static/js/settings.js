@@ -109,6 +109,7 @@ function populateForm(config) {
     // Global section — clear first so stale values don't persist on reset
     document.getElementById('global_default_server').value = '';
     document.getElementById('global_read_only').checked = false;
+    document.getElementById('global_prod_warning').checked = false;
     document.getElementById('global_hide_tables_container').innerHTML = '';
 
     if (config.global) {
@@ -120,6 +121,10 @@ function populateForm(config) {
 
         if (typeof global.read_only !== 'undefined') {
             document.getElementById('global_read_only').checked = global.read_only;
+        }
+
+        if (typeof global.prod_warning !== 'undefined') {
+            document.getElementById('global_prod_warning').checked = global.prod_warning;
         }
 
         if (global.hide_tables && Array.isArray(global.hide_tables)) {

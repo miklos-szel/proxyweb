@@ -58,6 +58,10 @@ body {
     border-bottom: 1px solid #e0e0e0;
 }
 
+.navbar.prod-warning {
+    border: 2px solid #dc3545;
+}
+
 .navbar-toggler {
     border-color: #ccc;
 }

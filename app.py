@@ -55,6 +55,15 @@ def inject_version():
 config = "config/config.yml"
 
 
+@app.context_processor
+def inject_prod_warning():
+    try:
+        enabled = bool(mdb.get_config(config).get('global', {}).get('prod_warning', False))
+    except Exception:
+        enabled = False
+    return {'prod_warning_enabled': enabled}
+
+
 def _atomic_write(path, content):
     """
     Write the given content to a file at `path` atomically.

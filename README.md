@@ -24,7 +24,6 @@ ProxyWeb gives you full control over ProxySQL through a clean web interface — 
 - **Settings UI** — edit `config.yml` through a structured form or raw YAML editor
 - **Hide tables** — filter out unused tables globally or per server
 - **Configurable reports** — define reusable SQL reports in config
-- **Docker and systemd** — run as a container or install as a native service
 
 | Config diff view | SQL editor with quick queries |
 |:---:|:---:|
@@ -40,6 +39,9 @@ Then open `http://<host>:5000` and log in with the default credentials (`admin` 
 
 > [!IMPORTANT]
 > ProxySQL's admin port (default **6032**) must be reachable from the ProxyWeb container. Configure the connection in Settings after first login.
+>
+> [!WARNING]
+> **macOS users:** port **5000** is used by the AirPlay Receiver (Control Center → AirDrop & Handoff), so `http://localhost:5000` may fail or hit macOS instead of ProxyWeb. Either disable AirPlay Receiver or map a different host port, e.g. `-p 5001:5000`, and open `http://localhost:5001`.
 >
 > [!NOTE]
 > The login page shows a hint when default credentials are still in use.
@@ -162,7 +164,15 @@ bash run_tests.sh          # build stack, run all tests, tear down
 bash run_tests.sh --keep   # same but leave the stack running
 ```
 
-With `--keep`, you can interact with all services:
+To bring up the **whole stack** (ProxyWeb + both ProxySQL instances + MySQL/PostgreSQL backends) for manual exploration **without** running the suite, start it directly with Compose — the `test-runner` container stays out of the way behind its `tests` profile:
+
+```bash
+cd test
+docker compose up -d --build --wait    # start everything; ProxyWeb on http://localhost:5000
+docker compose down -v --remove-orphans # stop and clean up when done
+```
+
+Either way (`run_tests.sh --keep` or `docker compose up`), you can interact with all services:
 
 ```bash
 # Browse ProxyWeb
@@ -196,3 +206,7 @@ docker compose down -v --remove-orphans
 
 - René Cannaò and the SysOwn team for [ProxySQL](https://proxysql.com/)
 - Tripolszky 'Tripy' Zsolt
+
+---
+
+<sub>ProxyWeb — open source since 2020.</sub>
