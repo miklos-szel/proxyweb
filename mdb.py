@@ -405,6 +405,7 @@ def _form_global_section(form_data):
 
     # Handle read_only - checkbox unchecked means false (checkbox not submitted when unchecked)
     section['read_only'] = _form_checkbox(form_data.get('global_read_only', ''))
+    section['prod_warning'] = _form_checkbox(form_data.get('global_prod_warning', ''))
 
     if 'global_sqlite_db_path' in form_data:
         section['sqlite_db_path'] = form_data['global_sqlite_db_path']

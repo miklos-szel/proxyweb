@@ -14,6 +14,27 @@
         border-bottom: 1px solid #e0e0e0;
     }
 
+    .settings-brand-name {
+        font-weight: 600;
+        color: var(--dark-color);
+    }
+
+    .brand-sep {
+        opacity: 0.5;
+    }
+
+    .settings-brand-version {
+        font-size: 0.85rem;
+        color: var(--secondary-color);
+        opacity: 0.8;
+        text-decoration: none;
+    }
+
+    .settings-brand-version:hover {
+        opacity: 1;
+        text-decoration: underline;
+    }
+
     .settings-card {
         background: white;
         border-radius: var(--border-radius);
@@ -369,9 +390,16 @@
 
 <div class="settings-header">
     <div class="container d-flex align-items-center gap-3">
-        <a href="/" class="app-icon-link">
+        <a href="https://proxyweb.org" target="_blank" rel="noopener"
+           class="app-icon-link d-flex align-items-center gap-2 text-decoration-none text-reset">
             <img src="/static/images/app_icon.png" alt="ProxyWeb" class="app-icon">
+            <span class="settings-brand-name">ProxyWeb</span>
         </a>
+        {% if app_version %}
+        <span class="brand-sep">-</span>
+        <a href="{{ changelog_url }}" target="_blank" rel="noopener"
+           class="settings-brand-version" title="View changelog">v{{ app_version }}</a>
+        {% endif %}
         <h1 class="page-title">
             <i class="fas fa-cog"></i> Settings
         </h1>
@@ -454,6 +482,14 @@
                                     <label for="global_read_only">Read-Only Mode</label>
                                 </div>
                                 <small style="color: var(--secondary-color); font-size: 0.85rem;">Enable read-only mode to prevent modifications</small>
+                            </div>
+
+                            <div class="form-group">
+                                <div class="checkbox-group">
+                                    <input type="checkbox" id="global_prod_warning" name="global_prod_warning" />
+                                    <label for="global_prod_warning">Highlight Prod Servers (red header border)</label>
+                                </div>
+                                <small style="color: var(--secondary-color); font-size: 0.85rem;">Draw a red border around the page header when the selected server's name contains "prod"</small>
                             </div>
 
                             <div class="form-group">
