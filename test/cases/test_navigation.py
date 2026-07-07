@@ -62,22 +62,20 @@ class TestNavigation(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn("global", resp.text)  # YAML content
 
-    def test_header_brand_links_to_project_and_changelog(self):
+    def test_settings_header_has_import_export_actions(self):
         """
-        The header brand shows 'ProxyWeb - v<version>' where the name links to
-        proxyweb.org and the version links to the changelog. Covers both the
-        main navbar (list_dbs.html) and the standalone settings header, which
-        do not share markup.
+        The Import/Export YAML actions live in the settings page header; the
+        standalone "Configuration Management" bar was removed. Guards that the
+        actions stayed reachable after the box was dropped.
         """
-        for path in (f"/{SERVER}/{DATABASE}/global_variables/", "/settings/edit/"):
-            resp = self.s.get(path)
-            self.assertEqual(resp.status_code, 200, f"GET {path} failed")
-            self.assertIn("https://proxyweb.org", resp.text,
-                          f"brand link to proxyweb.org missing on {path}")
-            # Version parsed from CHANGELOG.md is exposed as app_version and
-            # rendered as a changelog link next to the name.
-            self.assertIn("CHANGELOG.md", resp.text,
-                          f"changelog link missing from header on {path}")
+        resp = self.s.get("/settings/edit/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Export YAML", resp.text,
+                      "Export YAML action missing from settings header")
+        self.assertIn("Import YAML", resp.text,
+                      "Import YAML action missing from settings header")
+        self.assertNotIn("Configuration Management", resp.text,
+                         "the removed Configuration Management box is still rendered")
 
     def test_config_diff_page(self):
         resp = self.s.get(f"/{SERVER}/config_diff/")

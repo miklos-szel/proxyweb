@@ -14,27 +14,6 @@
         border-bottom: 1px solid #e0e0e0;
     }
 
-    .settings-brand-name {
-        font-weight: 600;
-        color: var(--dark-color);
-    }
-
-    .brand-sep {
-        opacity: 0.5;
-    }
-
-    .settings-brand-version {
-        font-size: 0.85rem;
-        color: var(--secondary-color);
-        opacity: 0.8;
-        text-decoration: none;
-    }
-
-    .settings-brand-version:hover {
-        opacity: 1;
-        text-decoration: underline;
-    }
-
     .settings-card {
         background: white;
         border-radius: var(--border-radius);
@@ -295,29 +274,6 @@
         transform: scale(1.1);
     }
 
-    /* Import/Export */
-    .import-export-bar {
-        background: white;
-        border: 1px solid #e0e0e0;
-        border-radius: var(--border-radius);
-        padding: 1rem;
-        margin-bottom: 1.5rem;
-        display: flex;
-        gap: 1rem;
-        flex-wrap: wrap;
-        align-items: center;
-        box-shadow: var(--box-shadow);
-    }
-
-    .import-export-bar .btn {
-        white-space: nowrap;
-    }
-
-    .import-export-bar > i {
-        font-size: 1.5rem;
-        color: var(--info-color);
-    }
-
     /* Collapsible sections */
     .collapsible {
         cursor: pointer;
@@ -363,14 +319,6 @@
             flex-direction: column;
         }
 
-        .import-export-bar {
-            flex-direction: column;
-        }
-
-        .import-export-bar .btn {
-            width: 100%;
-        }
-
         .server-card-header,
         .server-card-actions {
             flex-direction: column;
@@ -389,20 +337,23 @@
 </style>
 
 <div class="settings-header">
-    <div class="container d-flex align-items-center gap-3">
-        <a href="https://proxyweb.org" target="_blank" rel="noopener"
-           class="app-icon-link d-flex align-items-center gap-2 text-decoration-none text-reset">
+    <div class="container d-flex align-items-center gap-3 flex-wrap">
+        <a href="/" class="app-icon-link">
             <img src="/static/images/app_icon.png" alt="ProxyWeb" class="app-icon">
-            <span class="settings-brand-name">ProxyWeb</span>
         </a>
-        {% if app_version %}
-        <span class="brand-sep">-</span>
-        <a href="{{ changelog_url }}" target="_blank" rel="noopener"
-           class="settings-brand-version" title="View changelog">v{{ app_version }}</a>
-        {% endif %}
         <h1 class="page-title">
             <i class="fas fa-cog"></i> Settings
         </h1>
+        {% if not message %}
+        <div class="ms-auto d-flex gap-2">
+            <button type="button" class="btn btn-outline-primary btn-sm" onclick="exportConfig()">
+                <i class="fas fa-file-export"></i> Export YAML
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="showImportModal()">
+                <i class="fas fa-file-import"></i> Import YAML
+            </button>
+        </div>
+        {% endif %}
     </div>
 </div>
 
@@ -420,23 +371,6 @@
             </a>
         </div>
     {% else %}
-        <!-- Import/Export Bar -->
-        <div class="import-export-bar">
-            <i class="fas fa-download"></i>
-            <div>
-                <strong>Configuration Management</strong>
-                <p style="margin: 0; font-size: 0.9rem; color: var(--secondary-color);">Import, export, or backup your configuration</p>
-            </div>
-            <div style="margin-left: auto; display: flex; gap: 0.5rem;">
-                <button type="button" class="btn btn-outline-primary btn-sm" onclick="exportConfig()">
-                    <i class="fas fa-file-export"></i> Export YAML
-                </button>
-                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="showImportModal()">
-                    <i class="fas fa-file-import"></i> Import YAML
-                </button>
-            </div>
-        </div>
-
         <!-- Editor Mode Toggle -->
         <div class="editor-mode-toggle">
             <button type="button" class="btn btn-outline-primary active" id="btn-ui-editor" onclick="switchMode('ui')">

@@ -35,42 +35,14 @@
         padding: 0.5rem 0.875rem;
         background-color: rgba(71, 85, 105, 0.1);
     }
-
-    /* Version suffix on the brand: subtle, links to the changelog */
-    .brand-sep {
-        opacity: 0.5;
-        font-weight: 400;
-    }
-
-    .brand-version {
-        font-size: 0.8rem;
-        font-weight: 400;
-        color: inherit;
-        opacity: 0.7;
-        text-decoration: none;
-    }
-
-    .brand-version:hover {
-        opacity: 1;
-        color: inherit;
-        text-decoration: underline;
-    }
 </style>
 
 <nav class="navbar navbar-expand-lg navbar-dark fixed-top{% if prod_warning_enabled and 'prod' in (session.get('server') or '')|lower %} prod-warning{% endif %}">
     <div class="container-fluid">
-        <span class="navbar-brand d-flex align-items-center">
-            <a href="https://proxyweb.org" target="_blank" rel="noopener"
-               class="d-flex align-items-center text-decoration-none text-reset">
-                <img src="/static/images/app_icon.png" alt="ProxyWeb" class="app-icon me-2">
-                <span>ProxyWeb</span>
-            </a>
-            {% if app_version %}
-            <span class="brand-sep mx-1">-</span>
-            <a href="{{ changelog_url }}" target="_blank" rel="noopener"
-               class="brand-version" title="View changelog">v{{ app_version }}</a>
-            {% endif %}
-        </span>
+        <a class="navbar-brand d-flex align-items-center" href="/">
+            <img src="/static/images/app_icon.png" alt="App Icon" class="app-icon me-2">
+            <span>ProxyWeb</span>
+        </a>
 
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
                 aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">

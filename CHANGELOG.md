@@ -84,6 +84,9 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
   and `#` are still quoted.
 - Removed debug `console.log` noise from the table view and dead conditional
   blocks; hardened connection cleanup on error paths in `mdb.py`.
+- The settings page's **Import/Export YAML** actions moved into the page header
+  next to the "Settings" title; the standalone "Configuration Management" bar
+  was removed to reduce visual clutter.
 
 ### Added
 - **Dump Database** under the Misc menu (admin-only): `GET /<server>/dump/`
@@ -114,10 +117,6 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
   settings UI ("Highlight Prod Servers"). Covered by
   `TestProdWarningCheckboxSaved` and
   `TestProdWarningHeaderBorder`.
-- The header brand now reads `ProxyWeb - v<version>`: the **ProxyWeb** name
-  links to <https://proxyweb.org> and the version links to the changelog.
-  Applied to both the main navbar and the standalone settings header. Covered
-  by `TestNavigation.test_header_brand_links_to_project_and_changelog`.
 
 ## [2.1.5] — 2026-05-26
 
