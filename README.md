@@ -20,6 +20,7 @@ ProxyWeb gives you full control over ProxySQL through a clean web interface — 
 - **Query history** — persistent per-server history with dropdown recall and full history page
 - **Config diff** — compare Disk / Memory / Runtime layers side by side, spot drift instantly
 - **Role-based access** — admin and read-only users with separate credentials
+- **Okta SSO (OIDC)** — optional "Sign in with Okta" with group-based admin/read-only role mapping
 - **Environment variable overrides** — inject credentials and DSN settings without editing files
 - **Settings UI** — edit `config.yml` through a structured form or raw YAML editor
 - **Hide tables** — filter out unused tables globally or per server
@@ -140,6 +141,92 @@ export PROXYWEB_SERVER_PROXYSQL_PASSWORD=mypassword
 
 When running in Docker, place variables in a `.env` file mounted at `/app/.env` (or set `PROXYWEB_ENV_FILE` to a custom path). The entrypoint loads it automatically before startup.
 
+### Okta SSO (OIDC)
+
+ProxyWeb can authenticate users against Okta using the OIDC Authorization Code flow. Roles are mapped from Okta group membership: members of any configured *admin group* get full access, members of any *read-only group* get browse-only access, and everyone else is denied. Password login stays available unless you explicitly disable it, and Okta sign-in itself can be switched off at any time via `enabled: false` (or the "Enable Okta Sign-In" checkbox in the settings UI).
+
+#### 1. Create the app integration in Okta
+
+1. In the Okta admin console go to **Applications → Applications → Create App Integration**.
+2. Choose **OIDC – OpenID Connect** and application type **Web Application**.
+3. Set **Sign-in redirect URI** to:
+   ```
+   https://<your-proxyweb-host>/login/okta/callback
+   ```
+   (Use `http://localhost:5000/login/okta/callback` for local testing.)
+4. Under **Assignments**, limit access to the groups that should be able to sign in (e.g. `proxyweb-admins` and `proxyweb-readonly`).
+5. Save and note the **Client ID** and **Client secret** from the app's **General** tab.
+
+#### 2. Add a groups claim
+
+ProxyWeb reads the user's groups from the `groups` claim of the ID token (with a fallback to the userinfo endpoint). How you expose it depends on which authorization server you use:
+
+**Option A — custom authorization server** (issuer like `https://<org>.okta.com/oauth2/default`; requires the API Access Management feature):
+
+1. Go to **Security → API → Authorization Servers**, pick your server (e.g. `default`).
+2. On the **Claims** tab, **Add Claim**:
+   - Name: `groups`
+   - Include in token type: **ID Token**, **Always**
+   - Value type: **Groups**
+   - Filter: e.g. **Starts with** `proxyweb-` (or **Matches regex** `.*` to include all groups)
+   - Include in: **Any scope**
+3. Because custom authorization servers reject scopes they don't define, either add a `groups` scope on the **Scopes** tab, or set `scopes: "openid profile email"` in the ProxyWeb config (the claim is still included when it's bound to "Any scope").
+
+**Option B — org authorization server** (issuer `https://<org>.okta.com`, no API Access Management needed):
+
+1. Open your app integration → **Sign On** tab → **OpenID Connect ID Token** → **Edit**.
+2. Set **Groups claim type** to *Filter* and **Groups claim filter** to `groups` with e.g. **Starts with** `proxyweb-`.
+3. The built-in `groups` scope is requested by ProxyWeb's default `scopes` setting — nothing else to do.
+
+#### 3. Configure ProxyWeb
+
+Either via **Settings → Authentication → Okta SSO (OIDC)** in the UI, or directly in `config/config.yml`:
+
+```yaml
+auth:
+  admin_user: admin
+  admin_password: admin42
+  okta:
+    enabled: true
+    issuer: https://your-org.okta.com/oauth2/default   # or https://your-org.okta.com
+    client_id: 0oa1a2b3c4d5e6f7g8h9
+    client_secret: "<client secret>"
+    admin_group: proxyweb-admins
+    readonly_group: proxyweb-readonly
+    scopes: openid profile email groups
+    disable_local_login: false
+```
+
+Both group settings accept multiple groups — membership in **any** of them grants the role (admin wins if a user matches both). Use a comma-separated string or a YAML list:
+
+```yaml
+    admin_group: "proxyweb-admins, dba-team"
+    readonly_group:
+      - proxyweb-readonly
+      - support-team
+```
+
+All values can be supplied via environment variables instead of the file (recommended for the secret — put it in `.env`):
+
+| Variable                              | Overrides                       |
+|---------------------------------------|---------------------------------|
+| `PROXYWEB_OKTA_ENABLED`               | `auth.okta.enabled`             |
+| `PROXYWEB_OKTA_ISSUER`                | `auth.okta.issuer`              |
+| `PROXYWEB_OKTA_CLIENT_ID`             | `auth.okta.client_id`           |
+| `PROXYWEB_OKTA_CLIENT_SECRET`         | `auth.okta.client_secret`       |
+| `PROXYWEB_OKTA_ADMIN_GROUP`           | `auth.okta.admin_group`         |
+| `PROXYWEB_OKTA_READONLY_GROUP`        | `auth.okta.readonly_group`      |
+| `PROXYWEB_OKTA_SCOPES`                | `auth.okta.scopes`              |
+| `PROXYWEB_OKTA_DISABLE_LOCAL_LOGIN`   | `auth.okta.disable_local_login` |
+
+#### Notes
+
+- `disable_local_login: true` removes the password form and rejects password logins server-side, but **only while Okta is enabled** — if Okta is turned off the flag is ignored, so you can never lock yourself out.
+- Users who authenticate at Okta but belong to none of the configured groups are denied with "not authorized".
+- Behind a TLS-terminating reverse proxy, make sure the proxy sends `X-Forwarded-Proto: https` and enable a middleware such as Werkzeug's `ProxyFix`, so the generated redirect URI uses `https://` and matches the URI registered in Okta.
+- The OIDC issuer and its endpoints **must use HTTPS** — ProxyWeb relies on TLS server validation in place of verifying the ID token signature, and rejects plain-`http` OIDC URLs. For local/dev only (e.g. the hermetic test stack's mock IdP) you can set `PROXYWEB_OKTA_ALLOW_HTTP=1` to allow `http` endpoints. **Never set this in production.**
+- The discovery document's `issuer` must match the configured `issuer`; a mismatch fails the flow closed.
+
 ## Test Environment
 
 The `test/` directory contains a full Docker Compose stack for integration testing, including MySQL and PostgreSQL backends with replication. The Python test suite runs inside a dedicated `test-runner` container on the Compose network, so Docker is the only host prerequisite.
@@ -153,6 +240,7 @@ The `test/` directory contains a full Docker Compose stack for integration testi
 | `mysql2` / `mysql3` | MySQL writer/reader pair with replication | - |
 | `postgres` | PostgreSQL publisher (logical replication) | - |
 | `postgres2` | PostgreSQL subscriber | - |
+| `mock-okta` | Mock Okta OIDC provider for SSO tests | - |
 | `proxyweb` | App under test | 5000 |
 | `test-runner` | Runs the Python suite on the Compose network (profile: `tests`) | - |
 

@@ -35,6 +35,15 @@ auth:
   admin_password: admin42
   readonly_user: readonly
   readonly_password: readonly42
+  okta:
+    enabled: false
+    issuer: ""
+    client_id: ""
+    client_secret: ""
+    admin_group: ""
+    readonly_group: ""
+    scopes: openid profile email groups
+    disable_local_login: false
 
 flask:
   SECRET_KEY: 12345678901234567890

@@ -165,6 +165,22 @@ services:
       - proxyweb-test
     restart: "no"
 
+  mock-okta:
+    build:
+      context: ./mock_okta
+    environment:
+      MOCK_ISSUER: http://mock-okta:9000
+      MOCK_CLIENT_ID: proxyweb-test-client
+      MOCK_CLIENT_SECRET: mock-secret
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:9000/.well-known/openid-configuration')"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - proxyweb-test
+
   proxyweb:
     build:
       context: ..
@@ -174,6 +190,9 @@ services:
     # the settings save roundtrip keeps working inside the test stack.
     environment:
       PROXYWEB_ALLOW_NONATOMIC_WRITE: "1"
+      # The hermetic mock IdP is served over plain http on the compose network;
+      # opt into non-TLS OIDC endpoints. Never set this in production.
+      PROXYWEB_OKTA_ALLOW_HTTP: "1"
     volumes:
       - ./config/config.yml:/app/config/config.yml
     depends_on:
@@ -203,9 +222,12 @@ services:
       PROXYWEB_PASS: admin42
       PROXYSQL_MYSQL_HOST: proxysql2
       PROXYSQL_MYSQL_PORT: "6033"
+      MOCK_OKTA_URL: http://mock-okta:9000
       PY_COLORS: "1"
     depends_on:
       proxyweb:
+        condition: service_healthy
+      mock-okta:
         condition: service_healthy
     networks:
       - proxyweb-test

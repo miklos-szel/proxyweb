@@ -60,6 +60,7 @@ sudo make uninstall
 
 - **`app.py`** — Flask application. All routes live here. A per-request `db` dict (on `flask.g.db`) acts as an in-memory connection/cache store passed into `mdb` functions; it's initialised in a `@before_request` hook and its cursors/connections are closed in a `@teardown_request` hook so gunicorn thread workers don't share handles.
 - **`mdb.py`** — All database logic. Connects to ProxySQL via `mysql.connector`, executes queries, parses results, and handles config YAML manipulation.
+- **`oidc.py`** — Minimal OIDC Authorization Code client for Okta SSO (`requests` only, no Authlib). Stateless functions taking current config values, so runtime config edits need no client re-registration.
 - **`config/config.yml`** — Single config file for everything: ProxySQL server DSNs, auth credentials, Flask settings, hidden tables, adhoc report definitions, and SQL shortcut menus.
 - **`wsgi.py`** — Gunicorn entrypoint, just imports `app` from `app.py`.
 
@@ -83,6 +84,15 @@ servers:
 auth:
   admin_user: admin
   admin_password: admin42
+  okta:                 # optional Okta SSO (OIDC) — see "Okta SSO" below
+    enabled: false
+    issuer: ""
+    client_id: ""
+    client_secret: ""
+    admin_group: ""     # one or more groups: comma-separated string or YAML list
+    readonly_group: ""
+    scopes: openid profile email groups
+    disable_local_login: false
 flask:
   SECRET_KEY: ...
 misc:
@@ -102,6 +112,17 @@ The `SECRET_KEY` placeholder `12345678901234567890` is replaced at container sta
 5. The SQL form in `show_table_info.html` posts to `/<server>/<database>/<table>/sql/` — SELECT statements render `show_adhoc_report.html`, everything else executes as a change and refreshes the table.
 6. `/api/execute_proxysql_command` only accepts `LOAD`, `SAVE`, and `SELECT CONFIG` statements (validated per-statement after splitting on `;`).
 7. Config diff is at `/<server>/config_diff/` (parametric — works for any configured server). The route passes `server` to `mdb.get_config_diff(server)` and injects `window.configDiffServer` into the template.
+8. Okta SSO login runs through `GET /login/okta` (redirect to the IdP) and `GET /login/okta/callback` (code exchange + role mapping) — see "Okta SSO" below.
+
+### Okta SSO (OIDC)
+
+Optional SSO via the OIDC Authorization Code flow, configured under `auth.okta` (settings UI: Authentication section; env overrides `PROXYWEB_OKTA_*` in `mdb._apply_env_overrides`). Key invariants:
+
+- `mdb.get_okta_config(cfg)` is the only way to read the section — it normalizes defaults, coerces booleans, splits `admin_group`/`readonly_group` into lists (`admin_groups`/`readonly_groups`; comma-separated string or YAML list), and forces `disable_local_login` to `False` while `enabled` is false (lockout guard — a stray flag must never block password login).
+- Role mapping in `okta_callback` (`app.py`): any `admin_groups` match → `admin`; else any `readonly_groups` match → `readonly`; else denied. Groups come from the ID token's `groups` claim, falling back to the userinfo endpoint (whose `sub` must match the ID token `sub`, per OIDC Core 5.3.2).
+- `oidc.py` skips ID-token signature verification (permitted for a confidential client receiving the token straight from the token endpoint, OIDC Core 3.1.3.7) but validates `iss`/`aud`/`exp`/`nonce`, requires the discovery document's `issuer` to match the configured one, and rejects non-HTTPS issuer/endpoints unless `PROXYWEB_OKTA_ALLOW_HTTP=1` (test/dev only; the test compose sets it for the http-only `mock-okta` service).
+- `state` and `nonce` live in the signed session cookie (safe across gunicorn workers); the callback pops them single-use and redirects to `/login?sso_error=<code>` on any failure — only fixed codes from `SSO_ERROR_MESSAGES` ever render, details go to server logs (never log tokens or the raw subject).
+- The Okta `client_secret` is never sent to the browser: `settings_load_ui` blanks it, and `settings_ui_save` preserves the stored secret when the form field comes back empty. The structured-editor save path (`mdb.form_data_to_yaml` → `_form_okta_section`) must keep reconstructing the nested `auth.okta` block with real booleans, or UI saves silently drop it — `TestOktaSettingsPersistence` guards this.
 
 ### Config File Writes
 
@@ -158,6 +179,7 @@ The `test/` directory contains a Docker Compose stack and a Python test suite. T
 | `proxysql2` | proxysql/proxysql:3.0.6 | MySQL ProxySQL — Admin :6032, MySQL :6033; hg1=writer, hg2=reader |
 | `proxysql3` | proxysql/proxysql:3.0.6 | PostgreSQL ProxySQL — Admin :6034, PgSQL :6090 |
 | `proxysql2-init` / `proxysql3-init` | mysql:8.0 (one-shot) | Register backends, users, and query rules via admin SQL |
+| `mock-okta` | built from `test/mock_okta/` | Mock Okta OIDC provider for hermetic SSO tests (identity controlled via `mock_*` query params on `/authorize`) |
 | `proxyweb` | built from repo root | App under test on :5000 |
 | `test-runner` | built from `test/Dockerfile.runner` (profile: `tests`) | Runs the Python suite on the Compose network; invoked by `run_tests.sh` via `docker compose run --rm` |
 
