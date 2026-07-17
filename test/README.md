@@ -27,6 +27,7 @@ suite that exercise ProxyWeb against a real ProxySQL + MySQL backend.
 | proxysql3       | proxysql/proxysql:3.0.6   | 6034 admin, 6090 PostgreSQL  |
 | proxysql2-init  | mysql:8.0 (one-shot)      | —                            |
 | proxysql3-init  | mysql:8.0 (one-shot)      | —                            |
+| mock-okta       | built from `mock_okta/`   | (internal only)              |
 | proxyweb        | built from `../`          | 5000                         |
 
 ProxyWeb is configured (via `config/config.yml`) to manage both ProxySQL

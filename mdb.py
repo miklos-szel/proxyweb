@@ -195,6 +195,25 @@ def _apply_env_overrides(cfg):
             cfg.setdefault(section, {})[key] = value
             logging.info("Config override: %s.%s from env %s", section, key, env_key)
 
+    # Okta SSO settings: PROXYWEB_OKTA_* → auth.okta.* (booleans parsed like
+    # checkboxes so '1'/'true'/'yes'/'on' all work).
+    _ENV_OKTA_MAP = {
+        'PROXYWEB_OKTA_ENABLED':             ('enabled', True),
+        'PROXYWEB_OKTA_ISSUER':              ('issuer', False),
+        'PROXYWEB_OKTA_CLIENT_ID':           ('client_id', False),
+        'PROXYWEB_OKTA_CLIENT_SECRET':       ('client_secret', False),
+        'PROXYWEB_OKTA_ADMIN_GROUP':         ('admin_group', False),
+        'PROXYWEB_OKTA_READONLY_GROUP':      ('readonly_group', False),
+        'PROXYWEB_OKTA_SCOPES':              ('scopes', False),
+        'PROXYWEB_OKTA_DISABLE_LOCAL_LOGIN': ('disable_local_login', True),
+    }
+    for env_key, (key, is_bool) in _ENV_OKTA_MAP.items():
+        value = os.environ.get(env_key)
+        if value is not None:
+            okta = cfg.setdefault('auth', {}).setdefault('okta', {})
+            okta[key] = _form_checkbox(value) if is_bool else value
+            logging.info("Config override: auth.okta.%s from env %s", key, env_key)
+
     # Per-server DSN overrides: PROXYWEB_SERVER_<NAME>_{USER,PASSWORD,HOST,PORT,DATABASE}
     _DSN_FIELD_MAP = {
         'USER': 'user',
@@ -386,6 +405,38 @@ def validate_config_shape(cfg):
         for key in keys:
             if key not in cfg[section]:
                 raise ValueError(f"Missing required key: '{section}.{key}'")
+    # auth.okta is optional, but when present it must be a mapping. Its keys
+    # (client_id/client_secret/...) are never required here because they may
+    # be supplied via PROXYWEB_OKTA_* env overrides instead of the file.
+    if 'okta' in cfg['auth'] and not isinstance(cfg['auth']['okta'], dict):
+        raise ValueError("Config section 'auth.okta' must be a mapping")
+
+
+OKTA_DEFAULT_SCOPES = "openid profile email groups"
+
+
+def get_okta_config(cfg):
+    """
+    Return the auth.okta section normalized to a full dict with defaults, so
+    an absent or partial okta config never crashes callers.
+
+    The effective 'disable_local_login' is forced to False while Okta is
+    disabled, so a stray flag can never lock admins out of password login.
+    """
+    okta = cfg.get('auth', {}).get('okta') or {}
+    if not isinstance(okta, dict):
+        okta = {}
+    enabled = _form_checkbox(okta.get('enabled', ''))
+    return {
+        'enabled': enabled,
+        'issuer': str(okta.get('issuer') or '').strip(),
+        'client_id': str(okta.get('client_id') or '').strip(),
+        'client_secret': str(okta.get('client_secret') or ''),
+        'admin_group': str(okta.get('admin_group') or '').strip(),
+        'readonly_group': str(okta.get('readonly_group') or '').strip(),
+        'scopes': str(okta.get('scopes') or OKTA_DEFAULT_SCOPES).strip(),
+        'disable_local_login': enabled and _form_checkbox(okta.get('disable_local_login', '')),
+    }
 
 
 def _form_checkbox(value):
@@ -468,6 +519,28 @@ def _form_passthrough_section(form_data, prefix, fields):
     return section
 
 
+def _form_okta_section(form_data):
+    """
+    Build the nested 'auth.okta' dict from the flat 'auth_okta_*' form fields.
+
+    Returns {} when nothing is configured so form_data_to_yaml can skip the
+    block entirely. Checkboxes go through _form_checkbox so they persist as
+    real YAML booleans instead of the browser's 'on' string.
+    """
+    text_fields = ('issuer', 'client_id', 'client_secret',
+                   'admin_group', 'readonly_group', 'scopes')
+    okta = {}
+    enabled = _form_checkbox(form_data.get('auth_okta_enabled', ''))
+    disable_local = _form_checkbox(form_data.get('auth_okta_disable_local_login', ''))
+    for field in text_fields:
+        value = form_data.get(f'auth_okta_{field}', '').strip()
+        if value:
+            okta[field] = value
+    if not okta and not enabled and not disable_local:
+        return {}
+    return {'enabled': enabled, **okta, 'disable_local_login': disable_local}
+
+
 def _form_misc_items(form_data, misc_type, unescape_newlines):
     """
     Collect the numbered title/info/sql blocks for one misc array
@@ -522,6 +595,11 @@ def form_data_to_yaml(form_data):
                                             'TEMPLATES_AUTO_RELOAD')),
         'misc': misc,
     }
+
+    # Okta SSO lives nested under auth; _form_passthrough_section is flat-only.
+    okta = _form_okta_section(form_data)
+    if okta:
+        config['auth']['okta'] = okta
 
     # TEMPLATES_AUTO_RELOAD is a checkbox — store it as a real boolean instead
     # of the raw submitted string ('on').

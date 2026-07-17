@@ -155,6 +155,14 @@ function populateForm(config) {
     document.getElementById('auth_admin_password').value = '';
     document.getElementById('auth_readonly_user').value = '';
     document.getElementById('auth_readonly_password').value = '';
+    document.getElementById('auth_okta_enabled').checked = false;
+    document.getElementById('auth_okta_issuer').value = '';
+    document.getElementById('auth_okta_client_id').value = '';
+    document.getElementById('auth_okta_client_secret').value = '';
+    document.getElementById('auth_okta_admin_group').value = '';
+    document.getElementById('auth_okta_readonly_group').value = '';
+    document.getElementById('auth_okta_scopes').value = '';
+    document.getElementById('auth_okta_disable_local_login').checked = false;
 
     if (config.auth) {
         const auth = config.auth;
@@ -173,6 +181,18 @@ function populateForm(config) {
 
         if (auth.readonly_password) {
             document.getElementById('auth_readonly_password').value = auth.readonly_password;
+        }
+
+        if (auth.okta) {
+            const okta = auth.okta;
+            document.getElementById('auth_okta_enabled').checked = !!okta.enabled;
+            document.getElementById('auth_okta_issuer').value = okta.issuer || '';
+            document.getElementById('auth_okta_client_id').value = okta.client_id || '';
+            document.getElementById('auth_okta_client_secret').value = okta.client_secret || '';
+            document.getElementById('auth_okta_admin_group').value = okta.admin_group || '';
+            document.getElementById('auth_okta_readonly_group').value = okta.readonly_group || '';
+            document.getElementById('auth_okta_scopes').value = okta.scopes || '';
+            document.getElementById('auth_okta_disable_local_login').checked = !!okta.disable_local_login;
         }
     }
 

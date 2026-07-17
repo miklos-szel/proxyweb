@@ -489,6 +489,67 @@
                                 </label>
                                 <input type="password" id="auth_readonly_password" name="auth_readonly_password" class="form-control" placeholder="********" />
                             </div>
+
+                            <h5 style="margin-top: 1.5rem;"><i class="fas fa-id-badge"></i> Okta SSO (OIDC)</h5>
+
+                            <div class="form-group">
+                                <div class="checkbox-group">
+                                    <input type="checkbox" id="auth_okta_enabled" name="auth_okta_enabled" />
+                                    <label for="auth_okta_enabled">Enable Okta Sign-In</label>
+                                </div>
+                                <small style="color: var(--secondary-color); font-size: 0.85rem;">Show a "Sign in with Okta" button on the login page</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="auth_okta_issuer">
+                                    <i class="fas fa-globe"></i> Issuer URL
+                                </label>
+                                <input type="text" id="auth_okta_issuer" name="auth_okta_issuer" class="form-control" placeholder="https://your-org.okta.com/oauth2/default" />
+                            </div>
+
+                            <div class="form-group">
+                                <label for="auth_okta_client_id">
+                                    <i class="fas fa-fingerprint"></i> Client ID
+                                </label>
+                                <input type="text" id="auth_okta_client_id" name="auth_okta_client_id" class="form-control" placeholder="0oa..." />
+                            </div>
+
+                            <div class="form-group">
+                                <label for="auth_okta_client_secret">
+                                    <i class="fas fa-lock"></i> Client Secret
+                                </label>
+                                <input type="password" id="auth_okta_client_secret" name="auth_okta_client_secret" class="form-control" placeholder="********" />
+                            </div>
+
+                            <div class="form-group">
+                                <label for="auth_okta_admin_group">
+                                    <i class="fas fa-users-cog"></i> Admin Group
+                                </label>
+                                <input type="text" id="auth_okta_admin_group" name="auth_okta_admin_group" class="form-control" placeholder="proxyweb-admins" />
+                            </div>
+
+                            <div class="form-group">
+                                <label for="auth_okta_readonly_group">
+                                    <i class="fas fa-users"></i> Read-Only Group
+                                </label>
+                                <input type="text" id="auth_okta_readonly_group" name="auth_okta_readonly_group" class="form-control" placeholder="proxyweb-readonly" />
+                            </div>
+
+                            <div class="form-group">
+                                <label for="auth_okta_scopes">
+                                    <i class="fas fa-list"></i> Scopes
+                                </label>
+                                <input type="text" id="auth_okta_scopes" name="auth_okta_scopes" class="form-control" placeholder="openid profile email groups" />
+                                <small style="color: var(--secondary-color); font-size: 0.85rem;">Use "openid profile email" for custom authorization servers without a groups scope</small>
+                            </div>
+
+                            <div class="form-group">
+                                <div class="checkbox-group">
+                                    <input type="checkbox" id="auth_okta_disable_local_login" name="auth_okta_disable_local_login" />
+                                    <label for="auth_okta_disable_local_login">Disable Password Login</label>
+                                </div>
+                                <small style="color: var(--secondary-color); font-size: 0.85rem;">Only takes effect while Okta is enabled, so you cannot lock yourself out</small>
+                            </div>
                         </div>
                     </div>
 

@@ -30,6 +30,7 @@ import os
 import tempfile
 import yaml
 import mdb
+import oidc
 
 app = Flask(__name__)
 
@@ -362,50 +363,165 @@ def csrf_protect():
         if not token or token != session.get('csrf_token'):
             abort(403)
 
+# Fixed SSO error codes → user-facing messages. The Okta routes redirect to
+# /login?sso_error=<code>; only codes in this dict ever render, so no
+# request-controlled text is reflected. Detailed causes go to server logs.
+SSO_ERROR_MESSAGES = {
+    'disabled': 'Okta sign-in is not enabled.',
+    'state': 'Sign-in attempt expired — please try again.',
+    'exchange': 'Could not complete Okta sign-in. Check the server logs.',
+    'okta': 'Okta returned an error. Check the server logs.',
+    'not_authorized': 'Your Okta account is not authorized for ProxyWeb.',
+    'local_disabled': 'Password login is disabled — use Okta sign-in.',
+}
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """
     Render the login page and authenticate the admin user.
-    
-    On POST, validates submitted credentials against the configured admin username and password; if they match, sets session['logged_in'] and redirects to the database list view. On GET or failed authentication, renders the login page and includes an error message when credentials are invalid.
+
+    On POST, validates submitted credentials against the configured admin username and password; if they match, sets session['logged_in'] and redirects to the database list view. On GET or failed authentication, renders the login page and includes an error message when credentials are invalid. When Okta SSO is enabled the page also offers "Sign in with Okta"; with okta.disable_local_login set, password authentication is rejected server-side.
     Returns:
     	A Flask response: a redirect to the database list on successful authentication, or the rendered login page (login.html) with an optional error message.
     """
     session.clear()
     message=""
-    auth_cfg = mdb.get_config(config)['auth']
+    cfg = mdb.get_config(config)
+    auth_cfg = cfg['auth']
     admin_user = auth_cfg['admin_user']
     admin_password = auth_cfg['admin_password']
     readonly_user = auth_cfg.get('readonly_user', 'readonly')
     readonly_password = auth_cfg.get('readonly_password', '')
+    okta_cfg = mdb.get_okta_config(cfg)
+    local_login_disabled = okta_cfg['disable_local_login']
 
     if request.method == 'POST':
-        username = request.form.get('username') or ''
-        password = request.form.get('password') or ''
-        if (admin_user and admin_password
-                and hmac.compare_digest(str(admin_user), username)
-                and hmac.compare_digest(str(admin_password), password)):
-            session['logged_in'] = True
-            session['role'] = 'admin'
-            return redirect(url_for('render_list_dbs'))
-        elif (readonly_user and readonly_password
-              and hmac.compare_digest(str(readonly_user), username)
-              and hmac.compare_digest(str(readonly_password), password)):
-            session['logged_in'] = True
-            session['role'] = 'readonly'
-            return redirect(url_for('render_list_dbs'))
-        message="Invalid credentials!"
+        if local_login_disabled:
+            message = SSO_ERROR_MESSAGES['local_disabled']
+        else:
+            username = request.form.get('username') or ''
+            password = request.form.get('password') or ''
+            if (admin_user and admin_password
+                    and hmac.compare_digest(str(admin_user), username)
+                    and hmac.compare_digest(str(admin_password), password)):
+                session['logged_in'] = True
+                session['role'] = 'admin'
+                return redirect(url_for('render_list_dbs'))
+            elif (readonly_user and readonly_password
+                  and hmac.compare_digest(str(readonly_user), username)
+                  and hmac.compare_digest(str(readonly_password), password)):
+                session['logged_in'] = True
+                session['role'] = 'readonly'
+                return redirect(url_for('render_list_dbs'))
+            message="Invalid credentials!"
+    elif request.args.get('sso_error'):
+        message = SSO_ERROR_MESSAGES.get(request.args['sso_error'], '')
 
-    show_default_creds = (
+    show_default_creds = not local_login_disabled and (
         (admin_user == 'admin' and admin_password == 'admin42')
         or (readonly_user == 'readonly' and readonly_password == 'readonly42')
     )
-    return render_template("login.html", message=message, show_default_creds=show_default_creds)
+    return render_template("login.html", message=message,
+                           show_default_creds=show_default_creds,
+                           okta_enabled=okta_cfg['enabled'],
+                           local_login_disabled=local_login_disabled)
 
 @app.route('/logout')
 def logout():
     session.clear()
     return redirect(url_for('login'))
+
+
+@app.route('/login/okta')
+def okta_login():
+    """
+    Start the Okta OIDC Authorization Code flow.
+
+    Stores fresh state/nonce values in the (signed cookie) session so they
+    survive across gunicorn workers, then redirects to Okta's authorization
+    endpoint. The redirect_uri is always generated server-side.
+    """
+    okta_cfg = mdb.get_okta_config(mdb.get_config(config))
+    if not okta_cfg['enabled']:
+        return redirect(url_for('login', sso_error='disabled'))
+    try:
+        meta = oidc.get_provider_metadata(okta_cfg['issuer'])
+    except oidc.OidcError:
+        return redirect(url_for('login', sso_error='exchange'))
+    state = secrets.token_urlsafe(32)
+    nonce = secrets.token_urlsafe(32)
+    session['oidc_state'] = state
+    session['oidc_nonce'] = nonce
+    redirect_uri = url_for('okta_callback', _external=True)
+    return redirect(oidc.build_authorize_url(
+        meta, okta_cfg['client_id'], redirect_uri, state, nonce,
+        okta_cfg['scopes']))
+
+
+@app.route('/login/okta/callback')
+def okta_callback():
+    """
+    Complete the Okta OIDC flow: validate state, exchange the code, validate
+    the ID token claims (iss/aud/exp/nonce), and map the Okta groups claim to
+    a ProxyWeb role (admin_group -> admin, readonly_group -> readonly, no
+    match -> denied). Groups missing from the ID token are fetched from the
+    userinfo endpoint as a fallback.
+
+    Every failure redirects back to /login with a fixed sso_error code; the
+    details are only logged server-side.
+    """
+    okta_cfg = mdb.get_okta_config(mdb.get_config(config))
+    if not okta_cfg['enabled']:
+        return redirect(url_for('login', sso_error='disabled'))
+
+    if request.args.get('error'):
+        logging.error("Okta callback error: %s (%s)",
+                      request.args['error'],
+                      request.args.get('error_description', ''))
+        return redirect(url_for('login', sso_error='okta'))
+
+    state = request.args.get('state') or ''
+    expected_state = session.pop('oidc_state', None)
+    nonce = session.pop('oidc_nonce', None)
+    if not expected_state or not hmac.compare_digest(expected_state, state):
+        logging.warning("Okta callback: state missing or mismatched")
+        return redirect(url_for('login', sso_error='state'))
+
+    code = request.args.get('code') or ''
+    try:
+        meta = oidc.get_provider_metadata(okta_cfg['issuer'])
+        redirect_uri = url_for('okta_callback', _external=True)
+        tokens = oidc.exchange_code(meta, okta_cfg['client_id'],
+                                    okta_cfg['client_secret'], code, redirect_uri)
+        claims = oidc.decode_id_token_claims(tokens.get('id_token', ''))
+        oidc.validate_claims(claims, okta_cfg['issuer'],
+                             okta_cfg['client_id'], nonce)
+        groups = claims.get('groups')
+        if groups is None:
+            groups = oidc.fetch_userinfo(
+                meta, tokens.get('access_token', '')).get('groups')
+    except oidc.OidcError as e:
+        logging.error("Okta sign-in failed: %s", e)
+        return redirect(url_for('login', sso_error='exchange'))
+
+    groups = groups if isinstance(groups, list) else []
+    if okta_cfg['admin_group'] and okta_cfg['admin_group'] in groups:
+        role = 'admin'
+    elif okta_cfg['readonly_group'] and okta_cfg['readonly_group'] in groups:
+        role = 'readonly'
+    else:
+        logging.warning("Okta sign-in denied: user %s not in admin/readonly groups",
+                        claims.get('sub', '?'))
+        return redirect(url_for('login', sso_error='not_authorized'))
+
+    # Fresh session before granting access (session-fixation defense); a new
+    # csrf_token is minted by ensure_csrf_token on the next request.
+    session.clear()
+    session['logged_in'] = True
+    session['role'] = role
+    session['sso_user'] = claims.get('email') or claims.get('sub') or ''
+    return redirect(url_for('render_list_dbs'))
 
 
 @app.route('/')

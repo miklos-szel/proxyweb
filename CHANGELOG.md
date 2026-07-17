@@ -8,6 +8,18 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
 
 ## [Unreleased]
 
+### Added
+- **Okta SSO (OIDC)**: optional "Sign in with Okta" login via the OIDC
+  Authorization Code flow (`auth.okta` config section, `/login/okta` +
+  `/login/okta/callback` routes). Roles are mapped from Okta group
+  membership (`admin_group` / `readonly_group`; users in neither group are
+  denied). Includes `PROXYWEB_OKTA_*` environment overrides for supplying
+  the client secret via `.env`, an optional `disable_local_login` flag
+  (ignored while Okta is disabled, so admins can't lock themselves out),
+  structured settings-UI fields, a mock Okta IdP service in the test stack,
+  and a hermetic integration suite (`test/cases/test_okta.py`). See the
+  README's "Okta SSO (OIDC)" section for the Okta-side setup guide.
+
 ## [2.2.1] — 2026-07-07
 
 ### Security
