@@ -415,10 +415,25 @@ def validate_config_shape(cfg):
 OKTA_DEFAULT_SCOPES = "openid profile email groups"
 
 
+def _group_list(value):
+    """
+    Normalize a group setting to a list of group names. Accepts a YAML list
+    or a comma-separated string, so both of these grant the role to members
+    of either group:
+
+        admin_group: "dba-team, sre-leads"
+        admin_group: [dba-team, sre-leads]
+    """
+    if isinstance(value, (list, tuple)):
+        return [str(g).strip() for g in value if str(g).strip()]
+    return [g.strip() for g in str(value or '').split(',') if g.strip()]
+
+
 def get_okta_config(cfg):
     """
     Return the auth.okta section normalized to a full dict with defaults, so
-    an absent or partial okta config never crashes callers.
+    an absent or partial okta config never crashes callers. admin_groups /
+    readonly_groups are lists (see _group_list).
 
     The effective 'disable_local_login' is forced to False while Okta is
     disabled, so a stray flag can never lock admins out of password login.
@@ -432,8 +447,8 @@ def get_okta_config(cfg):
         'issuer': str(okta.get('issuer') or '').strip(),
         'client_id': str(okta.get('client_id') or '').strip(),
         'client_secret': str(okta.get('client_secret') or ''),
-        'admin_group': str(okta.get('admin_group') or '').strip(),
-        'readonly_group': str(okta.get('readonly_group') or '').strip(),
+        'admin_groups': _group_list(okta.get('admin_group')),
+        'readonly_groups': _group_list(okta.get('readonly_group')),
         'scopes': str(okta.get('scopes') or OKTA_DEFAULT_SCOPES).strip(),
         'disable_local_login': enabled and _form_checkbox(okta.get('disable_local_login', '')),
     }

@@ -518,21 +518,23 @@
                                 <label for="auth_okta_client_secret">
                                     <i class="fas fa-lock"></i> Client Secret
                                 </label>
-                                <input type="password" id="auth_okta_client_secret" name="auth_okta_client_secret" class="form-control" placeholder="********" />
+                                <input type="password" id="auth_okta_client_secret" name="auth_okta_client_secret" class="form-control" placeholder="unchanged if left blank" autocomplete="new-password" />
                             </div>
 
                             <div class="form-group">
                                 <label for="auth_okta_admin_group">
-                                    <i class="fas fa-users-cog"></i> Admin Group
+                                    <i class="fas fa-users-cog"></i> Admin Groups
                                 </label>
-                                <input type="text" id="auth_okta_admin_group" name="auth_okta_admin_group" class="form-control" placeholder="proxyweb-admins" />
+                                <input type="text" id="auth_okta_admin_group" name="auth_okta_admin_group" class="form-control" placeholder="proxyweb-admins, dba-team" />
+                                <small style="color: var(--secondary-color); font-size: 0.85rem;">Comma-separated Okta group names; membership in any grants admin</small>
                             </div>
 
                             <div class="form-group">
                                 <label for="auth_okta_readonly_group">
-                                    <i class="fas fa-users"></i> Read-Only Group
+                                    <i class="fas fa-users"></i> Read-Only Groups
                                 </label>
-                                <input type="text" id="auth_okta_readonly_group" name="auth_okta_readonly_group" class="form-control" placeholder="proxyweb-readonly" />
+                                <input type="text" id="auth_okta_readonly_group" name="auth_okta_readonly_group" class="form-control" placeholder="proxyweb-readonly, support-team" />
+                                <small style="color: var(--secondary-color); font-size: 0.85rem;">Comma-separated Okta group names; membership in any grants read-only</small>
                             </div>
 
                             <div class="form-group">

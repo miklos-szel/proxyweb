@@ -13,8 +13,9 @@ import time — every function takes the current config values.
 import base64
 import json
 import logging
+import os
 import time
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import requests
 
@@ -29,13 +30,36 @@ class OidcError(Exception):
     """Raised on any OIDC discovery/exchange/validation failure."""
 
 
+def _allow_http():
+    """
+    Whether plain-http OIDC endpoints are tolerated. Production must use TLS
+    (the module relies on TLS server validation in lieu of signature checks),
+    so http is only permitted when PROXYWEB_OKTA_ALLOW_HTTP=1 is set — this is
+    for the hermetic test stack / local dev only, never production.
+    """
+    return os.environ.get('PROXYWEB_OKTA_ALLOW_HTTP') == '1'
+
+
+def _require_https(url, what):
+    """Reject non-https OIDC URLs unless http is explicitly opted into."""
+    scheme = urlsplit(url).scheme
+    if scheme == 'https':
+        return
+    if scheme == 'http' and _allow_http():
+        return
+    raise OidcError(f"{what} must use HTTPS")
+
+
 def get_provider_metadata(issuer):
     """
     Fetch (and cache per issuer, ~1h) the provider's OIDC discovery document.
 
-    Returns the metadata dict; raises OidcError on network/HTTP/parse errors.
+    Returns the metadata dict; raises OidcError on network/HTTP/parse errors,
+    on a document whose issuer does not match the configured issuer, or on a
+    non-https endpoint (unless PROXYWEB_OKTA_ALLOW_HTTP=1).
     """
     issuer = issuer.rstrip('/')
+    _require_https(issuer, "issuer")
     cached = _metadata_cache.get(issuer)
     if cached and time.time() - cached[0] < METADATA_CACHE_TTL:
         return cached[1]
@@ -47,9 +71,17 @@ def get_provider_metadata(issuer):
     except Exception as e:
         logging.error("OIDC discovery failed for %s: %s", url, e)
         raise OidcError(f"discovery failed for {issuer}")
+    if not isinstance(meta, dict):
+        raise OidcError("discovery document is not a JSON object")
     for key in ('authorization_endpoint', 'token_endpoint'):
         if key not in meta:
             raise OidcError(f"discovery document missing {key}")
+    if str(meta.get('issuer', '')).rstrip('/') != issuer:
+        raise OidcError("discovery issuer mismatch")
+    _require_https(meta['authorization_endpoint'], "authorization_endpoint")
+    _require_https(meta['token_endpoint'], "token_endpoint")
+    if meta.get('userinfo_endpoint'):
+        _require_https(meta['userinfo_endpoint'], "userinfo_endpoint")
     _metadata_cache[issuer] = (time.time(), meta)
     return meta
 
@@ -129,10 +161,13 @@ def validate_claims(claims, issuer, client_id, nonce):
         raise OidcError("nonce mismatch")
 
 
-def fetch_userinfo(meta, access_token):
+def fetch_userinfo(meta, access_token, expected_sub):
     """
     Fetch claims from the userinfo endpoint (used as a fallback when the
     ID token carries no groups claim, e.g. Okta org authorization server).
+
+    Per OIDC Core 5.3.2 the userinfo response's 'sub' MUST match the 'sub'
+    of the ID token; a mismatch (token substitution) raises OidcError.
     """
     endpoint = meta.get('userinfo_endpoint')
     if not endpoint:
@@ -144,7 +179,10 @@ def fetch_userinfo(meta, access_token):
             timeout=HTTP_TIMEOUT,
         )
         resp.raise_for_status()
-        return resp.json()
+        claims = resp.json()
     except Exception as e:
         logging.error("OIDC userinfo request failed: %s", e)
         raise OidcError("userinfo request failed")
+    if not isinstance(claims, dict) or claims.get('sub') != expected_sub:
+        raise OidcError("userinfo subject mismatch")
+    return claims

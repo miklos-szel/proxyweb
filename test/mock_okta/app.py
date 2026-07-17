@@ -10,6 +10,8 @@ the authorize URL before following it:
   mock_email=...             email claim (default: mock-user@example.com)
   mock_no_groups_in_idtoken=1  omit groups from the id_token so ProxyWeb
                                must use the /userinfo fallback
+  mock_userinfo_wrong_sub=1    make /userinfo return a sub that differs from
+                               the id_token sub (OIDC Core 5.3.2 violation)
 
 The id_token carries a fake signature: ProxyWeb receives it directly from
 /token over the (test-network) channel and validates claims only, per
@@ -70,6 +72,8 @@ def authorize():
         'nonce': request.args.get('nonce', ''),
         'groups': [g for g in groups_raw.split(',') if g],
     }
+    if request.args.get('mock_userinfo_wrong_sub') == '1':
+        claims['_userinfo_wrong_sub'] = True
     code = secrets.token_urlsafe(16)
     _codes[code] = {
         'claims': claims,
@@ -122,8 +126,11 @@ def userinfo():
     claims = _tokens.get(header.removeprefix('Bearer '))
     if claims is None:
         return jsonify({'error': 'invalid_token'}), 401
+    sub = claims['sub']
+    if claims.get('_userinfo_wrong_sub'):
+        sub = f"{sub}-mismatch"
     return jsonify({
-        'sub': claims['sub'],
+        'sub': sub,
         'email': claims['email'],
         'groups': claims['groups'],
     })

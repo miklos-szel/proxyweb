@@ -230,6 +230,72 @@ class TestOktaLoginFlow(_OktaConfigMixin, unittest.TestCase):
         settings = sess.get(f"{BASE_URL}/settings/edit/", timeout=10)
         self.assertEqual(settings.status_code, 200)
 
+    def test_userinfo_sub_mismatch_rejected(self):
+        """OIDC Core 5.3.2: the userinfo response 'sub' must match the id_token
+        'sub'. A mismatched userinfo response (token substitution) must fail
+        the sign-in closed, not authenticate the wrong subject."""
+        sess, location = self.run_flow(
+            f"&mock_groups={ADMIN_GROUP}&mock_no_groups_in_idtoken=1"
+            "&mock_userinfo_wrong_sub=1")
+        self.assertIn("sso_error=exchange", location,
+                      f"userinfo sub mismatch not rejected: {location}")
+        self.assert_not_logged_in(sess)
+
+
+class TestOktaMultiGroupMapping(_OktaConfigMixin, unittest.TestCase):
+    """admin_group / readonly_group accept multiple comma-separated group
+    names; membership in any of them grants the corresponding role."""
+
+    okta_overrides = {
+        "admin_group": f"dba-team, {ADMIN_GROUP}",
+        "readonly_group": f"support-team,{READONLY_GROUP}",
+    }
+
+    def test_second_admin_group_grants_admin(self):
+        sess, location = self.run_flow(f"&mock_groups={ADMIN_GROUP}")
+        self.assertNotIn("sso_error", location, f"flow failed: {location}")
+        self.assertEqual(sess.get(f"{BASE_URL}/settings/edit/", timeout=10).status_code, 200)
+
+    def test_first_admin_group_grants_admin(self):
+        sess, location = self.run_flow("&mock_groups=dba-team")
+        self.assertNotIn("sso_error", location, f"flow failed: {location}")
+        self.assertEqual(sess.get(f"{BASE_URL}/settings/edit/", timeout=10).status_code, 200)
+
+    def test_any_readonly_group_grants_readonly(self):
+        sess, location = self.run_flow("&mock_groups=support-team")
+        self.assertNotIn("sso_error", location, f"flow failed: {location}")
+        self.assertEqual(sess.get(f"{BASE_URL}/settings/edit/", timeout=10).status_code, 403)
+
+    def test_unlisted_group_still_denied(self):
+        sess, location = self.run_flow("&mock_groups=unrelated-team")
+        self.assertIn("sso_error=not_authorized", location)
+        self.assert_not_logged_in(sess)
+
+    def test_admin_wins_across_multi_group_lists(self):
+        sess, location = self.run_flow("&mock_groups=support-team,dba-team")
+        self.assertNotIn("sso_error", location)
+        self.assertEqual(sess.get(f"{BASE_URL}/settings/edit/", timeout=10).status_code, 200)
+
+
+class TestOktaGroupYamlList(_OktaConfigMixin, unittest.TestCase):
+    """Hand-edited configs may express the group settings as YAML lists
+    instead of comma-separated strings — both forms must work."""
+
+    okta_overrides = {
+        "admin_group": ["dba-team", ADMIN_GROUP],
+        "readonly_group": ["support-team"],
+    }
+
+    def test_list_form_admin_group(self):
+        sess, location = self.run_flow(f"&mock_groups={ADMIN_GROUP}")
+        self.assertNotIn("sso_error", location, f"flow failed: {location}")
+        self.assertEqual(sess.get(f"{BASE_URL}/settings/edit/", timeout=10).status_code, 200)
+
+    def test_list_form_readonly_group(self):
+        sess, location = self.run_flow("&mock_groups=support-team")
+        self.assertNotIn("sso_error", location, f"flow failed: {location}")
+        self.assertEqual(sess.get(f"{BASE_URL}/settings/edit/", timeout=10).status_code, 403)
+
 
 class TestOktaWrongClientSecret(_OktaConfigMixin, unittest.TestCase):
     """Token exchange rejected by the IdP must fail closed."""
@@ -283,13 +349,19 @@ class TestOktaSettingsPersistence(_OktaConfigMixin, unittest.TestCase):
         self.assertIn("okta", cfg2["auth"], "save/re-export dropped auth.okta")
         self.assertEqual(cfg2["auth"]["okta"]["client_id"], CLIENT_ID)
 
-    def test_load_ui_includes_okta(self):
+    def test_load_ui_includes_okta_but_not_secret(self):
+        """/settings/load_ui/ feeds the structured settings UI, which renders
+        the client_secret into a password field — so the secret must never be
+        sent to the browser (blank or absent), unlike the raw YAML export."""
         body = self.s.get("/settings/load_ui/").json()
         self.assertTrue(body["success"])
         okta = body["config"]["auth"].get("okta")
         self.assertIsNotNone(okta, "/settings/load_ui/ missing auth.okta")
         self.assertEqual(okta["client_id"], CLIENT_ID)
-        self.assertIn("client_secret", okta)
+        self.assertNotEqual(okta.get("client_secret"), CLIENT_SECRET,
+                            "/settings/load_ui/ leaked the Okta client_secret")
+        self.assertFalse(okta.get("client_secret"),
+                         "client_secret must be blank/absent in load_ui")
 
     def test_ui_save_reconstructs_okta(self):
         """/settings/ui_save/ rebuilds the whole config from form fields —
@@ -328,6 +400,34 @@ class TestOktaSettingsPersistence(_OktaConfigMixin, unittest.TestCase):
         self.assertEqual(okta["client_secret"], CLIENT_SECRET)
         self.assertEqual(okta["admin_group"], ADMIN_GROUP)
         self.assertEqual(okta["readonly_group"], READONLY_GROUP)
+
+    def test_ui_save_blank_secret_preserves_existing(self):
+        """load_ui never returns the client_secret, so an unchanged save from
+        the settings UI submits it blank. ui_save must preserve the stored
+        secret instead of wiping it (regression: blank field zeroed it out)."""
+        cfg = yaml.safe_load(self._original_yaml)
+        form = {
+            "global_default_server": cfg["global"]["default_server"],
+            "auth_admin_user": cfg["auth"]["admin_user"],
+            "auth_admin_password": cfg["auth"]["admin_password"],
+            "flask_SECRET_KEY": cfg["flask"]["SECRET_KEY"],
+            "server_count": "0",
+            "auth_okta_enabled": "on",
+            "auth_okta_issuer": MOCK_ISSUER,
+            "auth_okta_client_id": CLIENT_ID,
+            "auth_okta_client_secret": "",  # left blank -> preserve stored value
+            "auth_okta_admin_group": ADMIN_GROUP,
+            "auth_okta_readonly_group": READONLY_GROUP,
+        }
+        resp = self.s.post_form("/settings/ui_save/", form)
+        body = resp.json()
+        self.assertTrue(body.get("success"), f"ui_save failed: {body.get('error')}")
+
+        saved = yaml.safe_load(self.s.get("/settings/export/").json()["yaml"])
+        okta = saved["auth"].get("okta")
+        self.assertIsNotNone(okta, "ui_save dropped auth.okta")
+        self.assertEqual(okta.get("client_secret"), CLIENT_SECRET,
+                         "blank client_secret in ui_save wiped the stored secret")
 
     def test_ui_save_without_okta_fields_omits_block(self):
         """A form with no okta fields at all (older UI, curl) must not emit

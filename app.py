@@ -464,9 +464,10 @@ def okta_callback():
     """
     Complete the Okta OIDC flow: validate state, exchange the code, validate
     the ID token claims (iss/aud/exp/nonce), and map the Okta groups claim to
-    a ProxyWeb role (admin_group -> admin, readonly_group -> readonly, no
-    match -> denied). Groups missing from the ID token are fetched from the
-    userinfo endpoint as a fallback.
+    a ProxyWeb role (any admin_group match -> admin, else any readonly_group
+    match -> readonly, no match -> denied; both settings accept multiple
+    comma-separated or YAML-list group names). Groups missing from the ID
+    token are fetched from the userinfo endpoint as a fallback.
 
     Every failure redirects back to /login with a fixed sso_error code; the
     details are only logged server-side.
@@ -500,19 +501,20 @@ def okta_callback():
         groups = claims.get('groups')
         if groups is None:
             groups = oidc.fetch_userinfo(
-                meta, tokens.get('access_token', '')).get('groups')
+                meta, tokens.get('access_token', ''),
+                claims.get('sub')).get('groups')
     except oidc.OidcError as e:
         logging.error("Okta sign-in failed: %s", e)
         return redirect(url_for('login', sso_error='exchange'))
 
-    groups = groups if isinstance(groups, list) else []
-    if okta_cfg['admin_group'] and okta_cfg['admin_group'] in groups:
+    groups = set(groups) if isinstance(groups, list) else set()
+    if groups & set(okta_cfg['admin_groups']):
         role = 'admin'
-    elif okta_cfg['readonly_group'] and okta_cfg['readonly_group'] in groups:
+    elif groups & set(okta_cfg['readonly_groups']):
         role = 'readonly'
     else:
-        logging.warning("Okta sign-in denied: user %s not in admin/readonly groups",
-                        claims.get('sub', '?'))
+        logging.warning("Okta sign-in denied: authenticated user is not in "
+                        "any configured admin/readonly group")
         return redirect(url_for('login', sso_error='not_authorized'))
 
     # Fresh session before granting access (session-fixation defense); a new
@@ -699,6 +701,21 @@ def settings_ui_save():
     try:
         # Get form data and build YAML
         form_data = request.form.to_dict()
+
+        # The Okta client_secret is never sent to the browser (settings_load_ui
+        # blanks it), so an unchanged save submits it empty. When Okta is being
+        # configured but the secret field is blank, preserve the stored secret
+        # instead of wiping it. Only do this when Okta is actually configured in
+        # the form, so a form with no Okta fields doesn't resurrect a stray block.
+        okta_configured = (
+            mdb._form_checkbox(form_data.get('auth_okta_enabled', '')) or
+            form_data.get('auth_okta_issuer', '').strip() or
+            form_data.get('auth_okta_client_id', '').strip())
+        if okta_configured and not form_data.get('auth_okta_client_secret', '').strip():
+            existing = (mdb.get_config(config).get('auth', {}) or {}).get('okta') or {}
+            if isinstance(existing, dict) and existing.get('client_secret'):
+                form_data['auth_okta_client_secret'] = existing['client_secret']
+
         yaml_config = mdb.form_data_to_yaml(form_data)
 
         # Validate before touching the existing config
@@ -731,6 +748,15 @@ def settings_load_ui():
         abort(403)
     try:
         config_data = mdb.get_config(config)
+        # Never send the Okta client_secret to the browser. get_config returns
+        # a freshly parsed dict per call, so blanking it here is safe. The
+        # settings UI leaves the field blank and preserves the stored secret on
+        # save (see settings_ui_save). The raw YAML editor/export intentionally
+        # still shows the full file, same as admin_password.
+        auth = config_data.get('auth') if isinstance(config_data, dict) else None
+        if isinstance(auth, dict) and isinstance(auth.get('okta'), dict) \
+                and auth['okta'].get('client_secret'):
+            auth['okta'] = {**auth['okta'], 'client_secret': ''}
         return jsonify({'success': True, 'config': config_data})
     except Exception as e:
         logging.exception(f"Error loading config for UI: {e}")

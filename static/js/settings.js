@@ -188,9 +188,14 @@ function populateForm(config) {
             document.getElementById('auth_okta_enabled').checked = !!okta.enabled;
             document.getElementById('auth_okta_issuer').value = okta.issuer || '';
             document.getElementById('auth_okta_client_id').value = okta.client_id || '';
-            document.getElementById('auth_okta_client_secret').value = okta.client_secret || '';
-            document.getElementById('auth_okta_admin_group').value = okta.admin_group || '';
-            document.getElementById('auth_okta_readonly_group').value = okta.readonly_group || '';
+            // The client_secret is never sent to the browser; always leave the
+            // field blank. An empty submit preserves the stored secret server-side.
+            document.getElementById('auth_okta_client_secret').value = '';
+            // Group settings accept a YAML list or a comma-separated string;
+            // render lists as comma-separated text for the single input.
+            const groupText = (v) => Array.isArray(v) ? v.join(', ') : (v || '');
+            document.getElementById('auth_okta_admin_group').value = groupText(okta.admin_group);
+            document.getElementById('auth_okta_readonly_group').value = groupText(okta.readonly_group);
             document.getElementById('auth_okta_scopes').value = okta.scopes || '';
             document.getElementById('auth_okta_disable_local_login').checked = !!okta.disable_local_login;
         }

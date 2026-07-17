@@ -20,6 +20,7 @@ ProxyWeb gives you full control over ProxySQL through a clean web interface — 
 - **Query history** — persistent per-server history with dropdown recall and full history page
 - **Config diff** — compare Disk / Memory / Runtime layers side by side, spot drift instantly
 - **Role-based access** — admin and read-only users with separate credentials
+- **Okta SSO (OIDC)** — optional "Sign in with Okta" with group-based admin/read-only role mapping
 - **Environment variable overrides** — inject credentials and DSN settings without editing files
 - **Settings UI** — edit `config.yml` through a structured form or raw YAML editor
 - **Hide tables** — filter out unused tables globally or per server
@@ -142,7 +143,7 @@ When running in Docker, place variables in a `.env` file mounted at `/app/.env` 
 
 ### Okta SSO (OIDC)
 
-ProxyWeb can authenticate users against Okta using the OIDC Authorization Code flow. Roles are mapped from Okta group membership: members of the configured *admin group* get full access, members of the *read-only group* get browse-only access, and everyone else is denied. Password login stays available unless you explicitly disable it.
+ProxyWeb can authenticate users against Okta using the OIDC Authorization Code flow. Roles are mapped from Okta group membership: members of any configured *admin group* get full access, members of any *read-only group* get browse-only access, and everyone else is denied. Password login stays available unless you explicitly disable it, and Okta sign-in itself can be switched off at any time via `enabled: false` (or the "Enable Okta Sign-In" checkbox in the settings UI).
 
 #### 1. Create the app integration in Okta
 
@@ -196,6 +197,15 @@ auth:
     disable_local_login: false
 ```
 
+Both group settings accept multiple groups — membership in **any** of them grants the role (admin wins if a user matches both). Use a comma-separated string or a YAML list:
+
+```yaml
+    admin_group: "proxyweb-admins, dba-team"
+    readonly_group:
+      - proxyweb-readonly
+      - support-team
+```
+
 All values can be supplied via environment variables instead of the file (recommended for the secret — put it in `.env`):
 
 | Variable                              | Overrides                       |
@@ -212,8 +222,10 @@ All values can be supplied via environment variables instead of the file (recomm
 #### Notes
 
 - `disable_local_login: true` removes the password form and rejects password logins server-side, but **only while Okta is enabled** — if Okta is turned off the flag is ignored, so you can never lock yourself out.
-- Users who authenticate at Okta but belong to neither configured group are denied with "not authorized".
+- Users who authenticate at Okta but belong to none of the configured groups are denied with "not authorized".
 - Behind a TLS-terminating reverse proxy, make sure the proxy sends `X-Forwarded-Proto: https` and enable a middleware such as Werkzeug's `ProxyFix`, so the generated redirect URI uses `https://` and matches the URI registered in Okta.
+- The OIDC issuer and its endpoints **must use HTTPS** — ProxyWeb relies on TLS server validation in place of verifying the ID token signature, and rejects plain-`http` OIDC URLs. For local/dev only (e.g. the hermetic test stack's mock IdP) you can set `PROXYWEB_OKTA_ALLOW_HTTP=1` to allow `http` endpoints. **Never set this in production.**
+- The discovery document's `issuer` must match the configured `issuer`; a mismatch fails the flow closed.
 
 ## Test Environment
 
