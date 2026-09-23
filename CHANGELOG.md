@@ -8,6 +8,8 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
 
 ## [Unreleased]
 
+## [2.4.0] — 2026-09-23
+
 ### Added
 - **Env-defined servers**: `PROXYWEB_SERVERS=name1,name2` defines servers
   entirely from the environment. Each listed name that `config.yml` doesn't
@@ -34,6 +36,25 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
   settings UI (left blank preserves the stored value).
 
 ### Fixed
+- Every page that renders the navbar now primes its session state itself, so
+  bookmarked URLs and sessions that outlived a restart no longer 500. Unknown
+  servers and paths (`/favicon.ico`, `/settings/<unknown>/`) return 404. An
+  unreachable server leaves the nav empty instead of failing the page.
+- Row APIs (`update_row`, `delete_row`, `insert_row`) validate every column
+  against the live table schema. A primary key column missing from
+  `pkValues` is rejected instead of silently matching zero rows.
+- Failed writes from the SQL editor were sometimes reported as "Success" and
+  added to query history; failure is now detected from any error output.
+- Config diff no longer reports inactive rows (`active = 0`), `NULL` vs `''`
+  `default_schema`, or backend-only `mysql_users` rows as drift. It uses one
+  admin connection per diff, and flags layers it could not read.
+- Optional config keys (`global.hide_tables`, adhoc report `info`) no longer
+  crash the pages that read them.
+- The parsed config is cached per file and invalidated on change, instead of
+  being re-read on every connection.
+- OIDC: the `redirect_uri` follows the HTTPS rule. Behind a TLS-terminating
+  proxy, set `PROXYWEB_TRUST_PROXY=1`. Malformed ID tokens are rejected
+  cleanly.
 - The structured settings editor, Export and the Okta secret-preserving UI
   save read the env-overridden config, so saving from the UI (or exporting
   and re-importing) wrote `PROXYWEB_*` passwords into `config.yml`. They now
@@ -317,7 +338,8 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
 
 See the git history for earlier milestones.
 
-[Unreleased]: https://github.com/miklos-szel/proxyweb/compare/v2.2.1...HEAD
+[Unreleased]: https://github.com/miklos-szel/proxyweb/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/miklos-szel/proxyweb/compare/v2.2.1...v2.4.0
 [2.2.1]: https://github.com/miklos-szel/proxyweb/compare/v2.1.5...v2.2.1
 [2.1.5]: https://github.com/miklos-szel/proxyweb/compare/v2.1.4...v2.1.5
 [2.1.4]: https://github.com/miklos-szel/proxyweb/compare/v2.1.3...v2.1.4

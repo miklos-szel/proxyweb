@@ -623,7 +623,7 @@
 
   <!-- HERO -->
   <section class="hero">
-    <div class="hero-badge">v2.2.1 &middot; New: Prod-server highlight &middot; MySQL &amp; PostgreSQL</div>
+    <div class="hero-badge">v2.4.0 &middot; New: Okta SSO &middot; MySQL &amp; PostgreSQL</div>
     <h1>A web interface for<br>ProxySQL management</h1>
     <p>
       Manage ProxySQL for <strong>MySQL and PostgreSQL</strong> backends. Browse tables, edit rows inline, run SQL queries, compare Disk/Memory/Runtime configs, and manage multiple instances &mdash; all from your browser.
@@ -702,7 +702,7 @@
       <div class="feature-card fade-up">
         <div class="feature-label">Operations</div>
         <h3>Environment overrides</h3>
-        <p>Inject credentials and DSN settings via environment variables. No need to bake secrets into config files.</p>
+        <p>Inject credentials and DSN settings via environment variables, or define whole servers with <code>PROXYWEB_SERVERS</code> &mdash; handy for Kubernetes sidecars. Env values are never written back to the config file.</p>
       </div>
 
       <div class="feature-card fade-up">
@@ -733,6 +733,12 @@
         <div class="feature-label">Security</div>
         <h3>Hardened read-only mode</h3>
         <p>The read-only SQL gate parses statement boundaries the way the database does &mdash; tracking string literals and comments, rejecting CTE-fronted mutations &mdash; and applies to read-only servers, not just read-only users.</p>
+      </div>
+
+      <div class="feature-card fade-up">
+        <div class="feature-label">Security</div>
+        <h3>Okta SSO</h3>
+        <p>Optional &ldquo;Sign in with Okta&rdquo; via OIDC. Okta groups map to the admin and read-only roles, and password login can be switched off once SSO is in place.</p>
       </div>
     </div>
   </section>
