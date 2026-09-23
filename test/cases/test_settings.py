@@ -536,12 +536,13 @@ class TestOptionalConfigSections(unittest.TestCase):
         self.addCleanup(self._restore_config)
 
     def _restore_config(self):
-        self.s.get("/")
-        self.s.session.post(
+        resp = self.s.session.post(
             f"{BASE_URL}/settings/save/",
             data={"settings": self._original_yaml, "_csrf_token": self.s.csrf_token},
             timeout=10,
         )
+        self.assertEqual(resp.status_code, 200,
+                         f"restoring the original config returned {resp.status_code}")
 
     def _save_config(self, cfg):
         yaml_text = yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False)

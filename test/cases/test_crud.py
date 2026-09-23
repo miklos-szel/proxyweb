@@ -553,6 +553,8 @@ class TestColumnWhitelist(unittest.TestCase):
     DATABASE = "main"
     TABLE    = "mysql_query_rules"
     BOGUS    = "definitely_not_a_column"
+    # mdb's whitelist message; MySQL's own reads "Unknown column 'x' in ...".
+    WHITELIST_ERROR = f"Unknown column: {BOGUS!r}"
 
     def setUp(self):
         self.s = ProxyWebSession()
@@ -573,7 +575,8 @@ class TestColumnWhitelist(unittest.TestCase):
         }).json()
         self.assertFalse(body.get("success"),
                          "update_row accepted a column that is not in the table")
-        self.assertIn(self.BOGUS, str(body.get("error", "")))
+        self.assertIn(self.WHITELIST_ERROR, str(body.get("error", "")),
+                      "rejected by MySQL, not by the live-schema whitelist")
 
     def test_delete_rejects_column_absent_from_schema(self):
         body = self.s.post_json("/api/delete_row", {
@@ -584,7 +587,8 @@ class TestColumnWhitelist(unittest.TestCase):
         }).json()
         self.assertFalse(body.get("success"),
                          "delete_row accepted a column that is not in the table")
-        self.assertIn(self.BOGUS, str(body.get("error", "")))
+        self.assertIn(self.WHITELIST_ERROR, str(body.get("error", "")),
+                      "rejected by MySQL, not by the live-schema whitelist")
 
     def test_insert_rejects_column_absent_from_schema(self):
         body = self.s.post_json("/api/insert_row", {
@@ -596,6 +600,8 @@ class TestColumnWhitelist(unittest.TestCase):
         }).json()
         self.assertFalse(body.get("success"),
                          "insert_row accepted a column that is not in the table")
+        self.assertIn(self.WHITELIST_ERROR, str(body.get("error", "")),
+                      "rejected by MySQL, not by the live-schema whitelist")
 
 
 class TestPartialPrimaryKeyRejected(unittest.TestCase):
@@ -663,7 +669,10 @@ class TestFailedWriteIsNotSuccess(unittest.TestCase):
 
     def test_constraint_violation_reports_failure(self):
         """Inserting a duplicate primary key must return success=False."""
-        rule_id = 993
+        # Unused by any other test; cleanup only deletes a row this test created,
+        # so a pre-existing rule with this id is never touched.
+        rule_id = 99301
+        inserted = False
         try:
             first = self.s.post_json("/api/insert_row", {
                 "server": self.SERVER, "database": self.DATABASE, "table": self.TABLE,
@@ -671,6 +680,7 @@ class TestFailedWriteIsNotSuccess(unittest.TestCase):
                 "data": {"rule_id": str(rule_id), "active": "1", "apply": "1"},
             }).json()
             self.assertTrue(first.get("success"), f"setup insert failed: {first.get('error')}")
+            inserted = True
 
             second = self.s.post_json("/api/insert_row", {
                 "server": self.SERVER, "database": self.DATABASE, "table": self.TABLE,
@@ -682,11 +692,12 @@ class TestFailedWriteIsNotSuccess(unittest.TestCase):
                 "duplicate primary key insert was reported as a success",
             )
         finally:
-            self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
-            self.s.post_json("/api/delete_row", {
-                "server": self.SERVER, "database": self.DATABASE, "table": self.TABLE,
-                "pkValues": {"rule_id": str(rule_id)},
-            })
+            if inserted:
+                self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+                self.s.post_json("/api/delete_row", {
+                    "server": self.SERVER, "database": self.DATABASE, "table": self.TABLE,
+                    "pkValues": {"rule_id": str(rule_id)},
+                })
 
     def test_failed_sql_form_write_is_not_added_to_history(self):
         """A failing statement from the SQL editor must not enter query history."""

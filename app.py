@@ -362,7 +362,14 @@ def _prime_session(server, database=None, table=None, refresh_dblist=False):
     session['servers'] = mdb.get_servers()
     dblist = session.get('dblist') or {}
     if refresh_dblist or server not in dblist:
-        dblist.update(mdb.get_all_dbs_and_tables(g.db, server))
+        # An unreachable server leaves the nav empty rather than failing the
+        # page: config diff renders and reports the error from its own request.
+        # The failure is not cached, so the next page load retries.
+        try:
+            dblist.update(mdb.get_all_dbs_and_tables(g.db, server))
+        except ValueError as e:
+            logging.warning("Could not list tables for server %s: %s", server, e)
+            dblist.pop(server, None)
     session['dblist'] = dblist
     session['misc'] = mdb.get_config(config)['misc']
     session['read_only'] = mdb.get_read_only(server)

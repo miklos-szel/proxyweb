@@ -3,6 +3,7 @@
 
 import copy
 import unittest
+from urllib.parse import urlparse
 
 import yaml
 
@@ -173,37 +174,84 @@ class TestFreshSessionRoutes(unittest.TestCase):
     def _fresh_session(self):
         """Log in WITHOUT following up with a GET / that primes the session."""
         s = ProxyWebSession()
-        s.session.post(
+        resp = s.session.post(
             f"{BASE_URL}/login",
             data={"username": USERNAME, "password": PASSWORD},
             allow_redirects=False,
             timeout=10,
         )
+        self.assertEqual(resp.status_code, 302, "login did not redirect")
+        self.assertEqual(urlparse(resp.headers.get("Location", "")).path, "/",
+                         "login redirected somewhere other than /")
         return s
 
+    def _get(self, path):
+        """GET without following redirects, so a bounce to /login is not a 200."""
+        return self._fresh_session().session.get(
+            f"{BASE_URL}{path}", allow_redirects=False, timeout=10)
+
     def test_config_diff_on_fresh_session(self):
-        resp = self._fresh_session().session.get(
-            f"{BASE_URL}/{SERVER}/config_diff/", timeout=10)
+        resp = self._get(f"/{SERVER}/config_diff/")
         self.assertEqual(resp.status_code, 200,
                          "config diff 500s on a session that never rendered /")
 
     def test_adhoc_report_on_fresh_session(self):
-        resp = self._fresh_session().session.get(
-            f"{BASE_URL}/{SERVER}/adhoc/", timeout=10)
+        resp = self._get(f"/{SERVER}/adhoc/")
         self.assertEqual(resp.status_code, 200,
                          "adhoc report 500s on a session that never rendered /")
 
     def test_query_history_on_fresh_session(self):
-        resp = self._fresh_session().session.get(
-            f"{BASE_URL}/{SERVER}/query_history/", timeout=10)
+        resp = self._get(f"/{SERVER}/query_history/")
         self.assertEqual(resp.status_code, 200,
                          "query history 500s on a session that never rendered /")
 
     def test_table_view_on_fresh_session(self):
-        resp = self._fresh_session().session.get(
-            f"{BASE_URL}/{SERVER}/{DATABASE}/global_variables/", timeout=10)
+        resp = self._get(f"/{SERVER}/{DATABASE}/global_variables/")
         self.assertEqual(resp.status_code, 200,
                          "table view 500s on a session that never rendered /")
+
+
+class TestUnreachableServerConfigDiff(unittest.TestCase):
+    """The config diff page must render for a server that cannot be reached.
+
+    Regression: priming the session for the navbar made render_config_diff
+    connect to list the server's tables, so an unreachable server turned the
+    page into a 500. Before that the page rendered and the diff request
+    (/<server>/config_diff/get) reported the connection error itself.
+    """
+
+    SERVER = "unreachable_srv"
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        body = self.s.get("/settings/export/").json()
+        self.assertTrue(body.get("success"), f"export failed: {body.get('error')}")
+        self._original_yaml = body["yaml"]
+        self.addCleanup(self._restore_config)
+
+        cfg = yaml.safe_load(self._original_yaml)
+        cfg["servers"][self.SERVER] = {"dsn": [{
+            "host": "unreachable-host.invalid", "user": "radmin",
+            "passwd": "radmin", "port": 6032, "db": "main",
+        }]}
+        self.s.post_form("/settings/save/", {
+            "settings": yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False)})
+
+    def _restore_config(self):
+        self.s.post_form("/settings/save/", {"settings": self._original_yaml})
+
+    def test_config_diff_page_renders(self):
+        resp = self.s.session.get(f"{BASE_URL}/{self.SERVER}/config_diff/",
+                                  allow_redirects=False, timeout=15)
+        self.assertEqual(resp.status_code, 200,
+                         "config diff page failed for an unreachable server")
+
+    def test_config_diff_request_reports_error(self):
+        body = self.s.post_json(f"/{self.SERVER}/config_diff/get", {}).json()
+        self.assertFalse(body.get("success"),
+                         "config diff reported success for an unreachable server")
+        self.assertTrue(body.get("error"))
 
 
 class TestUnknownServerIsNotFound(unittest.TestCase):
