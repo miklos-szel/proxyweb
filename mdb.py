@@ -947,7 +947,8 @@ def _merge_user_rows(table_name, rows):
     are identical apart from the two flags are merged with the flags OR-ed, so
     the runtime layer lines up with the single disk/memory row while a real
     flag change (e.g. frontend 1 -> 0 in memory) still shows as a difference.
-    Other tables are returned unchanged.
+    Only used where runtime is involved: disk vs memory compares the original
+    rows. Other tables are returned unchanged.
     """
     if table_name not in ('mysql_users', 'pgsql_users'):
         return rows
@@ -1091,16 +1092,22 @@ def _calculate_table_differences(disk_data, memory_data, runtime_data, table_nam
     reported as memory-vs-runtime differences: a row with `active = 0` whose
     identity has no runtime counterpart is expected to be missing there.
     """
-    # Users tables arrive with their split frontend/backend runtime rows
-    # already folded (get_config_diff applies _merge_user_rows to every layer,
-    # so the UI sees the same rows); the flags are compared like any column.
+    # Disk and memory hold the same row format, so they are compared as-is:
+    # folding them could make distinct rows (users has PK (username, backend))
+    # look identical. Runtime splits a user into one row per role, so memory vs
+    # runtime compares both sides folded by _merge_user_rows (a no-op for other
+    # tables); the flags are still compared, OR-ed per user.
+    runtime_data = _merge_user_rows(table_name, runtime_data)
+    memory_folded = _merge_user_rows(table_name, memory_data)
 
     disk_map = _build_hash_map(disk_data, table_name)
     memory_map = _build_hash_map(memory_data, table_name)
+    memory_folded_map = _build_hash_map(memory_folded, table_name)
     runtime_map = _build_hash_map(runtime_data, table_name)
 
     disk_hashes = set(disk_map.keys())
     memory_hashes = set(memory_map.keys())
+    memory_folded_hashes = set(memory_folded_map.keys())
     runtime_hashes = set(runtime_map.keys())
 
     runtime_identities = {_row_identity(table_name, row) for row in runtime_data}
@@ -1108,11 +1115,11 @@ def _calculate_table_differences(disk_data, memory_data, runtime_data, table_nam
     only_in_disk = [disk_map[h] for h in (disk_hashes - memory_hashes)]
     only_in_memory = [memory_map[h] for h in (memory_hashes - disk_hashes)]
     only_in_memory_not_runtime = [
-        memory_map[h] for h in (memory_hashes - runtime_hashes)
-        if not (_is_inactive_row(memory_map[h])
-                and _row_identity(table_name, memory_map[h]) not in runtime_identities)
+        memory_folded_map[h] for h in (memory_folded_hashes - runtime_hashes)
+        if not (_is_inactive_row(memory_folded_map[h])
+                and _row_identity(table_name, memory_folded_map[h]) not in runtime_identities)
     ]
-    only_in_runtime = [runtime_map[h] for h in (runtime_hashes - memory_hashes)]
+    only_in_runtime = [runtime_map[h] for h in (runtime_hashes - memory_folded_hashes)]
 
     differences = {
         'disk_vs_memory': {
@@ -1209,9 +1216,12 @@ def get_config_diff(server=None):
             failed_layers = []
             for layer_name, query in queries.items():
                 layer = _query_config_layer(query_db, server, query)
-                if layer.get('data'):
+                if layer_name == 'runtime' and layer.get('data'):
+                    # Show one runtime row per user, lined up with memory. Only
+                    # the displayed rows are folded; row_count stays the real
+                    # count and the diff folds on its own (see
+                    # _calculate_table_differences).
                     layer['data'] = _merge_user_rows(table_name, layer['data'])
-                    layer['row_count'] = len(layer['data'])
                 table_diff['databases'][layer_name] = layer
                 table_diff['stats'][f'{layer_name}_rows'] = layer['row_count']
                 if layer.get('error'):

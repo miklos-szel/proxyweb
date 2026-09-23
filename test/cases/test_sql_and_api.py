@@ -751,6 +751,37 @@ class TestConfigDiffUserFlagChange(ConfigDiffTestBase):
         self.assertIn(self.TEST_USER, mem_vs_runtime,
                       "frontend flag change not reported as memory-vs-runtime drift")
 
+    def test_split_memory_rows_differ_from_combined_disk_row(self):
+        """Two memory rows (frontend-only + backend-only; the PK is
+        (username, backend)) are not the same config as one frontend+backend
+        row on disk. Folding the rows before the disk-vs-memory comparison
+        made them look identical, so disk vs memory must use the rows as-is."""
+        self._run_sql(self.TABLE,
+                      f"INSERT INTO mysql_users "
+                      f"(username, password, default_hostgroup, frontend, backend, active) "
+                      f"VALUES ('{self.TEST_USER}', 'difftest-pass', 1, 1, 1, 1)")
+        self._assert_user_present(self.TABLE, self.TEST_USER)
+        self._admin_command("SAVE MYSQL USERS TO DISK")
+
+        self._run_sql(self.TABLE,
+                      f"DELETE FROM mysql_users WHERE username = '{self.TEST_USER}'")
+        for frontend, backend in ((1, 0), (0, 1)):
+            self._run_sql(self.TABLE,
+                          f"INSERT INTO mysql_users "
+                          f"(username, password, default_hostgroup, frontend, backend, active) "
+                          f"VALUES ('{self.TEST_USER}', 'difftest-pass', 1, "
+                          f"{frontend}, {backend}, 1)")
+        data = self.s.get_table_data(self.SERVER, self.DB, self.TABLE,
+                                     **{"length": "1000", "search[value]": self.TEST_USER})
+        rows = [r for r in data.get("data", []) if str(r[0]) == self.TEST_USER]
+        self.assertEqual(len(rows), 2, f"expected two split memory rows, got {rows}")
+
+        entry = self._table_diff(self.TABLE)
+        only_in_disk = [r.get("username") for r in
+                        entry["differences"]["disk_vs_memory"]["only_in_disk"]]
+        self.assertIn(self.TEST_USER, only_in_disk,
+                      "split memory rows reported as identical to the combined disk row")
+
 
 class TestConfigDiffIdentityColumnsServed(ConfigDiffTestBase):
     """The diff payload carries the per-table identity (primary key) map.
