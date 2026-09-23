@@ -40,7 +40,7 @@ def _allow_http():
     return os.environ.get('PROXYWEB_OKTA_ALLOW_HTTP') == '1'
 
 
-def _require_https(url, what):
+def require_https(url, what):
     """Reject non-https OIDC URLs unless http is explicitly opted into."""
     scheme = urlsplit(url).scheme
     if scheme == 'https':
@@ -59,7 +59,7 @@ def get_provider_metadata(issuer):
     non-https endpoint (unless PROXYWEB_OKTA_ALLOW_HTTP=1).
     """
     issuer = issuer.rstrip('/')
-    _require_https(issuer, "issuer")
+    require_https(issuer, "issuer")
     cached = _metadata_cache.get(issuer)
     if cached and time.time() - cached[0] < METADATA_CACHE_TTL:
         return cached[1]
@@ -78,10 +78,10 @@ def get_provider_metadata(issuer):
             raise OidcError(f"discovery document missing {key}")
     if str(meta.get('issuer', '')).rstrip('/') != issuer:
         raise OidcError("discovery issuer mismatch")
-    _require_https(meta['authorization_endpoint'], "authorization_endpoint")
-    _require_https(meta['token_endpoint'], "token_endpoint")
+    require_https(meta['authorization_endpoint'], "authorization_endpoint")
+    require_https(meta['token_endpoint'], "token_endpoint")
     if meta.get('userinfo_endpoint'):
-        _require_https(meta['userinfo_endpoint'], "userinfo_endpoint")
+        require_https(meta['userinfo_endpoint'], "userinfo_endpoint")
     _metadata_cache[issuer] = (time.time(), meta)
     return meta
 
@@ -139,14 +139,22 @@ def decode_id_token_claims(id_token):
     try:
         payload = id_token.split('.')[1]
         payload += '=' * (-len(payload) % 4)
-        return json.loads(base64.urlsafe_b64decode(payload))
+        claims = json.loads(base64.urlsafe_b64decode(payload))
     except Exception:
         raise OidcError("malformed id_token")
+    # A payload that decodes to an array or a scalar would sail through here
+    # and raise AttributeError out of validate_claims, which the caller's
+    # `except OidcError` does not catch — an unhandled 500 instead of the
+    # documented ?sso_error= redirect.
+    if not isinstance(claims, dict):
+        raise OidcError("malformed id_token")
+    return claims
 
 
 def validate_claims(claims, issuer, client_id, nonce):
     """Validate iss, aud (str or list), exp (with skew) and nonce."""
-    if claims.get('iss', '').rstrip('/') != issuer.rstrip('/'):
+    claim_issuer = claims.get('iss')
+    if not isinstance(claim_issuer, str) or claim_issuer.rstrip('/') != issuer.rstrip('/'):
         raise OidcError("issuer mismatch")
     aud = claims.get('aud')
     if isinstance(aud, list):

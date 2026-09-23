@@ -382,7 +382,7 @@ function addServer(serverName = '', serverData = null) {
         <div class="form-group">
             <label for="server_${serverIndex}_name">Server Name</label>
             <input type="text" id="server_${serverIndex}_name" name="server_${serverIndex}_name"
-                   class="form-control" placeholder="proxysql" value="${serverName || ''}" />
+                   class="form-control" placeholder="proxysql" value="${escapeHtmlAttr(serverName || '')}" />
         </div>
 
         <div class="form-group">
@@ -617,7 +617,7 @@ function addHideTable(section, value = '') {
     item.className = 'array-item';
     item.innerHTML = `
         <input type="text" name="${section}_hide_tables_${index}" class="form-control"
-               placeholder="table_name" value="${value}" style="padding-right: 40px;" />
+               placeholder="table_name" value="${escapeHtmlAttr(value)}" style="padding-right: 40px;" />
         <button type="button" class="array-item-remove" onclick="this.parentElement.remove()" aria-label="Remove table pattern">
             <i class="fas fa-times"></i>
         </button>

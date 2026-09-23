@@ -83,34 +83,6 @@
         margin-right: 0.5rem;
     }
 
-    .config-info {
-        background: #e8f0f4;
-        border-left: 3px solid var(--info-color);
-        padding: 0.75rem 1rem;
-        border-radius: var(--border-radius);
-        margin-bottom: 1rem;
-        box-shadow: var(--box-shadow);
-    }
-
-    .config-info h5 {
-        margin: 0 0 0.5rem 0;
-        color: var(--dark-color);
-        font-weight: 600;
-        font-size: 0.95rem;
-    }
-
-    .config-info ul {
-        margin: 0;
-        padding-left: 1.5rem;
-    }
-
-    .config-info li {
-        margin-bottom: 0.25rem;
-        color: var(--secondary-color);
-        font-size: 0.875rem;
-        line-height: 1.4;
-    }
-
     /* Editor Mode Toggle */
     .editor-mode-toggle {
         background: white;
@@ -228,13 +200,6 @@
         padding: 1.5rem;
         margin-bottom: 1rem;
         border: 1px solid #cbd5e1;
-    }
-
-    .dsn-card-title {
-        font-size: 1rem;
-        font-weight: 600;
-        color: var(--secondary-color);
-        margin: 0;
     }
 
     /* Array Management */
@@ -628,7 +593,7 @@
 
             <div class="settings-card-body">
                 <form action="/settings/save/" method="post">
-                    <input type="hidden" name="_csrf_token" value="{{ session.csrf_token }}">
+                    <input type="hidden" name="_csrf_token" value="{{ session.get('csrf_token', '') }}">
                     <div class="mb-4">
                         <label for="settings" class="form-label">
                             <i class="fas fa-edit me-2"></i>YAML Configuration

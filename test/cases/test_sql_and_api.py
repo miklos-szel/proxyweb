@@ -426,7 +426,10 @@ class TestConfigDiffMemoryRuntime(unittest.TestCase):
                 "server":   self.SERVER,
                 "database": self.DB,
                 "table":    self.TABLE,
-                "pkValues": {"username": self.TEST_USER},
+                # mysql_users' primary key is (username, backend). Sending only
+                # username made delete_row match `backend IS NULL` — zero rows —
+                # so the user leaked into the next run's INSERT.
+                "pkValues": {"username": self.TEST_USER, "backend": "1"},
             })
         except Exception:
             pass
@@ -482,6 +485,230 @@ class TestConfigDiffMemoryRuntime(unittest.TestCase):
             f"Expected {self.TEST_USER!r} to appear in memory-only diff rows, "
             f"got: {usernames_in_memory}",
         )
+
+
+class ConfigDiffTestBase(unittest.TestCase):
+    """Shared plumbing for tests that inspect POST /<server>/config_diff/get."""
+
+    SERVER = SERVER
+    DB     = "main"
+
+    def _login(self, table):
+        """Authenticated session with a fresh CSRF token and session['server'] set."""
+        self.s = ProxyWebSession()
+        self.s.login()
+        self.s.get(f"/{self.SERVER}/{self.DB}/{table}/")
+
+    def _run_sql(self, table, sql):
+        """Execute a statement through the SQL editor route (admin only)."""
+        self.s.get(f"/{self.SERVER}/{self.DB}/{table}/")
+        return self.s.post_form(f"/{self.SERVER}/{self.DB}/{table}/sql/", {"sql": sql})
+
+    def _admin_command(self, sql):
+        """Run LOAD/SAVE statements through /api/execute_proxysql_command."""
+        body = self.s.post_form("/api/execute_proxysql_command", {"sql": sql}).json()
+        self.assertTrue(body.get("success"),
+                        f"admin command failed ({sql}): {body.get('error')}")
+
+    def _table_diff(self, table):
+        """Return the config diff entry for one table."""
+        self.s.get(f"/{self.SERVER}/config_diff/")
+        body = self.s.post_json(f"/{self.SERVER}/config_diff/get", {}).json()
+        self.assertTrue(body.get("success"), body.get("error"))
+        entry = next((t for t in body.get("diff", {}).get("tables", [])
+                      if t.get("table_name") == table), None)
+        self.assertIsNotNone(entry, f"{table} missing from config diff tables list")
+        return entry
+
+    @staticmethod
+    def _memory_vs_runtime(entry, key):
+        return entry.get("differences", {}).get("memory_vs_runtime", {}).get(key, [])
+
+
+class TestConfigDiffInactiveRows(ConfigDiffTestBase):
+    """Rows with active=0 must not be reported as memory-vs-runtime drift.
+
+    Regression: ProxySQL deliberately never loads a row with ``active = 0``
+    into the runtime layer, so an inactive mysql_query_rules row present on
+    disk and in memory is correctly absent from runtime_mysql_query_rules.
+    The config diff counted that absence as a difference and flagged a fully
+    in-sync server with "Changes Detected".
+    """
+
+    TABLE             = "mysql_query_rules"
+    INACTIVE_RULE_ID  = 990
+    ACTIVE_RULE_ID    = 991
+
+    def setUp(self):
+        self._login(self.TABLE)
+
+    def tearDown(self):
+        try:
+            self._run_sql(self.TABLE,
+                          f"DELETE FROM mysql_query_rules WHERE rule_id IN "
+                          f"({self.INACTIVE_RULE_ID}, {self.ACTIVE_RULE_ID})")
+            self._admin_command("LOAD MYSQL QUERY RULES TO RUNTIME; "
+                                "SAVE MYSQL QUERY RULES TO DISK")
+        except Exception:
+            pass
+
+    def _insert_rule(self, rule_id, active):
+        self._run_sql(self.TABLE,
+                      f"INSERT INTO mysql_query_rules "
+                      f"(rule_id, active, match_digest, destination_hostgroup, apply) "
+                      f"VALUES ({rule_id}, {active}, '^SELECT {rule_id}', 2, 1)")
+        data = self.s.get_table_data(self.SERVER, self.DB, self.TABLE,
+                                     **{"length": "1000"})
+        ids = {str(row[0]) for row in data.get("data", [])}
+        self.assertIn(str(rule_id), ids, f"rule {rule_id} was not inserted")
+
+    def test_inactive_rule_not_reported_as_runtime_diff(self):
+        """An inactive rule saved to disk and loaded to runtime is not a diff.
+
+        LOAD MYSQL QUERY RULES TO RUNTIME skips active=0 rules by design, so
+        the row is on disk and in memory but not in runtime. That gap must not
+        appear in memory_vs_runtime.
+        """
+        self._insert_rule(self.INACTIVE_RULE_ID, 0)
+        self._admin_command("SAVE MYSQL QUERY RULES TO DISK; "
+                            "LOAD MYSQL QUERY RULES TO RUNTIME")
+
+        entry = self._table_diff(self.TABLE)
+        only_in_memory = [str(r.get("rule_id"))
+                          for r in self._memory_vs_runtime(entry, "only_in_memory")]
+        self.assertNotIn(
+            str(self.INACTIVE_RULE_ID), only_in_memory,
+            f"inactive rule {self.INACTIVE_RULE_ID} reported as a memory-vs-runtime "
+            f"difference; only_in_memory={only_in_memory}",
+        )
+
+    def test_active_rule_missing_from_runtime_still_reported(self):
+        """Guard against over-suppression: active=1 rules must still be diffed.
+
+        Same insert, but active=1 and no LOAD TO RUNTIME — this is real drift
+        and has to stay visible.
+        """
+        self._insert_rule(self.ACTIVE_RULE_ID, 1)
+
+        entry = self._table_diff(self.TABLE)
+        only_in_memory = [str(r.get("rule_id"))
+                          for r in self._memory_vs_runtime(entry, "only_in_memory")]
+        self.assertIn(
+            str(self.ACTIVE_RULE_ID), only_in_memory,
+            f"active rule {self.ACTIVE_RULE_ID} not loaded to runtime should be "
+            f"reported as a difference; only_in_memory={only_in_memory}",
+        )
+
+
+class TestConfigDiffNullDefaultSchema(ConfigDiffTestBase):
+    """mysql_users.default_schema NULL (disk/memory) vs '' (runtime) is not drift.
+
+    Regression: the runtime layer stores an empty string where disk and memory
+    hold NULL, and runtime_mysql_users carries a separate frontend and backend
+    row per user. Both are representation artefacts, but the diff reported the
+    user as memory-only / runtime-only and highlighted default_schema in red.
+    """
+
+    TABLE     = "mysql_users"
+    TEST_USER = "difftest-schema"
+
+    def setUp(self):
+        self._login(self.TABLE)
+
+    def tearDown(self):
+        try:
+            self._run_sql(self.TABLE,
+                          f"DELETE FROM mysql_users WHERE username = '{self.TEST_USER}'")
+            self._admin_command("LOAD MYSQL USERS TO RUNTIME; SAVE MYSQL USERS TO DISK")
+        except Exception:
+            pass
+
+    def test_null_default_schema_matches_empty_runtime(self):
+        self._run_sql(self.TABLE,
+                      f"INSERT INTO mysql_users "
+                      f"(username, password, default_hostgroup, default_schema, active) "
+                      f"VALUES ('{self.TEST_USER}', 'difftest-pass', 1, NULL, 1)")
+        self._admin_command("SAVE MYSQL USERS TO DISK; LOAD MYSQL USERS TO RUNTIME")
+
+        entry = self._table_diff(self.TABLE)
+        only_in_memory = [r.get("username")
+                          for r in self._memory_vs_runtime(entry, "only_in_memory")]
+        only_in_runtime = [r.get("username")
+                           for r in self._memory_vs_runtime(entry, "only_in_runtime")]
+
+        self.assertNotIn(
+            self.TEST_USER, only_in_memory,
+            f"user with a NULL default_schema reported as memory-only; "
+            f"only_in_memory={only_in_memory}",
+        )
+        self.assertNotIn(
+            self.TEST_USER, only_in_runtime,
+            f"user with a NULL default_schema reported as runtime-only; "
+            f"only_in_runtime={only_in_runtime}",
+        )
+
+
+class TestConfigDiffBackendOnlyUser(ConfigDiffTestBase):
+    """A backend-only mysql_users row (frontend=0) in sync is not drift.
+
+    Regression: the diff kept only runtime_mysql_users rows with frontend=1.
+    A backend-only user has just a frontend=0 row at runtime, so it was
+    filtered out and the user was reported as memory-only.
+    """
+
+    TABLE     = "mysql_users"
+    TEST_USER = "difftest-backend-only"
+
+    def setUp(self):
+        self._login(self.TABLE)
+
+    def tearDown(self):
+        try:
+            self._run_sql(self.TABLE,
+                          f"DELETE FROM mysql_users WHERE username = '{self.TEST_USER}'")
+            self._admin_command("LOAD MYSQL USERS TO RUNTIME; SAVE MYSQL USERS TO DISK")
+        except Exception:
+            pass
+
+    def test_backend_only_user_not_reported(self):
+        self._run_sql(self.TABLE,
+                      f"INSERT INTO mysql_users "
+                      f"(username, password, default_hostgroup, frontend, backend, active) "
+                      f"VALUES ('{self.TEST_USER}', 'difftest-pass', 1, 0, 1, 1)")
+        self._admin_command("SAVE MYSQL USERS TO DISK; LOAD MYSQL USERS TO RUNTIME")
+
+        entry = self._table_diff(self.TABLE)
+        for key in ("only_in_memory", "only_in_runtime"):
+            users = [r.get("username") for r in self._memory_vs_runtime(entry, key)]
+            self.assertNotIn(self.TEST_USER, users,
+                             f"in-sync backend-only user reported in {key}: {users}")
+
+
+class TestConfigDiffIdentityColumnsServed(ConfigDiffTestBase):
+    """The diff payload carries the per-table identity (primary key) map.
+
+    Regression: mdb._DIFF_IDENTITY_COLUMNS and a hand-copied IDENTIFYING_COLUMNS
+    constant in config_diff.html had drifted apart (the JS copy lacked
+    restapi_routes, the Python one the *_variables tables). The backend now
+    sends its map with the diff and the UI reads it from there.
+    """
+
+    def test_identity_columns_in_payload(self):
+        self._login("mysql_users")
+        body = self.s.post_json(f"/{self.SERVER}/config_diff/get", {}).json()
+        self.assertTrue(body.get("success"), body)
+        identity = body["diff"].get("identity_columns")
+        self.assertIsInstance(identity, dict, "diff payload has no identity_columns map")
+        self.assertEqual(identity.get("mysql_users"), ["username"])
+        self.assertEqual(identity.get("mysql_servers"), ["hostgroup_id", "hostname", "port"])
+        self.assertEqual(identity.get("global_variables"), ["variable_name"])
+
+    def test_template_has_no_hardcoded_identity_map(self):
+        self._login("mysql_users")
+        html = self.s.get(f"/{self.SERVER}/config_diff/").text
+        self.assertNotIn("const IDENTIFYING_COLUMNS", html)
+        self.assertNotIn("|| 'proxysql'", html)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -223,7 +223,7 @@ All values can be supplied via environment variables instead of the file (recomm
 
 - `disable_local_login: true` removes the password form and rejects password logins server-side, but **only while Okta is enabled** — if Okta is turned off the flag is ignored, so you can never lock yourself out.
 - Users who authenticate at Okta but belong to none of the configured groups are denied with "not authorized".
-- Behind a TLS-terminating reverse proxy, make sure the proxy sends `X-Forwarded-Proto: https` and enable a middleware such as Werkzeug's `ProxyFix`, so the generated redirect URI uses `https://` and matches the URI registered in Okta.
+- Behind a TLS-terminating reverse proxy, make sure the proxy sends `X-Forwarded-Proto: https` (and `X-Forwarded-Host`) and set `PROXYWEB_TRUST_PROXY=1`, which enables Werkzeug's `ProxyFix` for one proxy hop. The redirect URI then uses `https://` and matches the URI registered in Okta. Without it, SSO login fails, because ProxyWeb refuses to send an `http://` redirect URI. Only set it when a proxy is actually in front, since clients could otherwise spoof those headers.
 - The OIDC issuer and its endpoints **must use HTTPS** — ProxyWeb relies on TLS server validation in place of verifying the ID token signature, and rejects plain-`http` OIDC URLs. For local/dev only (e.g. the hermetic test stack's mock IdP) you can set `PROXYWEB_OKTA_ALLOW_HTTP=1` to allow `http` endpoints. **Never set this in production.**
 - The discovery document's `issuer` must match the configured `issuer`; a mismatch fails the flow closed.
 

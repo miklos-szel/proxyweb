@@ -159,5 +159,87 @@ class TestProdWarningHeaderBorder(unittest.TestCase):
                          "prod-warning class present after disabling the flag")
 
 
+
+class TestFreshSessionRoutes(unittest.TestCase):
+    """Every navbar-rendering page must work on a session that never hit `/`.
+
+    Regression: list_dbs.html (which every page extends) read
+    session['dblist'][session['server']] with bare subscripts, and
+    render_config_diff / adhoc_report / render_change never populated those
+    keys. Logging in and going straight to a bookmarked URL — or reusing a
+    session that outlived a restart — returned 500 instead of the page.
+    """
+
+    def _fresh_session(self):
+        """Log in WITHOUT following up with a GET / that primes the session."""
+        s = ProxyWebSession()
+        s.session.post(
+            f"{BASE_URL}/login",
+            data={"username": USERNAME, "password": PASSWORD},
+            allow_redirects=False,
+            timeout=10,
+        )
+        return s
+
+    def test_config_diff_on_fresh_session(self):
+        resp = self._fresh_session().session.get(
+            f"{BASE_URL}/{SERVER}/config_diff/", timeout=10)
+        self.assertEqual(resp.status_code, 200,
+                         "config diff 500s on a session that never rendered /")
+
+    def test_adhoc_report_on_fresh_session(self):
+        resp = self._fresh_session().session.get(
+            f"{BASE_URL}/{SERVER}/adhoc/", timeout=10)
+        self.assertEqual(resp.status_code, 200,
+                         "adhoc report 500s on a session that never rendered /")
+
+    def test_query_history_on_fresh_session(self):
+        resp = self._fresh_session().session.get(
+            f"{BASE_URL}/{SERVER}/query_history/", timeout=10)
+        self.assertEqual(resp.status_code, 200,
+                         "query history 500s on a session that never rendered /")
+
+    def test_table_view_on_fresh_session(self):
+        resp = self._fresh_session().session.get(
+            f"{BASE_URL}/{SERVER}/{DATABASE}/global_variables/", timeout=10)
+        self.assertEqual(resp.status_code, 200,
+                         "table view 500s on a session that never rendered /")
+
+
+class TestUnknownServerIsNotFound(unittest.TestCase):
+    """An unknown single-segment path must 404, not 500.
+
+    Regression: `/<server>/` is a catch-all, so `/settings/` (no action) and
+    `/favicon.ico` reached the table view with a bogus server name and blew up
+    on session['dblist'] / get_all_dbs_and_tables. Every path-parameter route
+    now validates the server against the configured list, the way
+    dump_database and api_table_data already did.
+    """
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+
+    def test_unknown_server_returns_404(self):
+        resp = self.s.session.get(f"{BASE_URL}/nosuchserver/", timeout=10)
+        self.assertEqual(resp.status_code, 404)
+
+    def test_settings_without_action_returns_404(self):
+        resp = self.s.session.get(f"{BASE_URL}/settings/", timeout=10)
+        self.assertEqual(resp.status_code, 404)
+
+    def test_favicon_returns_404(self):
+        resp = self.s.session.get(f"{BASE_URL}/favicon.ico", timeout=10)
+        self.assertEqual(resp.status_code, 404)
+
+    def test_unknown_settings_action_returns_404(self):
+        resp = self.s.session.get(f"{BASE_URL}/settings/nosuchaction/", timeout=10)
+        self.assertEqual(resp.status_code, 404)
+
+    def test_unknown_server_config_diff_returns_404(self):
+        resp = self.s.session.get(f"{BASE_URL}/nosuchserver/config_diff/", timeout=10)
+        self.assertEqual(resp.status_code, 404)
+
+
 if __name__ == "__main__":
     unittest.main()

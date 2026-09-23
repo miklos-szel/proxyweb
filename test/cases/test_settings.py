@@ -514,5 +514,109 @@ class TestExportTimestampedFilename(unittest.TestCase):
                          r"^config-\d{8}-\d{6}\.yml$")
 
 
+
+class TestOptionalConfigSections(unittest.TestCase):
+    """Optional config keys must not break the pages that read them.
+
+    Two regressions, both reachable from the settings UI:
+      * `global.hide_tables` is only written when the list is non-empty
+        (_form_global_section), but get_all_dbs_and_tables did
+        len(cfg['global']['hide_tables']) — a KeyError on the main nav path.
+      * adhoc report items have optional title/info/sql (_form_misc_items), but
+        execute_adhoc_report bare-subscripted all three, so a report saved with
+        an empty Info box made /<server>/adhoc/ raise KeyError.
+    """
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        body = self.s.get("/settings/export/").json()
+        self.assertTrue(body.get("success"), f"export failed: {body.get('error')}")
+        self._original_yaml = body["yaml"]
+        self.addCleanup(self._restore_config)
+
+    def _restore_config(self):
+        self.s.get("/")
+        self.s.session.post(
+            f"{BASE_URL}/settings/save/",
+            data={"settings": self._original_yaml, "_csrf_token": self.s.csrf_token},
+            timeout=10,
+        )
+
+    def _save_config(self, cfg):
+        yaml_text = yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False)
+        resp = self.s.session.post(
+            f"{BASE_URL}/settings/save/",
+            data={"settings": yaml_text, "_csrf_token": self.s.csrf_token},
+            timeout=10,
+        )
+        self.assertEqual(resp.status_code, 200,
+                         f"settings/save returned {resp.status_code}")
+
+    def test_nav_renders_without_global_hide_tables(self):
+        cfg = yaml.safe_load(self._original_yaml)
+        cfg["global"].pop("hide_tables", None)
+        for server_cfg in cfg.get("servers", {}).values():
+            server_cfg.pop("hide_tables", None)
+        self._save_config(cfg)
+
+        resp = self.s.session.get(f"{BASE_URL}/", timeout=10)
+        self.assertEqual(resp.status_code, 200,
+                         "nav failed to render with no global.hide_tables key")
+
+    def test_adhoc_report_renders_without_info_field(self):
+        cfg = yaml.safe_load(self._original_yaml)
+        cfg.setdefault("misc", {})["adhoc_report"] = [
+            {"title": "No info field", "sql": "SELECT 1 AS one"}
+        ]
+        self._save_config(cfg)
+
+        resp = self.s.session.get(f"{BASE_URL}/{SERVER}/adhoc/", timeout=10)
+        self.assertEqual(resp.status_code, 200,
+                         "adhoc report 500s when an item has no info field")
+
+    def test_table_view_renders_without_info_field(self):
+        """show_table_info.html serialises every misc item's sql/info with
+        |tojson; a missing info key is Jinja Undefined, which tojson cannot
+        serialise, so every table view 500'd once such an item was saved."""
+        cfg = yaml.safe_load(self._original_yaml)
+        cfg.setdefault("misc", {})["adhoc_report"] = [
+            {"title": "No info field", "sql": "SELECT 1 AS one"}
+        ]
+        self._save_config(cfg)
+
+        resp = self.s.session.get(f"{BASE_URL}/{SERVER}/main/global_variables/", timeout=10)
+        self.assertEqual(resp.status_code, 200,
+                         "table view 500s when a misc item has no info field")
+
+
+class TestSchemaApiWithoutSessionServer(unittest.TestCase):
+    """/api/get_schema must resolve the server without a session['server'].
+
+    Regression: it used session.get('server', 'default') — the last instance of
+    the hardcoded-fallback bug class TestDefaultServerFallback guards. 'default'
+    is not a configured server, so the lookup failed and the endpoint returned
+    a redacted error instead of the schema.
+    """
+
+    def test_get_schema_on_fresh_session(self):
+        s = ProxyWebSession()
+        s.session.post(
+            f"{BASE_URL}/login",
+            data={"username": USERNAME, "password": PASSWORD},
+            allow_redirects=False,
+            timeout=10,
+        )
+        resp = s.session.get(
+            f"{BASE_URL}/api/get_schema",
+            params={"table": "mysql_servers"},
+            timeout=10,
+        )
+        body = resp.json()
+        self.assertTrue(body.get("success"),
+                        f"get_schema failed on a session with no server: {body.get('error')}")
+        self.assertIn("columns", body.get("schema", {}))
+
+
 if __name__ == "__main__":
     unittest.main()

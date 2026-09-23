@@ -383,35 +383,6 @@
                     createNewRowTemplate(table);
                 }
             }
-
-            // Apply floating button behavior to rows that need horizontal scrolling
-            enableFloatingButtons();
-        }
-
-        // Detect horizontal overflow on table rows and apply floating button styling
-        function enableFloatingButtons() {
-            const table = document.getElementById('proxywebtable');
-            if (!table) return;
-
-            const rows = table.querySelectorAll('tbody tr');
-
-            rows.forEach(row => {
-                // Use our comprehensive validation to skip non-data rows
-                if (!isValidDataRow(row)) {
-                    return;
-                }
-
-                // Check if row has horizontal overflow
-                // scrollWidth > clientWidth means content overflows horizontally
-                const hasOverflow = row.scrollWidth > row.clientWidth;
-
-                // Toggle the has-overflow class based on actual overflow
-                if (hasOverflow) {
-                    row.classList.add('has-overflow');
-                } else {
-                    row.classList.remove('has-overflow');
-                }
-            });
         }
 
         // Build the action-buttons markup used by both the initial row render
@@ -555,76 +526,20 @@
             document.addEventListener('keydown', keydownHandler);
         }
 
-        // Debounce function to limit how often a function is called
-        function debounce(func, wait) {
-            let timeout;
-            return function executedFunction(...args) {
-                const later = () => {
-                    clearTimeout(timeout);
-                    func(...args);
-                };
-                clearTimeout(timeout);
-                timeout = setTimeout(later, wait);
-            };
-        }
-
-        // Debounced resize handler
-        const debouncedFloatingButtonsUpdate = debounce(() => {
-            enableFloatingButtons();
-        }, 250);
-
-        // Add resize event listener with debouncing
-        window.addEventListener('resize', debouncedFloatingButtonsUpdate);
-
-        // Also check for overflow when DataTables redraws
+        // Re-create the edit controls when DataTables redraws.
         document.addEventListener('DOMContentLoaded', function() {
             const table = document.getElementById('proxywebtable');
             if (table && $.fn.DataTable) {
                 // Use DataTables API to detect when table is redrawn
                 $(table).on('draw.dt', function() {
-                    // Re-apply floating buttons and re-create edit buttons after DataTables redraw
+                    // Re-create edit buttons after a DataTables redraw
                     setTimeout(() => {
-                        enableFloatingButtons();
                         // Only re-enable inline editing if we haven't processed this table yet
                         const existingControls = table.querySelectorAll('.edit-controls').length;
                         if (existingControls === 0) {
                             enableInlineEditing();
                         }
                     }, 100);
-                });
-            }
-
-            // Set up MutationObserver to detect when new rows are added dynamically
-            const tableBody = document.querySelector('#proxywebtable tbody');
-            if (tableBody) {
-                const observer = new MutationObserver((mutations) => {
-                    let shouldUpdate = false;
-
-                    // Check if any mutations involve adding new nodes
-                    mutations.forEach((mutation) => {
-                        if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-                            // Skip if only text nodes were added
-                            const hasElementNodes = Array.from(mutation.addedNodes).some(
-                                node => node.nodeType === Node.ELEMENT_NODE
-                            );
-                            if (hasElementNodes) {
-                                shouldUpdate = true;
-                            }
-                        }
-                    });
-
-                    // If new rows were added, re-check for overflow
-                    if (shouldUpdate) {
-                        setTimeout(() => {
-                            enableFloatingButtons();
-                        }, 100);
-                    }
-                });
-
-                // Observe the tbody for child additions
-                observer.observe(tableBody, {
-                    childList: true,
-                    subtree: true
                 });
             }
         });
@@ -949,10 +864,6 @@
                     if (data.success) {
                         showNotification('Row deleted successfully!', 'success');
                         row.remove();
-                        // Re-check for overflow after row removal
-                        setTimeout(() => {
-                            enableFloatingButtons();
-                        }, 100);
                     } else {
                         showNotification('Error deleting row: ' + data.error, 'error');
                     }
@@ -1002,11 +913,6 @@
                 newRowTemplate.appendChild(td);
             });
             tbody.insertBefore(newRowTemplate, tbody.firstChild);
-
-            // Re-check for overflow after template creation
-            setTimeout(() => {
-                enableFloatingButtons();
-            }, 100);
 
             return newRowTemplate;
         }
