@@ -524,6 +524,15 @@ class ConfigDiffTestBase(unittest.TestCase):
     def _memory_vs_runtime(entry, key):
         return entry.get("differences", {}).get("memory_vs_runtime", {}).get(key, [])
 
+    def _assert_user_present(self, table, username):
+        """Fail unless `username` has a row in `table` (mysql_users or
+        runtime_mysql_users), so an absence assertion can't pass vacuously
+        because the setup insert never took effect."""
+        data = self.s.get_table_data(self.SERVER, self.DB, table,
+                                     **{"length": "1000", "search[value]": username})
+        users = {str(row[0]) for row in data.get("data", [])}
+        self.assertIn(username, users, f"{username} not found in {table}")
+
 
 class TestConfigDiffInactiveRows(ConfigDiffTestBase):
     """Rows with active=0 must not be reported as memory-vs-runtime drift.
@@ -628,7 +637,9 @@ class TestConfigDiffNullDefaultSchema(ConfigDiffTestBase):
                       f"INSERT INTO mysql_users "
                       f"(username, password, default_hostgroup, default_schema, active) "
                       f"VALUES ('{self.TEST_USER}', 'difftest-pass', 1, NULL, 1)")
+        self._assert_user_present(self.TABLE, self.TEST_USER)
         self._admin_command("SAVE MYSQL USERS TO DISK; LOAD MYSQL USERS TO RUNTIME")
+        self._assert_user_present(f"runtime_{self.TABLE}", self.TEST_USER)
 
         entry = self._table_diff(self.TABLE)
         only_in_memory = [r.get("username")
@@ -675,13 +686,70 @@ class TestConfigDiffBackendOnlyUser(ConfigDiffTestBase):
                       f"INSERT INTO mysql_users "
                       f"(username, password, default_hostgroup, frontend, backend, active) "
                       f"VALUES ('{self.TEST_USER}', 'difftest-pass', 1, 0, 1, 1)")
+        self._assert_user_present(self.TABLE, self.TEST_USER)
         self._admin_command("SAVE MYSQL USERS TO DISK; LOAD MYSQL USERS TO RUNTIME")
+        self._assert_user_present(f"runtime_{self.TABLE}", self.TEST_USER)
 
         entry = self._table_diff(self.TABLE)
         for key in ("only_in_memory", "only_in_runtime"):
             users = [r.get("username") for r in self._memory_vs_runtime(entry, key)]
             self.assertNotIn(self.TEST_USER, users,
                              f"in-sync backend-only user reported in {key}: {users}")
+
+
+class TestConfigDiffUserFlagChange(ConfigDiffTestBase):
+    """A changed mysql_users frontend/backend flag must show up as drift.
+
+    Regression: to line up runtime_mysql_users' split frontend and backend rows
+    with the single memory row, the diff dropped both flags from every
+    comparison, so switching a user to backend-only in memory (frontend 1 -> 0)
+    without saving or loading it was reported as in sync. The split runtime
+    rows are now merged with the flags OR-ed and the flags are compared.
+    """
+
+    TABLE     = "mysql_users"
+    TEST_USER = "difftest-flag-change"
+
+    def setUp(self):
+        self._login(self.TABLE)
+
+    def tearDown(self):
+        try:
+            self._run_sql(self.TABLE,
+                          f"DELETE FROM mysql_users WHERE username = '{self.TEST_USER}'")
+            self._admin_command("LOAD MYSQL USERS TO RUNTIME; SAVE MYSQL USERS TO DISK")
+        except Exception:
+            pass
+
+    def test_frontend_flag_change_reported(self):
+        self._run_sql(self.TABLE,
+                      f"INSERT INTO mysql_users "
+                      f"(username, password, default_hostgroup, frontend, backend, active) "
+                      f"VALUES ('{self.TEST_USER}', 'difftest-pass', 1, 1, 1, 1)")
+        self._assert_user_present(self.TABLE, self.TEST_USER)
+        self._admin_command("SAVE MYSQL USERS TO DISK; LOAD MYSQL USERS TO RUNTIME")
+        self._assert_user_present(f"runtime_{self.TABLE}", self.TEST_USER)
+
+        # In sync: both runtime rows fold into the one memory row.
+        entry = self._table_diff(self.TABLE)
+        for key in ("only_in_memory", "only_in_runtime"):
+            users = [r.get("username") for r in self._memory_vs_runtime(entry, key)]
+            self.assertNotIn(self.TEST_USER, users,
+                             f"in-sync frontend+backend user reported in {key}: {users}")
+
+        # Memory-only change of the frontend flag is drift against disk and runtime.
+        self._run_sql(self.TABLE,
+                      f"UPDATE mysql_users SET frontend = 0 "
+                      f"WHERE username = '{self.TEST_USER}'")
+        entry = self._table_diff(self.TABLE)
+        disk_vs_memory = [r.get("username") for r in
+                          entry["differences"]["disk_vs_memory"]["only_in_memory"]]
+        self.assertIn(self.TEST_USER, disk_vs_memory,
+                      "frontend flag change not reported as disk-vs-memory drift")
+        mem_vs_runtime = [r.get("username")
+                          for r in self._memory_vs_runtime(entry, "only_in_memory")]
+        self.assertIn(self.TEST_USER, mem_vs_runtime,
+                      "frontend flag change not reported as memory-vs-runtime drift")
 
 
 class TestConfigDiffIdentityColumnsServed(ConfigDiffTestBase):

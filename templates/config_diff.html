@@ -618,11 +618,15 @@ function displayDiff(diffData) {
     document.getElementById('tables-with-diff').textContent = actualTablesWithDiff;
     // Tables we could not read are excluded from the percentage rather than
     // counted as in sync.
+    // If every table was unreadable the sync state is unknown, not 100%.
     const comparable = diffData.summary.total_tables - unreadableTables;
-    const syncPercentage = comparable > 0
-        ? Math.round(((comparable - actualTablesWithDiff) / comparable) * 100)
-        : 100;
-    document.getElementById('sync-status').textContent = syncPercentage + '%';
+    let syncStatus;
+    if (comparable > 0) {
+        syncStatus = Math.round(((comparable - actualTablesWithDiff) / comparable) * 100) + '%';
+    } else {
+        syncStatus = unreadableTables > 0 ? 'Unknown' : '100%';
+    }
+    document.getElementById('sync-status').textContent = syncStatus;
 }
 
 // ---------------------------------------------------------------------------
@@ -657,9 +661,6 @@ function normalizeDiffRow(tableName, row) {
                 normalized.default_schema = null;
             }
         }
-        // exclude frontend and backend columns from comparison
-        delete normalized.frontend;
-        delete normalized.backend;
     }
 
     return normalized;
@@ -790,18 +791,9 @@ function buildUnifiedRows(table) {
         addRows(table.databases.memory.data, 'memory');
     }
     if (table.databases.runtime && table.databases.runtime.data) {
-        let runtimeRows = table.databases.runtime.data;
-        // runtime_mysql_users has a frontend and a backend row per user; show
-        // the frontend row, but keep the backend row for a backend-only user
-        // (frontend=0), which has no frontend row and would look missing.
-        if (isUsersTable(tableName)) {
-            const hasFrontend = new Set(runtimeRows
-                .filter(row => String(row.frontend ?? '1') === '1')
-                .map(row => row.username));
-            runtimeRows = runtimeRows.filter(row =>
-                String(row.frontend ?? '1') === '1' || !hasFrontend.has(row.username));
-        }
-        addRows(runtimeRows, 'runtime');
+        // runtime_mysql_users' split frontend/backend rows arrive already
+        // merged into one row per user (mdb._merge_user_rows).
+        addRows(table.databases.runtime.data, 'runtime');
     }
 
     // Filter to only show rows with differences
@@ -841,9 +833,6 @@ function buildUnifiedTable(tableName, rows, tableData) {
         columnArray = Array.from(columnSet);
     }
 
-    // Columns to skip for diff comparison (table-specific)
-    const skipDiffCols = isUsersTable(tableName) ? new Set(['frontend', 'backend']) : new Set();
-
     const identCols = new Set(identifyingColumnsFor(tableName));
 
     // Compare every column once per row; the sort pass and the render pass
@@ -863,7 +852,7 @@ function buildUnifiedTable(tableName, rows, tableData) {
             if (row.runtime && runtimeVal !== null) presentValues.push(runtimeVal);
 
             let hasDifference = false;
-            if (!skipDiffCols.has(col) && presentValues.length > 1) {
+            if (presentValues.length > 1) {
                 hasDifference = presentValues.some(val => val !== presentValues[0]);
             }
             if (hasDifference) {
@@ -972,12 +961,11 @@ function buildUnifiedTable(tableName, rows, tableData) {
                 { name: 'runtime', present: row.runtime, data: row.runtimeData }
             ];
 
-            // Create signature for each environment (JSON of all column values, excluding skipDiffCols)
+            // Create signature for each environment (JSON of all column values)
             const envSignatures = envs.map(env => {
                 if (!env.present || !env.data) return null;
                 const sig = {};
                 columnArray.forEach(col => {
-                    if (skipDiffCols.has(col)) return;
                     sig[col] = normalizeDiffCell(tableName, col, env.data[col]);
                 });
                 return JSON.stringify(sig);

@@ -47,7 +47,10 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
   added to query history; failure is now detected from any error output.
 - Config diff no longer reports inactive rows (`active = 0`), `NULL` vs `''`
   `default_schema`, or backend-only `mysql_users` rows as drift. It uses one
-  admin connection per diff, and flags layers it could not read.
+  admin connection per diff, and flags layers it could not read (the sync
+  card shows "Unknown" when no table could be read). A changed `mysql_users`
+  `frontend`/`backend` flag is now reported: runtime's split per-role rows are
+  merged into one row per user instead of the flags being ignored.
 - Optional config keys (`global.hide_tables`, adhoc report `info`) no longer
   crash the pages that read them.
 - The parsed config is cached per file and invalidated on change, instead of

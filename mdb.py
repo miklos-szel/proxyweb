@@ -924,17 +924,46 @@ def _normalize_diff_row(table_name, row):
 
     ProxySQL's runtime layer does not round-trip every value verbatim:
     `default_schema` is stored as NULL on disk/in memory but surfaces as an
-    empty string in runtime_mysql_users, and runtime_mysql_users carries a
-    separate frontend and backend row per user. Neither is a configuration
-    difference.
+    empty string in runtime_mysql_users. That is not a configuration
+    difference. (The split frontend/backend runtime rows are folded by
+    _merge_user_rows before diffing, so the flags themselves are compared.)
     """
     normalized = dict(row)
     if table_name in ('mysql_users', 'pgsql_users'):
         if normalized.get('default_schema') in ('', 'null', None):
             normalized['default_schema'] = None
-        normalized.pop('frontend', None)
-        normalized.pop('backend', None)
     return normalized
+
+
+_USER_FLAGS = ('frontend', 'backend')
+
+
+def _merge_user_rows(table_name, rows):
+    """
+    Fold a users table's split rows back into one row per user.
+
+    runtime_mysql_users carries a separate row per role for a user that is both
+    frontend and backend (one with frontend=1, one with backend=1). Rows that
+    are identical apart from the two flags are merged with the flags OR-ed, so
+    the runtime layer lines up with the single disk/memory row while a real
+    flag change (e.g. frontend 1 -> 0 in memory) still shows as a difference.
+    Other tables are returned unchanged.
+    """
+    if table_name not in ('mysql_users', 'pgsql_users'):
+        return rows
+    merged = {}
+    for row in rows:
+        key = json.dumps({k: v for k, v in _normalize_diff_row(table_name, row).items()
+                          if k not in _USER_FLAGS},
+                         sort_keys=True, default=str)
+        if key not in merged:
+            merged[key] = dict(row)
+            continue
+        target = merged[key]
+        for flag in _USER_FLAGS:
+            if str(row.get(flag)) == '1':
+                target[flag] = row[flag]
+    return list(merged.values())
 
 
 def _is_inactive_row(row):
@@ -1062,10 +1091,9 @@ def _calculate_table_differences(disk_data, memory_data, runtime_data, table_nam
     reported as memory-vs-runtime differences: a row with `active = 0` whose
     identity has no runtime counterpart is expected to be missing there.
     """
-    # runtime_mysql_users holds a separate frontend and backend row per user.
-    # Do not filter to the frontend row: a backend-only user (frontend=0) has
-    # no such row and was reported as drift. _normalize_diff_row drops both
-    # flags, so a user's two runtime rows hash to one key and match memory.
+    # Users tables arrive with their split frontend/backend runtime rows
+    # already folded (get_config_diff applies _merge_user_rows to every layer,
+    # so the UI sees the same rows); the flags are compared like any column.
 
     disk_map = _build_hash_map(disk_data, table_name)
     memory_map = _build_hash_map(memory_data, table_name)
@@ -1181,6 +1209,9 @@ def get_config_diff(server=None):
             failed_layers = []
             for layer_name, query in queries.items():
                 layer = _query_config_layer(query_db, server, query)
+                if layer.get('data'):
+                    layer['data'] = _merge_user_rows(table_name, layer['data'])
+                    layer['row_count'] = len(layer['data'])
                 table_diff['databases'][layer_name] = layer
                 table_diff['stats'][f'{layer_name}_rows'] = layer['row_count']
                 if layer.get('error'):

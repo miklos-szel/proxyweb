@@ -238,6 +238,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+    # Host-run tests reach this instance at testlib's default ENV_BASE_URL.
+    ports:
+      - "5001:5000"
     networks:
       - proxyweb-test
 
