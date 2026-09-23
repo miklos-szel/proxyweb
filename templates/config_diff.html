@@ -118,55 +118,15 @@
         color: #dc2626;
     }
 
-    .status-badge.no-diff {
-        background: #d1fae5;
-        color: #16a34a;
+    .status-badge.status-unavailable {
+        background: #fef3c7;
+        color: #b45309;
     }
 
-    .layer-grid {
-        display: grid;
-        grid-template-columns: 150px repeat(3, 1fr);
-        border-bottom: 1px solid #e0e0e0;
-    }
-
-    .layer-grid:last-child {
-        border-bottom: none;
-    }
-
-    .layer-cell {
-        padding: 1rem;
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        font-size: 0.95rem;
-    }
-
-    .layer-cell-header {
-        background: #f8f9fa;
-        font-weight: 600;
-        color: #475569;
-        border-right: 1px solid #e0e0e0;
-    }
-
-    .layer-cell-content {
-        color: #334155;
-    }
-
-    .layer-icon {
-        font-size: 1.1rem;
-    }
-
-    .icon-disk { color: #8b5cf6; }
-    .icon-memory { color: #3b82f6; }
-    .icon-runtime { color: #10b981; }
-
-    .row-count {
-        background: #e2e8f0;
-        color: #475569;
-        padding: 0.25rem 0.625rem;
-        border-radius: 4px;
-        font-size: 0.85rem;
-        font-weight: 600;
+    .comparison-unavailable-note {
+        padding: 1rem 1.25rem;
+        color: #64748b;
+        font-size: 0.9rem;
     }
 
     .loading-state {
@@ -207,121 +167,6 @@
         display: block;
     }
 
-    .differences-section {
-        padding: 1.5rem;
-        background: #fafbfc;
-    }
-
-    .diff-comparison {
-        margin-bottom: 1.5rem;
-    }
-
-    .diff-comparison:last-child {
-        margin-bottom: 0;
-    }
-
-    .diff-comparison-title {
-        font-size: 0.95rem;
-        font-weight: 600;
-        color: #475569;
-        margin-bottom: 1rem;
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-    }
-
-    .diff-group {
-        background: white;
-        border: 1px solid #e0e0e0;
-        border-radius: 6px;
-        margin-bottom: 0.75rem;
-        overflow: hidden;
-    }
-
-    .diff-group:last-child {
-        margin-bottom: 0;
-    }
-
-    .diff-group-header {
-        padding: 0.875rem 1.25rem;
-        background: #f8f9fa;
-        font-weight: 600;
-        color: #475569;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        font-size: 0.9rem;
-        border-bottom: 1px solid #e0e0e0;
-    }
-
-    .diff-group-header-text {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-    }
-
-    .diff-count {
-        background: #e2e8f0;
-        color: #475569;
-        padding: 0.25rem 0.5rem;
-        border-radius: 12px;
-        font-size: 0.75rem;
-        font-weight: 700;
-    }
-
-    .diff-rows {
-        max-height: 300px;
-        overflow-y: auto;
-    }
-
-    .diff-row {
-        padding: 0.875rem 1.25rem;
-        border-bottom: 1px solid #f1f5f9;
-        font-family: 'Courier New', monospace;
-        font-size: 0.85rem;
-        line-height: 1.5;
-    }
-
-    .diff-row:last-child {
-        border-bottom: none;
-    }
-
-    .diff-row-only-disk {
-        background: #fef3c7;
-        border-left: 3px solid #f59e0b;
-    }
-
-    .diff-row-only-memory {
-        background: #dbeafe;
-        border-left: 3px solid #3b82f6;
-    }
-
-    .diff-row-only-runtime {
-        background: #d1fae5;
-        border-left: 3px solid #10b981;
-    }
-
-    .diff-content-json {
-        white-space: pre-wrap;
-        word-break: break-word;
-        color: #1e293b;
-    }
-
-    .no-differences {
-        padding: 2rem;
-        text-align: center;
-        color: #16a34a;
-        background: #f0fdf4;
-        border-radius: 6px;
-        font-weight: 500;
-    }
-
-    .no-differences i {
-        font-size: 2rem;
-        margin-bottom: 0.5rem;
-        display: block;
-    }
-
     /* Unified Table Styles */
     .unified-table-wrapper {
         overflow-x: auto;
@@ -347,15 +192,6 @@
         position: sticky;
         top: 0;
         z-index: 10;
-    }
-
-    .unified-config-table th.sortable {
-        cursor: pointer;
-        user-select: none;
-    }
-
-    .unified-config-table th.sortable:hover {
-        background: #e2e8f0;
     }
 
     .unified-config-table td {
@@ -448,6 +284,15 @@
         color: #991b1b;
     }
 
+    /* Runtime layer not applicable: the row is inactive (active=0), so ProxySQL
+       never loads it to runtime. Needs the td.presence-cell prefix to outrank
+       the :not(.presence-yes):not(.presence-no) white-background rule above. */
+    .unified-config-table td.presence-cell.presence-na {
+        background: #f1f5f9 !important;
+        color: #64748b;
+        cursor: help;
+    }
+
     .unified-config-table tbody tr {
         background: white;
     }
@@ -489,32 +334,6 @@
         border-bottom: 1px solid #e0e0e0;
     }
 
-    .env-badge {
-        display: inline-block;
-        padding: 0.25rem 0.625rem;
-        border-radius: 4px;
-        font-size: 0.75rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        margin-right: 0.5rem;
-    }
-
-    .env-badge-disk {
-        background: #ede9fe;
-        color: #7c3aed;
-    }
-
-    .env-badge-memory {
-        background: #dbeafe;
-        color: #2563eb;
-    }
-
-    .env-badge-runtime {
-        background: #d1fae5;
-        color: #059669;
-    }
-
     /* Action Buttons */
     .action-buttons {
         display: flex;
@@ -539,15 +358,6 @@
     @media (max-width: 768px) {
         .summary-cards {
             grid-template-columns: 1fr;
-        }
-
-        .layer-grid {
-            grid-template-columns: 1fr;
-        }
-
-        .layer-cell-header {
-            border-right: none;
-            border-bottom: 1px solid #e0e0e0;
         }
 
         .table-header {
@@ -647,7 +457,7 @@ function loadConfigDiff() {
         </div>
     `;
 
-    fetch('/' + (window.configDiffServer || 'proxysql') + '/config_diff/get', {
+    fetch('/' + encodeURIComponent(window.configDiffServer) + '/config_diff/get', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -669,17 +479,10 @@ function loadConfigDiff() {
 }
 
 function executeProxySQLCommandAndRefresh(title, sql) {
-    // Check if executeProxySQLCommand is available (from base.html)
-    if (typeof executeProxySQLCommand === 'function') {
-        executeProxySQLCommand(title, sql);
-        // Refresh after 3 seconds to allow command to complete
-        setTimeout(function() {
-            loadConfigDiff();
-        }, 3000);
-    } else {
-        console.error('executeProxySQLCommand is not defined');
-        alert('Error: Command execution function not available');
-    }
+    // executeProxySQLCommand comes from base.html, which every page extends.
+    executeProxySQLCommand(title, sql);
+    // Refresh after 3 seconds to allow command to complete
+    setTimeout(loadConfigDiff, 3000);
 }
 
 function displayDiff(diffData) {
@@ -687,15 +490,12 @@ function displayDiff(diffData) {
 
     // Store skip variables globally for use in row filtering
     window.configDiffSkipVariables = diffData.config_diff_skip_variable || [];
+    window.configDiffIdentityColumns = diffData.identity_columns || {};
 
-    // Update summary cards
+    // Summary cards are filled in once the tables below have been filtered —
+    // the client-side filter (skip variables, inactive rows) is what decides
+    // which tables actually count as changed.
     document.getElementById('total-tables').textContent = diffData.summary.total_tables;
-    document.getElementById('tables-with-diff').textContent = diffData.summary.tables_with_differences;
-
-    const syncPercentage = diffData.summary.total_tables > 0
-        ? Math.round(((diffData.summary.total_tables - diffData.summary.tables_with_differences) / diffData.summary.total_tables) * 100)
-        : 100;
-    document.getElementById('sync-status').textContent = syncPercentage + '%';
 
     // Build global actions
     let html = `
@@ -725,7 +525,34 @@ function displayDiff(diffData) {
 
     // Build table comparisons - only show tables with differences
     let actualTablesWithDiff = 0;
+    let unreadableTables = 0;
     diffData.tables.forEach(table => {
+        const stats = table.stats || {};
+
+        // A layer that could not be read comes back with zero rows, which would
+        // otherwise render as "every row drifted". Say so instead.
+        if (stats.comparison_unavailable) {
+            unreadableTables++;
+            const layers = (stats.failed_layers || []).join(', ') || 'unknown';
+            html += `
+                <div class="table-comparison">
+                    <div class="table-header">
+                        <div class="table-name">
+                            <i class="fas fa-table"></i>
+                            ${escapeHtml(table.table_name)}
+                        </div>
+                        <span class="status-badge status-unavailable">
+                            <i class="fas fa-plug"></i> Comparison unavailable
+                        </span>
+                    </div>
+                    <div class="comparison-unavailable-note">
+                        Could not read the ${escapeHtml(layers)} layer, so this table was not
+                        compared. Check the ProxySQL admin connection and refresh.
+                    </div>
+                </div>`;
+            return;
+        }
+
         // Build unified table to see if there are actual visible differences after filtering
         const unifiedRows = buildUnifiedRows(table);
 
@@ -736,18 +563,15 @@ function displayDiff(diffData) {
 
         actualTablesWithDiff++;
 
-        const statusClass = 'has-diff';
-        const statusText = '<i class="fas fa-exclamation-circle"></i> Changes Detected';
-
         html += `
             <div class="table-comparison">
                 <div class="table-header">
                     <div class="table-name">
                         <i class="fas fa-table"></i>
-                        ${table.table_name}
+                        ${escapeHtml(table.table_name)}
                     </div>
-                    <span class="status-badge ${statusClass}">
-                        ${statusText}
+                    <span class="status-badge has-diff">
+                        <i class="fas fa-exclamation-circle"></i> Changes Detected
                     </span>
                 </div>`;
 
@@ -761,17 +585,17 @@ function displayDiff(diffData) {
             html += `
                 <div class="action-buttons">
                     <button class="btn-action btn-action-runtime"
-                            onclick="executeTableCommand('${table.table_name}', 'LOAD TO RUNTIME')">
+                            onclick="executeTableCommand('${escapeAttr(table.table_name)}', 'LOAD TO RUNTIME')">
                         <i class="fas fa-play-circle"></i>
                         Load to Runtime
                     </button>
                     <button class="btn-action btn-action-disk"
-                            onclick="executeTableCommand('${table.table_name}', 'SAVE TO DISK')">
+                            onclick="executeTableCommand('${escapeAttr(table.table_name)}', 'SAVE TO DISK')">
                         <i class="fas fa-save"></i>
                         Save to Disk
                     </button>
                     <button class="btn-action btn-action-load-disk"
-                            onclick="executeTableCommand('${table.table_name}', 'LOAD FROM DISK')">
+                            onclick="executeTableCommand('${escapeAttr(table.table_name)}', 'LOAD FROM DISK')">
                         <i class="fas fa-download"></i>
                         Load from Disk
                     </button>
@@ -791,36 +615,97 @@ function displayDiff(diffData) {
 
     container.innerHTML = html;
 
-    // Update summary with actual filtered counts
     document.getElementById('tables-with-diff').textContent = actualTablesWithDiff;
-    const actualSyncPercentage = diffData.summary.total_tables > 0
-        ? Math.round(((diffData.summary.total_tables - actualTablesWithDiff) / diffData.summary.total_tables) * 100)
-        : 100;
-    document.getElementById('sync-status').textContent = actualSyncPercentage + '%';
+    // Tables we could not read are excluded from the percentage rather than
+    // counted as in sync.
+    // If every table was unreadable the sync state is unknown, not 100%.
+    const comparable = diffData.summary.total_tables - unreadableTables;
+    let syncStatus;
+    if (comparable > 0) {
+        syncStatus = Math.round(((comparable - actualTablesWithDiff) / comparable) * 100) + '%';
+    } else {
+        syncStatus = unreadableTables > 0 ? 'Unknown' : '100%';
+    }
+    document.getElementById('sync-status').textContent = syncStatus;
+}
+
+// ---------------------------------------------------------------------------
+// Shared comparison helpers.
+//
+// ProxySQL's layers do not round-trip every value verbatim, and some rows are
+// deliberately never loaded into runtime. Both the row-level filter
+// (buildUnifiedRows) and the per-cell highlighting (buildUnifiedTable) compare
+// through these helpers so they always agree on what counts as a difference.
+// ---------------------------------------------------------------------------
+
+// Identifying (primary key) columns per config table — what makes "the same
+// row" across the disk/memory/runtime layers. Served with the diff from
+// _DIFF_IDENTITY_COLUMNS in mdb.py so the backend and the UI share one map.
+function identifyingColumnsFor(tableName) {
+    return (window.configDiffIdentityColumns || {})[tableName] || [];
+}
+
+// mysql_users / pgsql_users share the layer artefacts handled below.
+function isUsersTable(tableName) {
+    return tableName === 'mysql_users' || tableName === 'pgsql_users';
+}
+
+// Normalize a whole row for comparison (handles layer-specific artefacts).
+function normalizeDiffRow(tableName, row) {
+    const normalized = {...row};
+
+    if (isUsersTable(tableName)) {
+        // normalize default_schema (treat "" and null as the same)
+        if ('default_schema' in normalized) {
+            if (normalized.default_schema === '' || normalized.default_schema === null || normalized.default_schema === 'null') {
+                normalized.default_schema = null;
+            }
+        }
+    }
+
+    return normalized;
+}
+
+// Normalize a single cell for comparison — the per-column twin of
+// normalizeDiffRow(). Returns null for "no value", otherwise a string.
+function normalizeDiffCell(tableName, col, value) {
+    if (value === undefined) {
+        return null;
+    }
+    // mysql_users.default_schema is NULL on disk/in memory but "" in runtime.
+    if (isUsersTable(tableName) && col === 'default_schema') {
+        if (value === null || value === '' || value === 'null') {
+            return '';
+        }
+    }
+    return String(value);
+}
+
+const RUNTIME_NA_TITLE = 'inactive (active=0) — not loaded to runtime';
+
+// ProxySQL never loads a row with active=0 into the runtime layer.
+function isInactiveRow(row) {
+    return !!row && 'active' in row && String(row.active) === '0';
+}
+
+// True when the runtime layer must be left out of the comparison: the row is
+// absent from runtime and is inactive in every layer it does exist in, so its
+// absence is expected rather than configuration drift.
+function runtimeNotApplicable(entry) {
+    if (entry.runtime) {
+        return false;
+    }
+    const present = [entry.memoryData, entry.diskData].filter(Boolean);
+    return present.length > 0 && present.every(isInactiveRow);
 }
 
 function buildUnifiedRows(table) {
     const rowMap = new Map();
     const tableName = table.table_name;
 
-    // Define identifying columns (primary keys) for each table
-    const IDENTIFYING_COLUMNS = {
-        'mysql_servers': ['hostgroup_id', 'hostname', 'port'],
-        'mysql_users': ['username'],
-        'mysql_query_rules': ['rule_id'],
-        'mysql_replication_hostgroups': ['writer_hostgroup'],
-        'mysql_group_replication_hostgroups': ['writer_hostgroup'],
-        'mysql_galera_hostgroups': ['writer_hostgroup'],
-        'mysql_aws_aurora_hostgroups': ['writer_hostgroup'],
-        'global_variables': ['variable_name'],
-        'admin_variables': ['variable_name'],
-        'mysql_variables': ['variable_name'],
-        'proxysql_servers': ['hostname', 'port'],
-        'scheduler': ['id']
-    };
 
     // Get identifying columns for this table
-    const identifyingCols = IDENTIFYING_COLUMNS[tableName] || [];
+    const identifyingCols = identifyingColumnsFor(tableName);
 
     // Helper to create a unique key for a row based on identifying columns
     function getRowKey(row) {
@@ -838,23 +723,8 @@ function buildUnifiedRows(table) {
     }
 
     // Helper to normalize row for comparison (handles special cases)
-    function normalizeRow(row, layer) {
-        const normalized = {...row};
-
-        // For mysql_users: normalize default_schema (treat "" and null as the same)
-        if (tableName === 'mysql_users' && 'default_schema' in normalized) {
-            if (normalized.default_schema === '' || normalized.default_schema === null || normalized.default_schema === 'null') {
-                normalized.default_schema = null;
-            }
-        }
-
-        // For mysql_users: exclude frontend and backend columns from comparison
-        if (tableName === 'mysql_users') {
-            delete normalized.frontend;
-            delete normalized.backend;
-        }
-
-        return normalized;
+    function normalizeRow(row) {
+        return normalizeDiffRow(tableName, row);
     }
 
     // Helper to check if row should be skipped (for variable_name tables)
@@ -868,21 +738,22 @@ function buildUnifiedRows(table) {
 
     // Helper to check if a row has any differences across layers
     function hasRowDifferences(entry) {
-        if (!entry.disk || !entry.memory || !entry.runtime) {
-            // Row doesn't exist in all layers - that's a difference
+        // An inactive row is never loaded to runtime - compare disk vs memory only.
+        const layers = runtimeNotApplicable(entry)
+            ? ['disk', 'memory']
+            : ['disk', 'memory', 'runtime'];
+
+        if (layers.some(layer => !entry[layer])) {
+            // Row doesn't exist in all compared layers - that's a difference
             return true;
         }
 
-        // Row exists in all three layers - check if column values differ
-        const normalized1 = normalizeRow(entry.diskData);
-        const normalized2 = normalizeRow(entry.memoryData);
-        const normalized3 = normalizeRow(entry.runtimeData);
+        const signatures = layers.map(layer => {
+            const normalized = normalizeRow(entry[layer + 'Data']);
+            return JSON.stringify(normalized, Object.keys(normalized).sort());
+        });
 
-        const str1 = JSON.stringify(normalized1, Object.keys(normalized1).sort());
-        const str2 = JSON.stringify(normalized2, Object.keys(normalized2).sort());
-        const str3 = JSON.stringify(normalized3, Object.keys(normalized3).sort());
-
-        return !(str1 === str2 && str2 === str3);
+        return signatures.some(sig => sig !== signatures[0]);
     }
 
     // Helper to add rows to map
@@ -920,13 +791,9 @@ function buildUnifiedRows(table) {
         addRows(table.databases.memory.data, 'memory');
     }
     if (table.databases.runtime && table.databases.runtime.data) {
-        let runtimeRows = table.databases.runtime.data;
-        // runtime_mysql_users has two rows per username (frontend=1 and backend=1);
-        // only compare against the frontend=1 row to match the mysql_users structure
-        if (tableName === 'mysql_users') {
-            runtimeRows = runtimeRows.filter(row => String(row.frontend) === '1');
-        }
-        addRows(runtimeRows, 'runtime');
+        // runtime_mysql_users' split frontend/backend rows arrive already
+        // merged into one row per user (mdb._merge_user_rows).
+        addRows(table.databases.runtime.data, 'runtime');
     }
 
     // Filter to only show rows with differences
@@ -966,46 +833,56 @@ function buildUnifiedTable(tableName, rows, tableData) {
         columnArray = Array.from(columnSet);
     }
 
-    // Columns to skip for diff comparison (table-specific)
-    const skipDiffCols = tableName === 'mysql_users' ? new Set(['frontend', 'backend']) : new Set();
+    const identCols = new Set(identifyingColumnsFor(tableName));
 
-    // Identifying columns per table (used to highlight key cells when a row is absent from some layers)
-    const IDENT_COLS_MAP = {
-        'mysql_servers': ['hostgroup_id', 'hostname', 'port'],
-        'mysql_users': ['username'],
-        'mysql_query_rules': ['rule_id'],
-        'mysql_replication_hostgroups': ['writer_hostgroup'],
-        'mysql_group_replication_hostgroups': ['writer_hostgroup'],
-        'mysql_galera_hostgroups': ['writer_hostgroup'],
-        'mysql_aws_aurora_hostgroups': ['writer_hostgroup'],
-        'global_variables': ['variable_name'],
-        'admin_variables': ['variable_name'],
-        'mysql_variables': ['variable_name'],
-        'proxysql_servers': ['hostname', 'port'],
-        'scheduler': ['id']
-    };
-    const identCols = new Set(IDENT_COLS_MAP[tableName] || []);
+    // Compare every column once per row; the sort pass and the render pass
+    // below both read the result off the row.
+    function compareColumns(row) {
+        const columnDifferences = {};
+        let hasAnyDifference = false;
 
-    // First, calculate if each row has differences
-    rows.forEach(row => {
-        row.hasAnyDifference = false;
         columnArray.forEach(col => {
-            const diskVal = row.diskData && row.diskData[col] !== undefined ? String(row.diskData[col]) : null;
-            const memoryVal = row.memoryData && row.memoryData[col] !== undefined ? String(row.memoryData[col]) : null;
-            const runtimeVal = row.runtimeData && row.runtimeData[col] !== undefined ? String(row.runtimeData[col]) : null;
+            const diskVal = row.diskData ? normalizeDiffCell(tableName, col, row.diskData[col]) : null;
+            const memoryVal = row.memoryData ? normalizeDiffCell(tableName, col, row.memoryData[col]) : null;
+            const runtimeVal = row.runtimeData ? normalizeDiffCell(tableName, col, row.runtimeData[col]) : null;
 
             const presentValues = [];
             if (row.disk && diskVal !== null) presentValues.push(diskVal);
             if (row.memory && memoryVal !== null) presentValues.push(memoryVal);
             if (row.runtime && runtimeVal !== null) presentValues.push(runtimeVal);
 
-            if (!skipDiffCols.has(col) && presentValues.length > 1) {
-                const firstVal = presentValues[0];
-                if (presentValues.some(val => val !== firstVal)) {
-                    row.hasAnyDifference = true;
-                }
+            let hasDifference = false;
+            if (presentValues.length > 1) {
+                hasDifference = presentValues.some(val => val !== presentValues[0]);
             }
+            if (hasDifference) {
+                hasAnyDifference = true;
+            }
+
+            // The displayed value is the raw one — normalization is for
+            // comparison only and must not change what the cell shows.
+            const rawValue = (layerData) =>
+                layerData && layerData[col] !== undefined ? String(layerData[col]) : null;
+            const rawDisk = rawValue(row.diskData);
+            const rawMemory = rawValue(row.memoryData);
+            const rawRuntime = rawValue(row.runtimeData);
+
+            columnDifferences[col] = {
+                hasDifference,
+                diskVal,
+                memoryVal,
+                runtimeVal,
+                displayValue: rawDisk !== null ? rawDisk : (rawMemory !== null ? rawMemory : rawRuntime)
+            };
         });
+
+        return { columnDifferences, hasAnyDifference };
+    }
+
+    rows.forEach(row => {
+        const compared = compareColumns(row);
+        row.columnDifferences = compared.columnDifferences;
+        row.hasAnyDifference = compared.hasAnyDifference;
     });
 
     // Sort rows: first by differences (differences first), then by primary key columns
@@ -1062,7 +939,7 @@ function buildUnifiedTable(tableName, rows, tableData) {
 
     // Data columns
     columnArray.forEach(col => {
-        html += `<th class="sortable">${escapeHtml(col)}</th>`;
+        html += `<th>${escapeHtml(col)}</th>`;
     });
 
     html += '</tr></thead>';
@@ -1070,54 +947,26 @@ function buildUnifiedTable(tableName, rows, tableData) {
     // Build table rows
     html += '<tbody>';
     rows.forEach(row => {
-        // First, check if ANY column has different values across environments
-        let hasAnyDifference = false;
-        const columnDifferences = {};
-
-        columnArray.forEach(col => {
-            const diskVal = row.diskData && row.diskData[col] !== undefined ? String(row.diskData[col]) : null;
-            const memoryVal = row.memoryData && row.memoryData[col] !== undefined ? String(row.memoryData[col]) : null;
-            const runtimeVal = row.runtimeData && row.runtimeData[col] !== undefined ? String(row.runtimeData[col]) : null;
-
-            const presentValues = [];
-            if (row.disk && diskVal !== null) presentValues.push(diskVal);
-            if (row.memory && memoryVal !== null) presentValues.push(memoryVal);
-            if (row.runtime && runtimeVal !== null) presentValues.push(runtimeVal);
-
-            let hasDifference = false;
-            if (!skipDiffCols.has(col) && presentValues.length > 1) {
-                const firstVal = presentValues[0];
-                hasDifference = presentValues.some(val => val !== firstVal);
-            }
-
-            columnDifferences[col] = {
-                hasDifference,
-                diskVal,
-                memoryVal,
-                runtimeVal,
-                displayValue: diskVal !== null ? diskVal : (memoryVal !== null ? memoryVal : runtimeVal)
-            };
-
-            if (hasDifference) {
-                hasAnyDifference = true;
-            }
-        });
+        const columnDifferences = row.columnDifferences;
+        const hasAnyDifference = row.hasAnyDifference;
+        // Inactive rows are never loaded to runtime: the runtime layer is not
+        // missing, it is not applicable.
+        const runtimeNA = runtimeNotApplicable(row);
 
         if (hasAnyDifference) {
             // Group environments by their row signature (combination of all column values)
             const envs = [
-                { name: 'disk', label: 'Disk', badge: 'env-badge-disk', present: row.disk, data: row.diskData },
-                { name: 'memory', label: 'Memory', badge: 'env-badge-memory', present: row.memory, data: row.memoryData },
-                { name: 'runtime', label: 'Runtime', badge: 'env-badge-runtime', present: row.runtime, data: row.runtimeData }
+                { name: 'disk', present: row.disk, data: row.diskData },
+                { name: 'memory', present: row.memory, data: row.memoryData },
+                { name: 'runtime', present: row.runtime, data: row.runtimeData }
             ];
 
-            // Create signature for each environment (JSON of all column values, excluding skipDiffCols)
+            // Create signature for each environment (JSON of all column values)
             const envSignatures = envs.map(env => {
                 if (!env.present || !env.data) return null;
                 const sig = {};
                 columnArray.forEach(col => {
-                    if (skipDiffCols.has(col)) return;
-                    sig[col] = env.data[col] !== undefined ? String(env.data[col]) : null;
+                    sig[col] = normalizeDiffCell(tableName, col, env.data[col]);
                 });
                 return JSON.stringify(sig);
             });
@@ -1164,6 +1013,8 @@ function buildUnifiedTable(tableName, rows, tableData) {
                     const isInGroup = group.envIndices.includes(idx);
                     if (isInGroup && e.present) {
                         html += `<td class="presence-cell presence-yes">✓</td>`;
+                    } else if (e.name === 'runtime' && runtimeNA) {
+                        html += `<td class="presence-cell presence-na" title="${RUNTIME_NA_TITLE}">–</td>`;
                     } else {
                         html += `<td class="presence-cell presence-no">✗</td>`;
                     }
@@ -1177,7 +1028,7 @@ function buildUnifiedTable(tableName, rows, tableData) {
                         ? String(representativeEnv.data[col])
                         : '';
 
-                    const notInAllLayers = !(row.disk && row.memory && row.runtime);
+                    const notInAllLayers = !(row.disk && row.memory && (row.runtime || runtimeNA));
                     const cellClass = (colInfo.hasDifference || (identCols.has(col) && notInAllLayers)) ? 'data-cell cell-diff' : 'data-cell';
                     html += `<td class="${cellClass}">${escapeHtml(envValue)}</td>`;
                 });
@@ -1195,14 +1046,18 @@ function buildUnifiedTable(tableName, rows, tableData) {
             html += `<td class="presence-cell ${row.memory ? 'presence-yes' : 'presence-no'}">
                         ${row.memory ? '✓' : '✗'}
                      </td>`;
-            html += `<td class="presence-cell ${row.runtime ? 'presence-yes' : 'presence-no'}">
-                        ${row.runtime ? '✓' : '✗'}
-                     </td>`;
+            if (runtimeNA) {
+                html += `<td class="presence-cell presence-na" title="${RUNTIME_NA_TITLE}">–</td>`;
+            } else {
+                html += `<td class="presence-cell ${row.runtime ? 'presence-yes' : 'presence-no'}">
+                            ${row.runtime ? '✓' : '✗'}
+                         </td>`;
+            }
 
             // Data cells
             columnArray.forEach(col => {
                 const colInfo = columnDifferences[col];
-                const notInAllLayers = !(row.disk && row.memory && row.runtime);
+                const notInAllLayers = !(row.disk && row.memory && (row.runtime || runtimeNA));
                 const cellClass = (identCols.has(col) && notInAllLayers) ? 'data-cell cell-diff' : 'data-cell';
                 html += `<td class="${cellClass}">${escapeHtml(colInfo.displayValue || '')}</td>`;
             });
@@ -1265,6 +1120,7 @@ function escapeAttr(text) {
 }
 
 function displayError(message) {
+    message = escapeHtml(message);
     const container = document.getElementById('diff-content');
     container.innerHTML = `
         <div class="error-state">

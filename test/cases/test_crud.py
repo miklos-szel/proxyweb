@@ -538,5 +538,180 @@ class TestCrossPkStyleEditing(unittest.TestCase):
             })
 
 
+
+class TestColumnWhitelist(unittest.TestCase):
+    """Row-mutation APIs must validate column names against the live schema.
+
+    Regression: update_row validated the caller's columns against the caller's
+    own `columnNames` list — i.e. against itself, whitelisting nothing — and
+    delete_row validated nothing at all. Only insert_row read the real schema.
+    CLAUDE.md documents the live-schema whitelist as the invariant for all
+    three.
+    """
+
+    SERVER   = SERVER
+    DATABASE = "main"
+    TABLE    = "mysql_query_rules"
+    BOGUS    = "definitely_not_a_column"
+    # mdb's whitelist message; MySQL's own reads "Unknown column 'x' in ...".
+    WHITELIST_ERROR = f"Unknown column: {BOGUS!r}"
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+
+    def test_update_rejects_column_absent_from_schema(self):
+        """A column the caller also lists in columnNames must still be rejected."""
+        body = self.s.post_json("/api/update_row", {
+            "server":      self.SERVER,
+            "database":    self.DATABASE,
+            "table":       self.TABLE,
+            "pkValues":    {"rule_id": "1"},
+            # The caller "authorises" its own bogus column — the old whitelist
+            # accepted exactly this.
+            "columnNames": ["rule_id", self.BOGUS],
+            "data":        {self.BOGUS: "x"},
+        }).json()
+        self.assertFalse(body.get("success"),
+                         "update_row accepted a column that is not in the table")
+        self.assertIn(self.WHITELIST_ERROR, str(body.get("error", "")),
+                      "rejected by MySQL, not by the live-schema whitelist")
+
+    def test_delete_rejects_column_absent_from_schema(self):
+        body = self.s.post_json("/api/delete_row", {
+            "server":   self.SERVER,
+            "database": self.DATABASE,
+            "table":    self.TABLE,
+            "pkValues": {self.BOGUS: "1"},
+        }).json()
+        self.assertFalse(body.get("success"),
+                         "delete_row accepted a column that is not in the table")
+        self.assertIn(self.WHITELIST_ERROR, str(body.get("error", "")),
+                      "rejected by MySQL, not by the live-schema whitelist")
+
+    def test_insert_rejects_column_absent_from_schema(self):
+        body = self.s.post_json("/api/insert_row", {
+            "server":      self.SERVER,
+            "database":    self.DATABASE,
+            "table":       self.TABLE,
+            "columnNames": [self.BOGUS],
+            "data":        {self.BOGUS: "x"},
+        }).json()
+        self.assertFalse(body.get("success"),
+                         "insert_row accepted a column that is not in the table")
+        self.assertIn(self.WHITELIST_ERROR, str(body.get("error", "")),
+                      "rejected by MySQL, not by the live-schema whitelist")
+
+
+class TestPartialPrimaryKeyRejected(unittest.TestCase):
+    """update_row/delete_row must reject pkValues that omit a primary key column.
+
+    Regression: a PK column absent from pkValues was turned into `col IS NULL`.
+    On a NOT NULL key that matches nothing, so the API reported success while
+    changing zero rows — e.g. deleting from mysql_users (PK username, backend)
+    with only `username` silently left the row in place.
+    """
+
+    SERVER   = SERVER
+    DATABASE = "main"
+    TABLE    = "mysql_servers"  # PK (hostgroup_id, hostname, port)
+    PARTIAL  = {"hostgroup_id": "1", "hostname": "partial-pk-host"}
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+
+    def test_delete_rejects_partial_pk(self):
+        body = self.s.post_json("/api/delete_row", {
+            "server":   self.SERVER,
+            "database": self.DATABASE,
+            "table":    self.TABLE,
+            "pkValues": self.PARTIAL,
+        }).json()
+        self.assertFalse(body.get("success"),
+                         "delete_row reported success for a pkValues missing 'port'")
+        self.assertIn("port", str(body.get("error", "")))
+
+    def test_update_rejects_partial_pk(self):
+        body = self.s.post_json("/api/update_row", {
+            "server":      self.SERVER,
+            "database":    self.DATABASE,
+            "table":       self.TABLE,
+            "pkValues":    self.PARTIAL,
+            "columnNames": ["hostgroup_id", "hostname", "port", "weight"],
+            "data":        {"weight": "2"},
+        }).json()
+        self.assertFalse(body.get("success"),
+                         "update_row reported success for a pkValues missing 'port'")
+        self.assertIn("port", str(body.get("error", "")))
+
+
+class TestFailedWriteIsNotSuccess(unittest.TestCase):
+    """A rejected write must not be reported as success.
+
+    Regression: success was decided by `"ERROR" in <execute_change output>`,
+    but two of its failure returns ("mysql CLI exited with status N" and a
+    bare connector error string) contain no "ERROR", so failed writes rendered
+    "Success", returned {'success': True}, and were appended to the persistent
+    query history.
+    """
+
+    SERVER   = SERVER
+    DATABASE = "main"
+    TABLE    = "mysql_query_rules"
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+
+    def test_constraint_violation_reports_failure(self):
+        """Inserting a duplicate primary key must return success=False."""
+        # Unused by any other test; cleanup only deletes a row this test created,
+        # so a pre-existing rule with this id is never touched.
+        rule_id = 99301
+        inserted = False
+        try:
+            first = self.s.post_json("/api/insert_row", {
+                "server": self.SERVER, "database": self.DATABASE, "table": self.TABLE,
+                "columnNames": ["rule_id", "active", "apply"],
+                "data": {"rule_id": str(rule_id), "active": "1", "apply": "1"},
+            }).json()
+            self.assertTrue(first.get("success"), f"setup insert failed: {first.get('error')}")
+            inserted = True
+
+            second = self.s.post_json("/api/insert_row", {
+                "server": self.SERVER, "database": self.DATABASE, "table": self.TABLE,
+                "columnNames": ["rule_id", "active", "apply"],
+                "data": {"rule_id": str(rule_id), "active": "1", "apply": "1"},
+            }).json()
+            self.assertFalse(
+                second.get("success"),
+                "duplicate primary key insert was reported as a success",
+            )
+        finally:
+            if inserted:
+                self.s.get(f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/")
+                self.s.post_json("/api/delete_row", {
+                    "server": self.SERVER, "database": self.DATABASE, "table": self.TABLE,
+                    "pkValues": {"rule_id": str(rule_id)},
+                })
+
+    def test_failed_sql_form_write_is_not_added_to_history(self):
+        """A failing statement from the SQL editor must not enter query history."""
+        bad_sql = "INSERT INTO mysql_query_rules (rule_id, nosuchcolumn) VALUES (994, 1)"
+        resp = self.s.post_form(
+            f"/{self.SERVER}/{self.DATABASE}/{self.TABLE}/sql/", {"sql": bad_sql})
+        self.assertEqual(resp.status_code, 200)
+
+        history = self.s.get(f"/{self.SERVER}/query_history/").text
+        self.assertNotIn(
+            "nosuchcolumn", history,
+            "a statement that failed was recorded in the query history",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

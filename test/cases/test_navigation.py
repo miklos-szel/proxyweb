@@ -3,6 +3,7 @@
 
 import copy
 import unittest
+from urllib.parse import urlparse
 
 import yaml
 
@@ -157,6 +158,135 @@ class TestProdWarningHeaderBorder(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertNotIn("prod-warning", resp.text,
                          "prod-warning class present after disabling the flag")
+
+
+
+class TestFreshSessionRoutes(unittest.TestCase):
+    """Every navbar-rendering page must work on a session that never hit `/`.
+
+    Regression: list_dbs.html (which every page extends) read
+    session['dblist'][session['server']] with bare subscripts, and
+    render_config_diff / adhoc_report / render_change never populated those
+    keys. Logging in and going straight to a bookmarked URL — or reusing a
+    session that outlived a restart — returned 500 instead of the page.
+    """
+
+    def _fresh_session(self):
+        """Log in WITHOUT following up with a GET / that primes the session."""
+        s = ProxyWebSession()
+        resp = s.session.post(
+            f"{BASE_URL}/login",
+            data={"username": USERNAME, "password": PASSWORD},
+            allow_redirects=False,
+            timeout=10,
+        )
+        self.assertEqual(resp.status_code, 302, "login did not redirect")
+        self.assertEqual(urlparse(resp.headers.get("Location", "")).path, "/",
+                         "login redirected somewhere other than /")
+        return s
+
+    def _get(self, path):
+        """GET without following redirects, so a bounce to /login is not a 200."""
+        return self._fresh_session().session.get(
+            f"{BASE_URL}{path}", allow_redirects=False, timeout=10)
+
+    def test_config_diff_on_fresh_session(self):
+        resp = self._get(f"/{SERVER}/config_diff/")
+        self.assertEqual(resp.status_code, 200,
+                         "config diff 500s on a session that never rendered /")
+
+    def test_adhoc_report_on_fresh_session(self):
+        resp = self._get(f"/{SERVER}/adhoc/")
+        self.assertEqual(resp.status_code, 200,
+                         "adhoc report 500s on a session that never rendered /")
+
+    def test_query_history_on_fresh_session(self):
+        resp = self._get(f"/{SERVER}/query_history/")
+        self.assertEqual(resp.status_code, 200,
+                         "query history 500s on a session that never rendered /")
+
+    def test_table_view_on_fresh_session(self):
+        resp = self._get(f"/{SERVER}/{DATABASE}/global_variables/")
+        self.assertEqual(resp.status_code, 200,
+                         "table view 500s on a session that never rendered /")
+
+
+class TestUnreachableServerConfigDiff(unittest.TestCase):
+    """The config diff page must render for a server that cannot be reached.
+
+    Regression: priming the session for the navbar made render_config_diff
+    connect to list the server's tables, so an unreachable server turned the
+    page into a 500. Before that the page rendered and the diff request
+    (/<server>/config_diff/get) reported the connection error itself.
+    """
+
+    SERVER = "unreachable_srv"
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        body = self.s.get("/settings/export/").json()
+        self.assertTrue(body.get("success"), f"export failed: {body.get('error')}")
+        self._original_yaml = body["yaml"]
+        self.addCleanup(self._restore_config)
+
+        cfg = yaml.safe_load(self._original_yaml)
+        cfg["servers"][self.SERVER] = {"dsn": [{
+            "host": "unreachable-host.invalid", "user": "radmin",
+            "passwd": "radmin", "port": 6032, "db": "main",
+        }]}
+        self.s.post_form("/settings/save/", {
+            "settings": yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False)})
+
+    def _restore_config(self):
+        self.s.post_form("/settings/save/", {"settings": self._original_yaml})
+
+    def test_config_diff_page_renders(self):
+        resp = self.s.session.get(f"{BASE_URL}/{self.SERVER}/config_diff/",
+                                  allow_redirects=False, timeout=15)
+        self.assertEqual(resp.status_code, 200,
+                         "config diff page failed for an unreachable server")
+
+    def test_config_diff_request_reports_error(self):
+        body = self.s.post_json(f"/{self.SERVER}/config_diff/get", {}).json()
+        self.assertFalse(body.get("success"),
+                         "config diff reported success for an unreachable server")
+        self.assertTrue(body.get("error"))
+
+
+class TestUnknownServerIsNotFound(unittest.TestCase):
+    """An unknown single-segment path must 404, not 500.
+
+    Regression: `/<server>/` is a catch-all, so `/settings/` (no action) and
+    `/favicon.ico` reached the table view with a bogus server name and blew up
+    on session['dblist'] / get_all_dbs_and_tables. Every path-parameter route
+    now validates the server against the configured list, the way
+    dump_database and api_table_data already did.
+    """
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+
+    def test_unknown_server_returns_404(self):
+        resp = self.s.session.get(f"{BASE_URL}/nosuchserver/", timeout=10)
+        self.assertEqual(resp.status_code, 404)
+
+    def test_settings_without_action_returns_404(self):
+        resp = self.s.session.get(f"{BASE_URL}/settings/", timeout=10)
+        self.assertEqual(resp.status_code, 404)
+
+    def test_favicon_returns_404(self):
+        resp = self.s.session.get(f"{BASE_URL}/favicon.ico", timeout=10)
+        self.assertEqual(resp.status_code, 404)
+
+    def test_unknown_settings_action_returns_404(self):
+        resp = self.s.session.get(f"{BASE_URL}/settings/nosuchaction/", timeout=10)
+        self.assertEqual(resp.status_code, 404)
+
+    def test_unknown_server_config_diff_returns_404(self):
+        resp = self.s.session.get(f"{BASE_URL}/nosuchserver/config_diff/", timeout=10)
+        self.assertEqual(resp.status_code, 404)
 
 
 if __name__ == "__main__":

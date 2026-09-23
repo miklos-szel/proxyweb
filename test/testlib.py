@@ -5,6 +5,7 @@ Shared test fixtures, constants, and runner for the ProxyWeb integration suite.
 Each topical ``test_*.py`` file imports from here. Environment variables:
 
   PROXYWEB_URL     Base URL of proxyweb (default: http://localhost:5000)
+  PROXYWEB_ENV_URL Base URL of the env-defined-servers instance (default: http://localhost:5001)
   PROXYWEB_USER    Admin username       (default: admin)
   PROXYWEB_PASS    Admin password       (default: admin42)
   PROXYSQL_MYSQL_HOST   ProxySQL MySQL frontend host (default: 127.0.0.1)
@@ -26,6 +27,8 @@ except ImportError:
     HAS_PYMYSQL = False
 
 BASE_URL = os.environ.get("PROXYWEB_URL", "http://localhost:5000").rstrip("/")
+# Second instance started with env-defined servers (see test_env_config.py).
+ENV_BASE_URL = os.environ.get("PROXYWEB_ENV_URL", "http://localhost:5001").rstrip("/")
 USERNAME = os.environ.get("PROXYWEB_USER", "admin")
 PASSWORD = os.environ.get("PROXYWEB_PASS", "admin42")
 
@@ -41,7 +44,8 @@ DATABASE  = "main"
 class ProxyWebSession:
     """Authenticated requests session with automatic CSRF token handling."""
 
-    def __init__(self):
+    def __init__(self, base_url=BASE_URL):
+        self.base_url = base_url
         self.session = requests.Session()
         self.csrf_token = ""
 
@@ -55,7 +59,7 @@ class ProxyWebSession:
 
     def login(self, username=USERNAME, password=PASSWORD):
         resp = self.session.post(
-            f"{BASE_URL}/login",
+            f"{self.base_url}/login",
             data={"username": username, "password": password},
             allow_redirects=True,
             timeout=10,
@@ -66,7 +70,7 @@ class ProxyWebSession:
 
     def get(self, path, **kwargs):
         kwargs.setdefault("timeout", 10)
-        resp = self.session.get(f"{BASE_URL}{path}", **kwargs)
+        resp = self.session.get(f"{self.base_url}{path}", **kwargs)
         resp.raise_for_status()
         self._assert_authenticated(resp)
         self._refresh_csrf(resp.text)
@@ -76,7 +80,7 @@ class ProxyWebSession:
         payload = dict(data or {})
         payload["_csrf_token"] = self.csrf_token
         kwargs.setdefault("timeout", 10)
-        resp = self.session.post(f"{BASE_URL}{path}", data=payload, **kwargs)
+        resp = self.session.post(f"{self.base_url}{path}", data=payload, **kwargs)
         resp.raise_for_status()
         self._assert_authenticated(resp)
         self._refresh_csrf(resp.text)
@@ -89,7 +93,7 @@ class ProxyWebSession:
             "X-CSRF-Token": self.csrf_token,
         }
         resp = self.session.post(
-            f"{BASE_URL}{path}", json=body, headers=headers, **kwargs
+            f"{self.base_url}{path}", json=body, headers=headers, **kwargs
         )
         resp.raise_for_status()
         self._assert_authenticated(resp)
@@ -104,7 +108,7 @@ class ProxyWebSession:
             "order[0][dir]": "asc",
         }
         defaults.update(params)
-        resp = self.session.get(f"{BASE_URL}/api/table_data",
+        resp = self.session.get(f"{self.base_url}/api/table_data",
                                 params=defaults, timeout=10)
         resp.raise_for_status()
         self._assert_authenticated(resp)

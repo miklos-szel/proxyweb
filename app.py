@@ -34,6 +34,14 @@ import oidc
 
 app = Flask(__name__)
 
+# Behind a TLS-terminating reverse proxy Flask sees plain http, so the OIDC
+# redirect_uri would be built as http:// and rejected by _okta_redirect_uri.
+# PROXYWEB_TRUST_PROXY=1 trusts one proxy hop's X-Forwarded-Proto/Host. Off by
+# default: without a proxy in front, clients could spoof these headers.
+if os.environ.get('PROXYWEB_TRUST_PROXY') == '1':
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
 CHANGELOG_URL = 'https://github.com/miklos-szel/proxyweb/blob/main/CHANGELOG.md'
 
 try:
@@ -139,6 +147,9 @@ def _backup_and_write_config(yaml_content):
         current_content = src.read()
     _atomic_write(config + ".bak", current_content)
     _atomic_write(config, yaml_content)
+    # get_config() caches the parse keyed by (mtime, size); drop it explicitly
+    # so a save is visible even within one filesystem timestamp tick.
+    mdb.invalidate_config_cache(config)
 
 
 # Dict keys matching these substrings (case-insensitive) get their values
@@ -188,6 +199,22 @@ if not isinstance(app.config.get('SECRET_KEY'), (str, bytes)):
 
 
 mdb.logging.debug(flask_custom_config)
+
+def _okta_redirect_uri():
+    """Build the OIDC redirect_uri and hold it to the same HTTPS rule as the
+    provider endpoints.
+
+    ``url_for(..., _external=True)`` takes the scheme from the incoming
+    request, so behind a TLS-terminating proxy that does not set
+    ``PREFERRED_URL_SCHEME`` (or ProxyFix) Flask sees http and we would hand
+    the IdP an http redirect_uri — the authorization code then comes back in
+    plaintext. Fail loudly instead, unless http was explicitly opted into via
+    PROXYWEB_OKTA_ALLOW_HTTP (test/dev only).
+    """
+    redirect_uri = url_for('okta_callback', _external=True)
+    oidc.require_https(redirect_uri, 'redirect_uri')
+    return redirect_uri
+
 
 def _redacted_error():
     """Generic client-facing error string; full detail goes to the server log.
@@ -306,6 +333,53 @@ def login_required(f):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
+
+
+def _require_known_server(server):
+    """Abort with 404 when ``server`` is not in the configured server list.
+
+    ``/<server>/`` is a single-segment catch-all, so without this any unknown
+    path (``/settings/``, ``/favicon.ico``) reached the table view with a bogus
+    server name and produced a 500 instead of a 404.
+    """
+    if server not in mdb.get_servers():
+        abort(404)
+
+
+def _prime_session(server, database=None, table=None, refresh_dblist=False):
+    """Populate the session state that every navbar-rendering template needs.
+
+    ``list_dbs.html`` — which every page extends — reads ``server``, ``servers``,
+    ``dblist``, ``misc``, ``read_only`` and ``history``. Routes that rendered a
+    page without first filling these returned a 500 on any session that had not
+    been through ``/`` (a bookmarked URL, a session that outlived a restart).
+
+    ``refresh_dblist`` re-reads the table list even when it is already cached in
+    the session. The landing page passes it so that a ``hide_tables`` change
+    saved in settings shows up in the nav on the next visit (``TestHideTables``).
+    """
+    session['server'] = server
+    session['servers'] = mdb.get_servers()
+    dblist = session.get('dblist') or {}
+    if refresh_dblist or server not in dblist:
+        # An unreachable server leaves the nav empty rather than failing the
+        # page: config diff renders and reports the error from its own request.
+        # The failure is not cached, so the next page load retries.
+        try:
+            dblist.update(mdb.get_all_dbs_and_tables(g.db, server))
+        except ValueError as e:
+            logging.warning("Could not list tables for server %s: %s", server, e)
+            dblist.pop(server, None)
+    session['dblist'] = dblist
+    session['misc'] = mdb.get_config(config)['misc']
+    session['read_only'] = mdb.get_read_only(server)
+    if session.get('role') == 'readonly':
+        session['read_only'] = True
+    session['history'] = [e['sql'] for e in mdb.load_query_history(server, limit=10)]
+    if database is not None:
+        session['database'] = database
+    if table is not None:
+        session['table'] = table
 
 
 @app.before_request
@@ -447,13 +521,13 @@ def okta_login():
         return redirect(url_for('login', sso_error='disabled'))
     try:
         meta = oidc.get_provider_metadata(okta_cfg['issuer'])
+        redirect_uri = _okta_redirect_uri()
     except oidc.OidcError:
         return redirect(url_for('login', sso_error='exchange'))
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
     session['oidc_state'] = state
     session['oidc_nonce'] = nonce
-    redirect_uri = url_for('okta_callback', _external=True)
     return redirect(oidc.build_authorize_url(
         meta, okta_cfg['client_id'], redirect_uri, state, nonce,
         okta_cfg['scopes']))
@@ -492,7 +566,7 @@ def okta_callback():
     code = request.args.get('code') or ''
     try:
         meta = oidc.get_provider_metadata(okta_cfg['issuer'])
-        redirect_uri = url_for('okta_callback', _external=True)
+        redirect_uri = _okta_redirect_uri()
         tokens = oidc.exchange_code(meta, okta_cfg['client_id'],
                                     okta_cfg['client_secret'], code, redirect_uri)
         claims = oidc.decode_id_token_claims(tokens.get('id_token', ''))
@@ -547,15 +621,7 @@ def render_list_dbs():
             return render_template("error.html", error="No servers configured. Ask an admin to set one up."), 503
         flash('No servers configured. Please add one below.', 'warning')
         return redirect(url_for('render_settings', action='edit'))
-    session['server'] = server
-    session['dblist'] = mdb.get_all_dbs_and_tables(g.db, server)
-    session['servers'] = mdb.get_servers()
-    session['read_only'] = mdb.get_read_only(server)
-    if session.get('role') == 'readonly':
-        session['read_only'] = True
-    session['misc'] = mdb.get_config(config)['misc']
-    recent = mdb.load_query_history(server, limit=10)
-    session['history'] = [e['sql'] for e in recent]
+    _prime_session(server, refresh_dblist=True)
 
     return render_template("list_dbs.html", server=server)
 
@@ -579,24 +645,12 @@ def render_show_table_content(server, database="main", table="global_variables")
     Raises:
         ValueError: If any underlying operation (data loading, processing, or rendering) fails.
     """
-    # refresh the tablelist if changing to a new server
-    if server not in session['dblist']:
-        session['dblist'].update(mdb.get_all_dbs_and_tables(g.db, server))
-
-    session['servers'] = mdb.get_servers()
-    session['server'] = server
-    recent = mdb.load_query_history(server, limit=10)
-    session['history'] = [e['sql'] for e in recent]
-    session['table'] = table
-    session['database'] = database
-    session['misc'] = mdb.get_config(config)['misc']
-    session['read_only'] = mdb.get_read_only(server)
-    if session.get('role') == 'readonly':
-        session['read_only'] = True
+    _require_known_server(server)
+    _prime_session(server, database=database, table=table)
     content = mdb.get_table_metadata(g.db, server, database, table)
     return render_template("show_table_info.html", content=content)
 
-@app.route('/<server>/<database>/<table>/sql/', methods=['GET', 'POST'])
+@app.route('/<server>/<database>/<table>/sql/', methods=['POST'])
 @login_required
 def render_change(server, database, table):
     """
@@ -613,9 +667,10 @@ def render_change(server, database, table):
     error = ""
     message = ""
     ret = ""
-    session['sql'] = request.form["sql"]
+    _require_known_server(server)
+    _prime_session(server, database=database, table=table)
+    session['sql'] = request.form.get("sql", "")
 
-    mdb.logging.debug(session['history'])
     select = _is_read_only_sql(session['sql'])
     # Non-SELECT statements are mutations: block them for read-only users and
     # read-only servers. The SQL editor is hidden in the UI for these cases,
@@ -635,7 +690,11 @@ def render_change(server, database, table):
         ret = mdb.execute_change(g.db, server, session['sql'])
         content = mdb.get_table_metadata(g.db, server, database, table)
 
-    if "ERROR" in ret:
+    # execute_change returns an empty string on success and the client's error
+    # output otherwise. Do not look for the substring "ERROR": two of its
+    # failure returns ("mysql CLI exited with status N", a connector error)
+    # do not contain it, and were reported to the user as a success.
+    if ret:
         error = ret
     else:
         message = "Success"
@@ -649,6 +708,8 @@ def render_change(server, database, table):
 @app.route('/<server>/adhoc/')
 @login_required
 def adhoc_report(server):
+    _require_known_server(server)
+    _prime_session(server)
     adhoc_results = mdb.execute_adhoc_report(g.db, server)
     return render_template("show_adhoc_report.html", adhoc_results=adhoc_results)
 
@@ -670,17 +731,28 @@ def render_settings(action):
     """
     if session.get('role') == 'readonly':
         abort(403)
+    if action not in ('edit', 'save'):
+        abort(404)
     config_file_content = ""
     message = ""
     if action == 'edit':
         with open(config, "r") as f:
             config_file_content = f.read()
     if action == 'save':
-        raw = request.form["settings"]
-        _validate_config(raw)
+        raw = request.form.get("settings", "")
         _backup_and_write_config(raw)
         message = "success"
-    return render_template("settings.html", config_file_content=config_file_content, message=message)
+    # Servers that exist only because of PROXYWEB_SERVERS (not in the file),
+    # so the editor can explain why they are missing from it.
+    # A broken file must not stop the editor from loading (it is how the file
+    # gets fixed), so fall back to listing every env server.
+    try:
+        file_servers = mdb.get_config(config, apply_env=False).get('servers') or {}
+    except Exception:
+        file_servers = {}
+    env_servers = [n for n in mdb.get_env_managed_servers() if n not in file_servers]
+    return render_template("settings.html", config_file_content=config_file_content, message=message,
+                           env_servers=env_servers)
 
 
 @app.route('/settings/ui_save/', methods=['POST'])
@@ -712,7 +784,7 @@ def settings_ui_save():
             form_data.get('auth_okta_issuer', '').strip() or
             form_data.get('auth_okta_client_id', '').strip())
         if okta_configured and not form_data.get('auth_okta_client_secret', '').strip():
-            existing = (mdb.get_config(config).get('auth', {}) or {}).get('okta') or {}
+            existing = (mdb.get_config(config, apply_env=False).get('auth', {}) or {}).get('okta') or {}
             if isinstance(existing, dict) and existing.get('client_secret'):
                 form_data['auth_okta_client_secret'] = existing['client_secret']
 
@@ -747,7 +819,9 @@ def settings_load_ui():
     if session.get('role') == 'readonly':
         abort(403)
     try:
-        config_data = mdb.get_config(config)
+        # Read the file without env overrides: whatever the UI shows it saves
+        # back, and env-supplied servers/secrets must never land in config.yml.
+        config_data = mdb.get_config(config, apply_env=False)
         # Never send the Okta client_secret to the browser. get_config returns
         # a freshly parsed dict per call, so blanking it here is safe. The
         # settings UI leaves the field blank and preserves the stored secret on
@@ -777,7 +851,9 @@ def settings_export():
     if session.get('role') == 'readonly':
         abort(403)
     try:
-        config_data = mdb.get_config(config)
+        # Export the file as written, not the env-overridden view (see
+        # settings_load_ui): an exported file may be imported straight back.
+        config_data = mdb.get_config(config, apply_env=False)
         yaml_content = mdb.dict_to_yaml(config_data)
         filename = f"config-{datetime.now().strftime('%Y%m%d-%H%M%S')}.yml"
         return jsonify({'success': True, 'yaml': yaml_content, 'filename': filename})
@@ -804,8 +880,7 @@ def settings_import():
         # Get uploaded YAML content
         yaml_content = request.form.get('yaml_content', '')
 
-        # Validate YAML syntax and required shape before touching the existing config
-        _validate_config(yaml_content)
+        # _backup_and_write_config validates syntax and shape before writing.
         _backup_and_write_config(yaml_content)
 
         return jsonify({'success': True, 'message': 'Configuration imported successfully'})
@@ -814,7 +889,7 @@ def settings_import():
         return jsonify({'success': False, 'error': _redacted_error()})
 
 
-@app.route('/<server>/config_diff/', methods=['GET', 'POST'])
+@app.route('/<server>/config_diff/')
 @login_required
 def render_config_diff(server):
     """
@@ -826,6 +901,8 @@ def render_config_diff(server):
     Returns:
         flask.Response: Rendered HTML response for the configuration diff page.
     """
+    _require_known_server(server)
+    _prime_session(server)
     return render_template('config_diff.html', server=server)
 
 
@@ -843,6 +920,7 @@ def get_config_diff(server):
             - `diff` (object) when `success` is True: the configuration differences grouped by source.
             - `error` (str) when `success` is False: error message explaining the failure.
     """
+    _require_known_server(server)
     try:
         diff_data = mdb.get_config_diff(server)
         return jsonify({'success': True, 'diff': diff_data})
@@ -936,7 +1014,7 @@ def api_update_row():
     - server (str): target server identifier.
     - database (str): target database name.
     - table (str): target table name.
-    - pkValues (list): primary key values identifying the row to update.
+    - pkValues (dict): primary key column -> value for the row to update; every PK column must be present (send null for a NULL key).
     - columnNames (list): column names corresponding to the data values.
     - data (list): values to write for the specified columns.
     
@@ -1084,7 +1162,7 @@ def api_get_schema():
             return jsonify({'success': False, 'error': 'Table name required'})
 
         # Get server from session
-        server = session.get('server', 'default')
+        server = session.get('server') or mdb.get_default_server()
         database = session.get('database', 'main')
 
         schema_info = mdb.get_table_schema(g.db, server, database, table_name)
@@ -1141,7 +1219,7 @@ def api_execute_proxysql_command():
     """
     Execute allowed ProxySQL administrative commands submitted via the request form.
     
-    Reads the 'sql' form field, validates that each statement is an allowed ProxySQL administrative command (e.g., LOAD, SAVE, or SELECT CONFIG), executes the commands against the server from the session (default 'proxysql'), and returns execution status.
+    Reads the 'sql' form field, validates that each statement is an allowed ProxySQL administrative command (e.g., LOAD, SAVE, or SELECT CONFIG), executes the commands against the server from the session (falling back to the configured default server), and returns execution status.
     
     Returns:
         dict: JSON-serializable object: `{'success': True}` on success; `{'success': False, 'error': <message>}` on failure or validation error.
@@ -1151,7 +1229,7 @@ def api_execute_proxysql_command():
         if not sql:
             return jsonify({'success': False, 'error': 'SQL command required'})
 
-        statements = [s.strip() for s in sql.split(';') if s.strip()]
+        statements = _split_sql_statements(sql)
         if not statements or not all(_ALLOWED_PROXYSQL_CMD.match(s) for s in statements):
             logging.warning(f"Rejected disallowed command in execute_proxysql_command: {sql[:200]}")
             return jsonify({'success': False, 'error': 'Only ProxySQL LOAD/SAVE administrative commands are allowed'})
@@ -1167,7 +1245,7 @@ def api_execute_proxysql_command():
 
         if error:
             # Convert error to string if it's an exception object
-            error_msg = str(error) if error else 'Unknown error'
+            error_msg = str(error)
             logging.error(f"ProxySQL command execution error: {error_msg}")
             return jsonify({'success': False, 'error': error_msg})
         else:
@@ -1193,15 +1271,8 @@ def query_history(server):
     Returns:
         A Flask response rendering the `query_history.html` template with the server and its reversed history list.
     """
-    session['server'] = server
-    session['servers'] = mdb.get_servers()
-    if server not in session.get('dblist', {}):
-        session['dblist'] = session.get('dblist', {})
-        session['dblist'].update(mdb.get_all_dbs_and_tables(g.db, server))
-    session['misc'] = mdb.get_config(config)['misc']
-    session['read_only'] = mdb.get_read_only(server)
-    if session.get('role') == 'readonly':
-        session['read_only'] = True
+    _require_known_server(server)
+    _prime_session(server)
     history = mdb.load_query_history(server)
     history.reverse()
     return render_template("query_history.html", server=server, history=history)

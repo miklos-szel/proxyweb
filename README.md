@@ -139,6 +139,18 @@ export PROXYWEB_SERVER_PROXYSQL_USER=myuser
 export PROXYWEB_SERVER_PROXYSQL_PASSWORD=mypassword
 ```
 
+**Servers defined entirely from the environment:** the variables above only override servers that already exist in `config.yml`. To add servers without editing the file (e.g. a Kubernetes sidecar configured through a mounted `.env`), list them in `PROXYWEB_SERVERS` (comma-separated). Each listed server that `config.yml` doesn't already define starts from ProxySQL's default admin DSN (`127.0.0.1:6032`, `admin`/`admin`, db `main`). The `PROXYWEB_SERVER_<NAME>_*` variables then override individual fields.
+
+```bash
+PROXYWEB_SERVERS=core_0
+PROXYWEB_SERVER_CORE_0_HOST=127.0.0.1
+PROXYWEB_SERVER_CORE_0_PORT=6032
+PROXYWEB_SERVER_CORE_0_USER=admin
+PROXYWEB_SERVER_CORE_0_PASSWORD=secret
+```
+
+Env-defined servers exist only in memory. They never appear in the settings editor or Export, and are never written to `config.yml`. Server names may contain only letters, digits, `_` and `-`. Environment variable names can't contain `-`, so use `_` in names you want to configure. If `global.default_server` doesn't name an existing server, the first server is used.
+
 When running in Docker, place variables in a `.env` file mounted at `/app/.env` (or set `PROXYWEB_ENV_FILE` to a custom path). The entrypoint loads it automatically before startup.
 
 ### Okta SSO (OIDC)
@@ -223,7 +235,7 @@ All values can be supplied via environment variables instead of the file (recomm
 
 - `disable_local_login: true` removes the password form and rejects password logins server-side, but **only while Okta is enabled** — if Okta is turned off the flag is ignored, so you can never lock yourself out.
 - Users who authenticate at Okta but belong to none of the configured groups are denied with "not authorized".
-- Behind a TLS-terminating reverse proxy, make sure the proxy sends `X-Forwarded-Proto: https` and enable a middleware such as Werkzeug's `ProxyFix`, so the generated redirect URI uses `https://` and matches the URI registered in Okta.
+- Behind a TLS-terminating reverse proxy, make sure the proxy sends `X-Forwarded-Proto: https` (and `X-Forwarded-Host`) and set `PROXYWEB_TRUST_PROXY=1`, which enables Werkzeug's `ProxyFix` for one proxy hop. The redirect URI then uses `https://` and matches the URI registered in Okta. Without it, SSO login fails, because ProxyWeb refuses to send an `http://` redirect URI. Only set it when a proxy is actually in front, since clients could otherwise spoof those headers.
 - The OIDC issuer and its endpoints **must use HTTPS** — ProxyWeb relies on TLS server validation in place of verifying the ID token signature, and rejects plain-`http` OIDC URLs. For local/dev only (e.g. the hermetic test stack's mock IdP) you can set `PROXYWEB_OKTA_ALLOW_HTTP=1` to allow `http` endpoints. **Never set this in production.**
 - The discovery document's `issuer` must match the configured `issuer`; a mismatch fails the flow closed.
 

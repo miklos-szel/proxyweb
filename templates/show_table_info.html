@@ -2,17 +2,6 @@
 
 {% block show_table_info %}
 <style>
-    .action-toolbar {
-        background: white;
-        padding: 2rem;
-        border-radius: var(--border-radius);
-        box-shadow: var(--box-shadow);
-        margin-bottom: 2rem;
-        display: flex;
-        gap: 1.25rem;
-        flex-wrap: wrap;
-        align-items: center;
-    }
 
     .info-panel {
         background: #f8f9fa;
@@ -119,6 +108,8 @@
         z-index: 1060;
         max-height: 80vh;
         overflow-y: auto;  /* Keep vertical scrolling for long menus */
+        overflow-x: hidden;
+        width: max-content;  /* Size to content, not the narrow button-width containing block */
     }
 
     .editor-controls .dropdown-submenu {
@@ -129,6 +120,10 @@
         padding: 0.75rem 1.25rem;
         position: relative;
         font-size: 0.95rem;
+    }
+
+    .editor-controls .dropdown-item.has-submenu {
+        padding-right: 2.25rem;  /* room for the absolutely-positioned chevron */
     }
 
     .editor-controls .dropdown-item.has-submenu::after {
@@ -301,10 +296,6 @@
     }
 
     @media (max-width: 768px) {
-        .action-toolbar {
-            flex-direction: column;
-            align-items: stretch;
-        }
 
         .editor-controls {
             display: flex;
@@ -319,7 +310,7 @@
     }
 </style>
 
-{% if not session['read_only'] or session.get('role') == 'readonly' %}
+{% if not session.get('read_only', False) or session.get('role') == 'readonly' %}
     <div class="sql-editor-card">
         <div class="sql-editor-header" onclick="toggleSqlEditor()">
             <h5><i class="fas fa-code"></i> SQL Query Editor
@@ -350,13 +341,13 @@
                                 <i class="fas fa-bolt"></i> Quick Queries
                             </button>
                             <ul class="dropdown-menu" aria-labelledby="quickQueriesBtn">
-                                {% for item in session['misc']|sort %}
+                                {% for item in session.get('misc', {})|sort %}
                                     <li class="dropdown-submenu">
                                         <button type="button" class="dropdown-item has-submenu" aria-haspopup="true" aria-expanded="false">
                                             <i class="fas fa-folder me-2"></i>{{ item|title }}
                                         </button>
                                         <ul class="submenu">
-                                            {% for subitem in session['misc'][item] %}
+                                            {% for subitem in session.get('misc', {})[item] %}
                                                 <li>
                                                     <button type="button" class="dropdown-item" onclick="loadQueryWithInfo('{{ item }}_item_{{ loop.index }}', '{{ item }}_info_{{ loop.index }}'); return false;">
                                                         <i class="fas fa-bolt me-2"></i>{{ subitem['title'] }}
@@ -373,8 +364,8 @@
                                 <i class="fas fa-clock"></i> Query History
                             </button>
                             <ul class="dropdown-menu" aria-labelledby="historyBtn">
-                                {% if session['history'] and session['history']|length > 0 %}
-                                    {% for item in session['history'][-10:]|reverse %}
+                                {% if session.get('history', []) and session.get('history', [])|length > 0 %}
+                                    {% for item in session.get('history', [])[-10:]|reverse %}
                                         <li>
                                             <button type="button" class="dropdown-item" onclick="loadQuery(window['history_item_{{ loop.index }}']); return false;">
                                                 <i class="fas fa-clock me-2"></i>{{ loop.index }}. {{ item|truncate(60, True) }}
@@ -389,8 +380,8 @@
                     </div>
                 </div>
 
-                <form action="/{{ session['server'] }}/{{ session['database'] }}/{{ session['table'] }}/sql/" method="post">
-                    <input type="hidden" name="_csrf_token" value="{{ session.csrf_token }}">
+                <form action="/{{ session.get('server', '') }}/{{ session.get('database', '') }}/{{ session.get('table', '') }}/sql/" method="post">
+                    <input type="hidden" name="_csrf_token" value="{{ session.get('csrf_token', '') }}">
                     <div class="mb-4">
                         <textarea class="form-control font-monospace" name="sql" id="sql" rows="8" placeholder="Enter your SQL query here..."></textarea>
                     </div>
@@ -408,7 +399,7 @@
                     <div class="alert-custom alert-danger mt-3">
                         <i class="fas fa-exclamation-triangle me-2"></i>
                         <strong>Query Error</strong>
-                        <pre>{{ session['sql'] }}</pre>
+                        <pre>{{ session.get('sql', '') }}</pre>
                         <strong>{{ error }}</strong>
                     </div>
                 {% endif %}
@@ -417,7 +408,7 @@
                     <div class="alert-custom alert-success mt-3">
                         <i class="fas fa-check-circle me-2"></i>
                         <strong>Success</strong>
-                        <pre>{{ session['sql'] }}</pre>
+                        <pre>{{ session.get('sql', '') }}</pre>
                         <strong>{{ message }}</strong>
                     </div>
                 {% endif %}
@@ -430,16 +421,16 @@
     <div class="table-header">
         <h1 class="page-title">
             <i class="fas fa-table"></i>
-            {{ session['table'] }} Table
+            {{ session.get('table', '') }} Table
         </h1>
         <div class="table-stats">
             <div class="stat-item">
                 <i class="fas fa-database"></i>
-                <span><strong>Database:</strong> {{ session['database'] }}</span>
+                <span><strong>Database:</strong> {{ session.get('database', '') }}</span>
             </div>
             <div class="stat-item">
                 <i class="fas fa-server"></i>
-                <span><strong>Server:</strong> {{ session['server'] }}</span>
+                <span><strong>Server:</strong> {{ session.get('server', '') }}</span>
             </div>
             <div class="stat-item">
                 <i class="fas fa-list"></i>
@@ -462,13 +453,13 @@
     <script>
         var tableColumnNames = {{ content['column_names'] | tojson }};
         var serverSideMode = {{ content.get('server_side', False) | tojson }};
-        var tableServer = {{ session['server'] | tojson }};
+        var tableServer = {{ session.get('server', '') | tojson }};
         var tableDatabase = {{ session.get('database', 'main') | tojson }};
         var tableName = {{ session.get('table', '') | tojson }};
     </script>
 
     <div>
-        <table id="proxywebtable" class="table table-hover table-striped mb-0" aria-label="{{ session['table'] }} table">
+        <table id="proxywebtable" class="table table-hover table-striped mb-0" aria-label="{{ session.get('table', '') }} table">
             <thead class="sticky-header">
                 <tr>
                     {% for column_name in content['column_names'] %}
@@ -639,16 +630,16 @@ function loadQueryWithInfo(sqlVarName, infoVarName) {
 }
 
 // Define SQL query variables and info variables for quick access
-{% for item in session['misc']|sort %}
-{% for subitem in session['misc'][item] %}
-window['{{ item }}_item_{{ loop.index }}'] = {{ subitem['sql']|tojson }};
-window['{{ item }}_info_{{ loop.index }}'] = {{ subitem['info']|tojson }};
+{% for item in session.get('misc', {})|sort %}
+{% for subitem in session.get('misc', {})[item] %}
+window['{{ item }}_item_{{ loop.index }}'] = {{ subitem.get('sql', '')|tojson }};
+window['{{ item }}_info_{{ loop.index }}'] = {{ subitem.get('info', '')|tojson }};
 {% endfor %}
 {% endfor %}
 
 // Define history query variables
-{% if session['history'] and session['history']|length > 0 %}
-{% for item in session['history'][-10:]|reverse %}
+{% if session.get('history', []) and session.get('history', [])|length > 0 %}
+{% for item in session.get('history', [])[-10:]|reverse %}
 window['history_item_{{ loop.index }}'] = {{ item|tojson }};
 {% endfor %}
 {% endif %}

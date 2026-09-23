@@ -120,7 +120,7 @@ Optional SSO via the OIDC Authorization Code flow, configured under `auth.okta` 
 
 - `mdb.get_okta_config(cfg)` is the only way to read the section — it normalizes defaults, coerces booleans, splits `admin_group`/`readonly_group` into lists (`admin_groups`/`readonly_groups`; comma-separated string or YAML list), and forces `disable_local_login` to `False` while `enabled` is false (lockout guard — a stray flag must never block password login).
 - Role mapping in `okta_callback` (`app.py`): any `admin_groups` match → `admin`; else any `readonly_groups` match → `readonly`; else denied. Groups come from the ID token's `groups` claim, falling back to the userinfo endpoint (whose `sub` must match the ID token `sub`, per OIDC Core 5.3.2).
-- `oidc.py` skips ID-token signature verification (permitted for a confidential client receiving the token straight from the token endpoint, OIDC Core 3.1.3.7) but validates `iss`/`aud`/`exp`/`nonce`, requires the discovery document's `issuer` to match the configured one, and rejects non-HTTPS issuer/endpoints unless `PROXYWEB_OKTA_ALLOW_HTTP=1` (test/dev only; the test compose sets it for the http-only `mock-okta` service).
+- `oidc.py` skips ID-token signature verification (permitted for a confidential client receiving the token straight from the token endpoint, OIDC Core 3.1.3.7) but validates `iss`/`aud`/`exp`/`nonce`, requires the discovery document's `issuer` to match the configured one, and rejects non-HTTPS issuer/endpoints unless `PROXYWEB_OKTA_ALLOW_HTTP=1` (test/dev only; the test compose sets it for the http-only `mock-okta` service). The same rule applies to the redirect_uri (`_okta_redirect_uri` in `app.py`); behind a TLS-terminating proxy set `PROXYWEB_TRUST_PROXY=1` (enables Werkzeug `ProxyFix`, one hop) so it is built as https.
 - `state` and `nonce` live in the signed session cookie (safe across gunicorn workers); the callback pops them single-use and redirects to `/login?sso_error=<code>` on any failure — only fixed codes from `SSO_ERROR_MESSAGES` ever render, details go to server logs (never log tokens or the raw subject).
 - The Okta `client_secret` is never sent to the browser: `settings_load_ui` blanks it, and `settings_ui_save` preserves the stored secret when the form field comes back empty. The structured-editor save path (`mdb.form_data_to_yaml` → `_form_okta_section`) must keep reconstructing the nested `auth.okta` block with real booleans, or UI saves silently drop it — `TestOktaSettingsPersistence` guards this.
 
@@ -130,7 +130,15 @@ All writes to `config/config.yml` must go through `_atomic_write(path, content)`
 
 On Docker single-file bind-mounts `os.replace()` raises EXDEV/EBUSY; set `PROXYWEB_ALLOW_NONATOMIC_WRITE=1` (as the test compose file does) to opt into a non-atomic fallback that truncates and writes in place. The fallback is off by default to keep atomicity guarantees in production deployments.
 
-Every config write handler also backs up the current file to `config.yml.bak` before writing, and validates YAML syntax and shape (`mdb.validate_yaml` + `mdb.validate_config_shape`) before touching the file.
+Every config write goes through `_backup_and_write_config()`, which validates YAML syntax and shape (`mdb.validate_yaml` + `mdb.validate_config_shape`), backs the current file up to `config.yml.bak`, writes, and then drops the config cache. Handlers must not re-validate beforehand — that just parses the file twice.
+
+Env overrides (`mdb._apply_env_overrides`, including servers defined only by `PROXYWEB_SERVERS`) are applied to each caller's copy, not cached. Anything shown in the settings editor, exported, or written back to disk must use `mdb.get_config(config, apply_env=False)` so env servers and secrets never land in the file (`TestEnvServerNotPersisted`).
+
+`mdb.get_config()` caches the parsed YAML per path, keyed by the file's `(inode, mtime_ns, ctime_ns, size)` (so another gunicorn worker's same-size save is still seen), and returns a **deep copy** to each caller — `db_connect()` stores live connection and cursor objects inside the returned dict, so the cached object must never be shared. Any code that writes the config outside `_backup_and_write_config` must call `mdb.invalidate_config_cache()`.
+
+### Session State for Templates
+
+`list_dbs.html` supplies the navbar for every page, and reads `server`, `servers`, `dblist`, `misc`, `read_only` and `history` from the session. Any route that renders a template must therefore call `_prime_session(server)` (and `_require_known_server(server)` when the server comes from the URL) — a route that renders without priming 500s for anyone who arrives by direct URL. Templates read session keys with `session.get(...)`, never bare `session['...']`.
 
 ### CSRF Protection
 
@@ -144,7 +152,7 @@ Client side: `base.html` exposes the token via `<meta name="csrf-token">` and a 
 
 `execute_change` runs SQL via subprocess/`mysql` CLI (not mysql.connector parameterized queries — ProxySQL compatibility issue). To prevent injection:
 - All SQL identifiers (database, table, column names) are backtick-quoted via `_quote_ident()`.
-- Column names supplied by API callers are validated against a whitelist of `content['column_names']` from `get_table_content()` before use.
+- Column names supplied by API callers are validated against the live schema — `get_column_names()` (a `LIMIT 0` query read off `cursor.description`) — before use. This applies to every column that reaches the SQL in `update_row`, `delete_row` and `insert_row`: never validate a caller's columns against a list the same caller supplied.
 - String values use `replace("'", "''")` escaping inside single-quoted SQL literals.
 
 ### Debug Mode
@@ -181,6 +189,7 @@ The `test/` directory contains a Docker Compose stack and a Python test suite. T
 | `proxysql2-init` / `proxysql3-init` | mysql:8.0 (one-shot) | Register backends, users, and query rules via admin SQL |
 | `mock-okta` | built from `test/mock_okta/` | Mock Okta OIDC provider for hermetic SSO tests (identity controlled via `mock_*` query params on `/authorize`) |
 | `proxyweb` | built from repo root | App under test on :5000 |
+| `proxyweb-env` | built from repo root | Same app and `config.yml`, plus the env-only server `envserver` (`PROXYWEB_SERVERS`); used by `test_env_config.py` via `PROXYWEB_ENV_URL` |
 | `test-runner` | built from `test/Dockerfile.runner` (profile: `tests`) | Runs the Python suite on the Compose network; invoked by `run_tests.sh` via `docker compose run --rm` |
 
 Config names the servers `proxysql_mysql` and `proxysql_postgres`.
@@ -233,3 +242,19 @@ Rules:
 | Copy SQL button rendered on every table view (stats, monitor, …) even though those rows aren't pasteable ProxySQL config; now gated to databases `main`/`disk` via `copySqlEnabled()` and the actions column is skipped entirely elsewhere | `TestCopySqlScopedToConfigDatabases` |
 | settings Export YAML always downloaded as hardcoded `config.yml`; route now returns a timestamped `filename` the frontend uses | `TestExportTimestampedFilename` |
 | `/<server>/dump/` (Misc → Dump Database): admin-only data-only mysqldump of `main` excluding `runtime_*` tables, timestamped attachment | `TestDumpDatabaseDownload`, `TestDumpDatabaseAccessControl` |
+| config diff flagged rows ProxySQL never loads to runtime: a row with `active = 0` is absent from the runtime layer by design, so an in-sync server reported "Changes Detected" | `TestConfigDiffInactiveRows` |
+| config diff highlighted `mysql_users.default_schema` as drift because disk/memory store NULL where the runtime layer stores `''` (and `runtime_mysql_users` carries a frontend and a backend row per user) | `TestConfigDiffNullDefaultSchema` |
+| `list_dbs.html` (extended by every page) bare-subscripted `session['dblist'][session['server']]` while `render_config_diff`/`adhoc_report`/`render_change` never populated them → 500 on any session that had not rendered `/` first (bookmarked URL, session outliving a restart) | `TestFreshSessionRoutes` |
+| `/<server>/` is a single-segment catch-all, so `/settings/`, `/favicon.ico` and any unknown server reached the table view and 500'd instead of 404; `/settings/<unknown-action>/` returned 200 with an empty editor | `TestUnknownServerIsNotFound` |
+| `update_row` validated caller column names against the caller's *own* `columnNames` list (whitelisting nothing) and `delete_row` validated none at all, contrary to the documented live-schema whitelist; all three row APIs now use `mdb.get_column_names()` | `TestColumnWhitelist` |
+| write failures were detected with `"ERROR" in <execute_change output>`, but "mysql CLI exited with status N" and bare connector errors contain no "ERROR" → failed writes reported "Success" and were appended to query history | `TestFailedWriteIsNotSuccess` |
+| optional config keys crashed their readers: `global.hide_tables` (omitted when empty) raised KeyError on the nav path, and an adhoc report item saved with an empty Info box raised KeyError on `/<server>/adhoc/` | `TestOptionalConfigSections` |
+| `api_get_schema` used `session.get('server', 'default')` — last instance of the hardcoded-fallback bug class — so it failed on a session that had not navigated first | `TestSchemaApiWithoutSessionServer` |
+| config diff identity-column map was duplicated in `mdb._DIFF_IDENTITY_COLUMNS` and a hand-copied JS constant in `config_diff.html`, and the two had drifted; the backend now serves the map with the diff (`identity_columns`), and the template's hardcoded `'proxysql'` server fallback is gone | `TestConfigDiffIdentityColumnsServed` |
+| config diff kept only `runtime_mysql_users` rows with `frontend=1`, so an in-sync backend-only user (`frontend=0`) was reported as memory-only drift | `TestConfigDiffBackendOnlyUser` |
+| `show_table_info.html` serialised misc items with `subitem['info']\|tojson`; a missing `info` key is Jinja `Undefined`, which `tojson` cannot serialise → every table view 500'd | `TestOptionalConfigSections.test_table_view_renders_without_info_field` |
+| priming the navbar session made `render_config_diff` connect to list tables, so an unreachable server 500'd the config diff page instead of letting its diff request report the error; `_prime_session` now falls back to an empty nav | `TestUnreachableServerConfigDiff` |
+| `PROXYWEB_SERVER_<NAME>_*` only overrode servers already in `config.yml` (shipped with `servers: {}`), so env-only deployments couldn't define a server; added `PROXYWEB_SERVERS` | `TestEnvDefinedServer` |
+| settings editor/Export/Okta-secret save read the env-overridden config → a UI save or export+import wrote `PROXYWEB_*` secrets into `config.yml` | `TestEnvServerNotPersisted` |
+| config diff dropped `mysql_users` `frontend`/`backend` from every comparison (to match runtime's split per-role rows), so a memory-only flag change was reported as in sync; split rows are now merged with the flags OR-ed (`mdb._merge_user_rows`) and the flags compared — for memory vs runtime only; disk vs memory compares the original rows, since folding can make distinct rows (PK `(username, backend)`) look identical | `TestConfigDiffUserFlagChange` |
+| `update_row`/`delete_row` turned a PK column missing from `pkValues` into `col IS NULL` → zero rows matched on a NOT NULL key but the API reported success (e.g. `mysql_users` deleted by `username` only, PK is `(username, backend)`); now rejected | `TestPartialPrimaryKeyRejected` |

@@ -37,6 +37,10 @@
     }
 </style>
 
+{# The navbar renders on every page, including ones reached directly by URL,
+   so every session key it reads must tolerate a session that has not been
+   through / yet. #}
+{% set nav_dblist = session.get('dblist', {}).get(session.get('server'), {}) %}
 <nav class="navbar navbar-expand-lg navbar-dark fixed-top{% if prod_warning_enabled and 'prod' in (session.get('server') or '')|lower %} prod-warning{% endif %}">
     <div class="container-fluid">
         <a class="navbar-brand d-flex align-items-center" href="/">
@@ -52,22 +56,22 @@
         <div class="collapse navbar-collapse" id="navbarNav">
             <ul class="navbar-nav me-auto">
                 <!-- Disk database menu -->
-                {% if session['dblist'][session['server']].get('disk') %}
-                <li class="nav-item dropdown {% if session['database'] == 'disk' %}active-database{% endif %}">
-                    <a class="nav-link dropdown-toggle {% if session['database'] == 'disk' %}active{% endif %}" href="#" id="navbarDisk" role="button"
+                {% if nav_dblist.get('disk') %}
+                <li class="nav-item dropdown {% if session.get('database', '') == 'disk' %}active-database{% endif %}">
+                    <a class="nav-link dropdown-toggle {% if session.get('database', '') == 'disk' %}active{% endif %}" href="#" id="navbarDisk" role="button"
                        data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="fas fa-hard-drive nav-icon"></i>
                         Disk
                     </a>
                     <ul class="dropdown-menu" aria-labelledby="navbarDisk">
-                        {% for item in session['dblist'][session['server']]['disk'] %}
+                        {% for item in nav_dblist['disk'] %}
                             <li>
-                                {% if session['database'] == 'disk' and item == session['table'] %}
+                                {% if session.get('database', '') == 'disk' and item == session.get('table', '') %}
                                     <span class="dropdown-item active" aria-current="true">
                                         <i class="fas fa-check-circle text-success me-2"></i>{{ item }}
                                     </span>
                                 {% else %}
-                                    <a class="dropdown-item" href="/{{ session['server'] }}/disk/{{ item }}/">
+                                    <a class="dropdown-item" href="/{{ session.get('server', '') }}/disk/{{ item }}/">
                                         <i class="fas fa-table me-2"></i>{{ item }}
                                     </a>
                                 {% endif %}
@@ -78,23 +82,23 @@
                 {% endif %}
 
                 <!-- Memory (main) database menu -->
-                {% if session['dblist'][session['server']].get('main') %}
-                <li class="nav-item dropdown {% if session['database'] == 'main' and not session.get('table', '').startswith('runtime_') %}active-database{% endif %}">
-                    <a class="nav-link dropdown-toggle {% if session['database'] == 'main' and not session.get('table', '').startswith('runtime_') %}active{% endif %}" href="#" id="navbarMemory" role="button"
+                {% if nav_dblist.get('main') %}
+                <li class="nav-item dropdown {% if session.get('database', '') == 'main' and not session.get('table', '').startswith('runtime_') %}active-database{% endif %}">
+                    <a class="nav-link dropdown-toggle {% if session.get('database', '') == 'main' and not session.get('table', '').startswith('runtime_') %}active{% endif %}" href="#" id="navbarMemory" role="button"
                        data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="fas fa-cog nav-icon"></i>
                         Memory
                     </a>
                     <ul class="dropdown-menu" aria-labelledby="navbarMemory">
-                        {% for item in session['dblist'][session['server']]['main'] %}
+                        {% for item in nav_dblist['main'] %}
                             {% if not item.startswith('runtime_') %}
                             <li>
-                                {% if session['database'] == 'main' and item == session['table'] %}
+                                {% if session.get('database', '') == 'main' and item == session.get('table', '') %}
                                     <span class="dropdown-item active" aria-current="true">
                                         <i class="fas fa-check-circle text-success me-2"></i>{{ item }}
                                     </span>
                                 {% else %}
-                                    <a class="dropdown-item" href="/{{ session['server'] }}/main/{{ item }}/">
+                                    <a class="dropdown-item" href="/{{ session.get('server', '') }}/main/{{ item }}/">
                                         <i class="fas fa-table me-2"></i>{{ item }}
                                     </a>
                                 {% endif %}
@@ -106,16 +110,16 @@
                 {% endif %}
 
                 <!-- Runtime menu -->
-                {% if session['dblist'][session['server']].get('main') %}
+                {% if nav_dblist.get('main') %}
                 {% set runtime_tables = [] %}
-                {% for item in session['dblist'][session['server']]['main'] %}
+                {% for item in nav_dblist['main'] %}
                     {% if item.startswith('runtime_') %}
                         {% set _ = runtime_tables.append(item) %}
                     {% endif %}
                 {% endfor %}
                 {% if runtime_tables|length > 0 %}
-                <li class="nav-item dropdown {% if session['database'] == 'main' and session.get('table', '').startswith('runtime_') %}active-database{% endif %}">
-                    <a class="nav-link dropdown-toggle {% if session['database'] == 'main' and session.get('table', '').startswith('runtime_') %}active{% endif %}" href="#" id="navbarRuntime" role="button"
+                <li class="nav-item dropdown {% if session.get('database', '') == 'main' and session.get('table', '').startswith('runtime_') %}active-database{% endif %}">
+                    <a class="nav-link dropdown-toggle {% if session.get('database', '') == 'main' and session.get('table', '').startswith('runtime_') %}active{% endif %}" href="#" id="navbarRuntime" role="button"
                        data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="fas fa-bolt nav-icon"></i>
                         Runtime
@@ -123,12 +127,12 @@
                     <ul class="dropdown-menu" aria-labelledby="navbarRuntime">
                         {% for item in runtime_tables|sort %}
                             <li>
-                                {% if session['database'] == 'main' and item == session['table'] %}
+                                {% if session.get('database', '') == 'main' and item == session.get('table', '') %}
                                     <span class="dropdown-item active" aria-current="true">
                                         <i class="fas fa-check-circle text-success me-2"></i>{{ item }}
                                     </span>
                                 {% else %}
-                                    <a class="dropdown-item" href="/{{ session['server'] }}/main/{{ item }}/">
+                                    <a class="dropdown-item" href="/{{ session.get('server', '') }}/main/{{ item }}/">
                                         <i class="fas fa-table me-2"></i>{{ item }}
                                     </a>
                                 {% endif %}
@@ -140,10 +144,10 @@
                 {% endif %}
 
                 <!-- Other databases menu -->
-                {% for key, value in session['dblist'][session['server']]|dictsort %}
+                {% for key, value in nav_dblist|dictsort %}
                     {% if key not in ['main', 'disk'] %}
-                    <li class="nav-item dropdown {% if key == session['database'] %}active-database{% endif %}">
-                        <a class="nav-link dropdown-toggle {% if key == session['database'] %}active{% endif %}" href="#" id="navbar{{ loop.index }}" role="button"
+                    <li class="nav-item dropdown {% if key == session.get('database', '') %}active-database{% endif %}">
+                        <a class="nav-link dropdown-toggle {% if key == session.get('database', '') %}active{% endif %}" href="#" id="navbar{{ loop.index }}" role="button"
                            data-bs-toggle="dropdown" aria-expanded="false">
                             <i class="{% if key == 'monitor' %}fas fa-desktop{% elif key == 'stats' %}fas fa-chart-bar{% elif key == 'stats_history' %}fas fa-history{% else %}fas fa-database{% endif %} nav-icon"></i>
                             {{ key }}
@@ -151,12 +155,12 @@
                         <ul class="dropdown-menu" aria-labelledby="navbar{{ loop.index }}">
                             {% for item in value %}
                                 <li>
-                                    {% if key == session['database'] and item == session['table'] %}
+                                    {% if key == session.get('database', '') and item == session.get('table', '') %}
                                         <span class="dropdown-item active" aria-current="true">
                                             <i class="fas fa-check-circle text-success me-2"></i>{{ item }}
                                         </span>
                                     {% else %}
-                                        <a class="dropdown-item" href="/{{ session['server'] }}/{{ key }}/{{ item }}/">
+                                        <a class="dropdown-item" href="/{{ session.get('server', '') }}/{{ key }}/{{ item }}/">
                                             <i class="fas fa-table me-2"></i>{{ item }}
                                         </a>
                                     {% endif %}
@@ -176,17 +180,17 @@
                     </a>
                     <ul class="dropdown-menu" aria-labelledby="navbarMisc">
                         <li>
-                            <a class="dropdown-item" href="/{{ session['server'] }}/config_diff/">
+                            <a class="dropdown-item" href="/{{ session.get('server', '') }}/config_diff/">
                                 <i class="fas fa-code-compare me-2"></i>Configuration Diff
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="/{{ session['server'] }}/adhoc/">
+                            <a class="dropdown-item" href="/{{ session.get('server', '') }}/adhoc/">
                                 <i class="fas fa-chart-line me-2"></i>ProxySQL Report
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="/{{ session['server'] }}/query_history/">
+                            <a class="dropdown-item" href="/{{ session.get('server', '') }}/query_history/">
                                 <i class="fas fa-history me-2"></i>Full Query History
                             </a>
                         </li>
@@ -214,7 +218,7 @@
                         </li>
                         <li><hr class="dropdown-divider"></li>
                         <li>
-                            <a class="dropdown-item" href="/{{ session['server'] }}/dump/">
+                            <a class="dropdown-item" href="/{{ session.get('server', '') }}/dump/">
                                 <i class="fas fa-file-download me-2"></i>Dump Database
                             </a>
                         </li>
@@ -230,11 +234,11 @@
                     <a class="nav-link dropdown-toggle" href="#" id="navbarServers" role="button"
                        data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="fas fa-server nav-icon"></i>
-                        {{ session['server'] }}
+                        {{ session.get('server', '') }}
                     </a>
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarServers">
-                        {% for item in session['servers'] %}
-                            {% if item == session['server'] %}
+                        {% for item in session.get('servers', []) %}
+                            {% if item == session.get('server', '') %}
                                 <li>
                                     <span class="dropdown-item active" aria-current="true">
                                         <i class="fas fa-check-circle text-success me-2"></i>{{ item }}
@@ -242,7 +246,7 @@
                                 </li>
                             {% else %}
                                 <li>
-                                    <a class="dropdown-item" href="/{{ item }}/{% if session.get('database') and session.get('table') %}{{ session['database'] }}/{{ session['table'] }}/{% endif %}">
+                                    <a class="dropdown-item" href="/{{ item }}/{% if session.get('database') and session.get('table') %}{{ session.get('database', '') }}/{{ session.get('table', '') }}/{% endif %}">
                                         <i class="fas fa-server me-2"></i>{{ item }}
                                     </a>
                                 </li>
@@ -271,7 +275,7 @@
                     <nav aria-label="breadcrumb">
                         <span class="current-location">
                             <i class="fas fa-map-marker-alt me-1"></i>
-                            {{ session['database'] }} / {{ session['table'] }}
+                            {{ session.get('database', '') }} / {{ session.get('table', '') }}
                         </span>
                     </nav>
                 </li>

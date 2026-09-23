@@ -19,8 +19,10 @@ __license__ = "GPLv3"
 
 
 import mysql.connector
+import copy
 import logging
 import os
+import threading
 import yaml
 import subprocess
 import re
@@ -152,35 +154,130 @@ def _safe_close_conn(db, server):
             logging.debug(f"_safe_close_conn: ignoring close error for {server}: {e}")
 
 
+def _close_handles(server_info):
+    """Close the cursor and connection stored on one server's config entry."""
+    for key in ('cur', 'conn'):
+        handle = server_info.get(key)
+        if handle is None:
+            continue
+        try:
+            handle.close()
+        except Exception as e:
+            logging.debug("_close_handles: ignoring close error: %s", e)
+        server_info[key] = None
+
+
 sql_get_databases = "show databases"
 
-def get_config(config="config/config.yml"):
+# Parsed config, keyed by path and invalidated by the file's stat signature.
+# db_connect() calls get_config() on every connection, so a single config-diff
+# request used to re-read and re-parse config.yml ~100 times. Writers call
+# invalidate_config_cache() so a settings save is visible immediately even
+# inside one filesystem timestamp tick.
+_config_cache = {}
+_config_cache_lock = threading.Lock()
+
+
+def invalidate_config_cache(config=None):
+    """Drop the cached parse of ``config`` (or of every file when None)."""
+    with _config_cache_lock:
+        if config is None:
+            _config_cache.clear()
+        else:
+            _config_cache.pop(config, None)
+
+
+def get_config(config="config/config.yml", apply_env=True):
     """
     Load and parse a YAML configuration file into a Python dictionary.
-    
+
+    The parse is cached per file and reused while the file's mtime and size are
+    unchanged. Callers get their own copy: db_connect() stores live connection
+    and cursor objects inside the returned dict, which must never be shared
+    between requests.
+
     Parameters:
         config (str): Path to the YAML configuration file.
-    
+        apply_env (bool): Apply PROXYWEB_* environment overrides (the default).
+            Pass False for anything that is shown in the settings editor or can
+            be written back to disk, so env-supplied servers and secrets are
+            never persisted into the file.
+
     Returns:
         dict: Parsed configuration dictionary.
-    
+
     Raises:
         ValueError: If the file cannot be opened or the YAML cannot be parsed.
     """
     logging.debug(f"Using file: {config}")
     try:
-        with open(config, 'r') as yml:
-            cfg = yaml.safe_load(yml)
-        cfg = _apply_env_overrides(cfg)
-        return cfg
+        stat = os.stat(config)
+        # Inode and ctime catch a same-size rewrite by another worker inside one
+        # mtime tick (invalidate_config_cache only clears the writing process),
+        # including the in-place non-atomic fallback that keeps the inode.
+        stat_key = (stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
+
+        with _config_cache_lock:
+            cached = _config_cache.get(config)
+        reparsed = not (cached and cached[0] == stat_key)
+        if not reparsed:
+            cfg = copy.deepcopy(cached[1])
+        else:
+            with open(config, 'r') as yml:
+                raw = yaml.safe_load(yml)
+            with _config_cache_lock:
+                _config_cache[config] = (stat_key, raw)
+            cfg = copy.deepcopy(raw)
+
+        # The cache holds the file as written; env overrides are applied to
+        # each caller's copy so apply_env=False can see the file untouched.
+        return _apply_env_overrides(cfg, verbose=reparsed) if apply_env else cfg
     except Exception as e:
+        logging.error("Error opening or parsing %s: %s", config, e)
         raise ValueError("Error opening or parsing the file: %s" % config)
 
 
-def _apply_env_overrides(cfg):
-    """Override config values with PROXYWEB_* environment variables when set."""
+# DSN given to a server that exists only in PROXYWEB_SERVERS: ProxySQL's
+# out-of-the-box admin interface on the same host (the sidecar deployment).
+_ENV_SERVER_DEFAULT_DSN = {
+    'host': '127.0.0.1',
+    'port': 6032,
+    'user': 'admin',
+    'passwd': 'admin',
+    'db': 'main',
+}
+# Server names end up in URL paths and in env variable names.
+_ENV_SERVER_NAME_RE = re.compile(r'^[A-Za-z0-9_-]+$')
+# Invalid names already warned about; the list is re-read on every get_config().
+_env_server_names_warned = set()
+
+
+def get_env_managed_servers():
+    """Return the server names listed in PROXYWEB_SERVERS (comma-separated),
+    in order, skipping blanks, duplicates and names that are not URL-safe."""
+    names = []
+    for name in os.environ.get('PROXYWEB_SERVERS', '').split(','):
+        name = name.strip()
+        if not name or name in names:
+            continue
+        if not _ENV_SERVER_NAME_RE.match(name):
+            if name not in _env_server_names_warned:
+                _env_server_names_warned.add(name)
+                logging.warning("PROXYWEB_SERVERS: ignoring invalid server name %r", name)
+            continue
+        names.append(name)
+    return names
+
+
+def _apply_env_overrides(cfg, verbose=True):
+    """Override config values with PROXYWEB_* environment variables when set.
+
+    ``verbose`` logs each override at INFO; get_config() only asks for that
+    when it re-parses the file, since it applies the overrides on every call.
+    """
     if not cfg:
         return cfg
+    log = logging.info if verbose else logging.debug
 
     # Auth credentials
     _ENV_AUTH_MAP = {
@@ -193,7 +290,7 @@ def _apply_env_overrides(cfg):
         value = os.environ.get(env_key)
         if value is not None:
             cfg.setdefault(section, {})[key] = value
-            logging.info("Config override: %s.%s from env %s", section, key, env_key)
+            log("Config override: %s.%s from env %s", section, key, env_key)
 
     # Okta SSO settings: PROXYWEB_OKTA_* → auth.okta.* (booleans parsed like
     # checkboxes so '1'/'true'/'yes'/'on' all work).
@@ -212,7 +309,18 @@ def _apply_env_overrides(cfg):
         if value is not None:
             okta = cfg.setdefault('auth', {}).setdefault('okta', {})
             okta[key] = _form_checkbox(value) if is_bool else value
-            logging.info("Config override: auth.okta.%s from env %s", key, env_key)
+            log("Config override: auth.okta.%s from env %s", key, env_key)
+
+    # Env-defined servers: PROXYWEB_SERVERS=name1,name2 adds each listed server
+    # that config.yml does not already define, with ProxySQL's default admin
+    # DSN. The per-server overrides below then fill in the real values.
+    for server_name in get_env_managed_servers():
+        if not isinstance(cfg.get('servers'), dict):
+            cfg['servers'] = {}
+        if server_name not in cfg['servers']:
+            cfg['servers'][server_name] = {'dsn': [dict(_ENV_SERVER_DEFAULT_DSN)]}
+            log("Config override: server %s defined from env PROXYWEB_SERVERS",
+                         server_name)
 
     # Per-server DSN overrides: PROXYWEB_SERVER_<NAME>_{USER,PASSWORD,HOST,PORT,DATABASE}
     _DSN_FIELD_MAP = {
@@ -231,7 +339,7 @@ def _apply_env_overrides(cfg):
                 overrides[dsn_key] = int(value) if dsn_key == 'port' else value
 
         if overrides:
-            logging.info("Config override: server %s DSN fields %s from env",
+            log("Config override: server %s DSN fields %s from env",
                          server_name, list(overrides.keys()))
             for dsn in server_cfg.get('dsn', []):
                 dsn.update(overrides)
@@ -648,21 +756,36 @@ def form_data_to_yaml(form_data):
     return header + yaml_content
 
 
-def db_connect(db, server, buffered=False, dictionary=True):
+def db_connect(db, server, dictionary=True):
     """
     Establishes a MySQL connection for the given server and stores the loaded configuration, connection, and cursor in the provided `db` dictionary.
 
     Parameters:
         db (dict): Mutable mapping where configuration (`'cnf'`), connection (`'conn'`) and cursor (`'cur'`) will be stored.
         server (str): Key identifying the server entry inside the loaded configuration's `servers` section.
-        buffered (bool): If True, create a buffered cursor.
         dictionary (bool): If True, create a cursor that returns rows as dictionaries.
 
     Raises:
         ValueError: If a MySQL connector error or warning occurs while connecting or creating the cursor.
     """
     try:
-        db['cnf'] = get_config()
+        # The connection and cursor live inside db['cnf'], so replacing that
+        # dict wholesale orphaned any handle opened earlier in the request —
+        # the teardown hook walks the *current* dict and never saw them. Carry
+        # live handles across, and close the ones we are about to replace.
+        previous = db.get('cnf') if isinstance(db.get('cnf'), dict) else None
+        cfg = get_config()
+        if previous:
+            for name, info in (previous.get('servers') or {}).items():
+                if not isinstance(info, dict) or name not in (cfg.get('servers') or {}):
+                    continue
+                if name == server:
+                    _close_handles(info)
+                    continue
+                for key in ('conn', 'cur'):
+                    if info.get(key) is not None:
+                        cfg['servers'][name][key] = info[key]
+        db['cnf'] = cfg
 
         config = db['cnf']['servers'][server]['dsn'][0]
         logging.debug(db['cnf']['servers'][server]['dsn'][0])
@@ -694,9 +817,8 @@ def db_connect(db, server, buffered=False, dictionary=True):
 
         conn.get_warnings = True
 
-        db['cnf']['servers'][server]['cur'] = conn.cursor(buffered=buffered,
-                                                          dictionary=dictionary)
-        logging.debug(f"buffered: {buffered}, dictionary: {dictionary}")
+        db['cnf']['servers'][server]['cur'] = conn.cursor(dictionary=dictionary)
+        logging.debug(f"dictionary: {dictionary}")
 
     except (mysql.connector.Error, mysql.connector.Warning) as e:
         raise ValueError(e)
@@ -746,12 +868,13 @@ def get_all_dbs_and_tables(db, server):
         db['cnf']['servers'][server]['cur'].execute(sql_get_databases)
         table_exception_list = []
 
-        if 'hide_tables' not in db['cnf']['servers'][server]:
-            #it there is a global hide_tables defined and there is no local one:
-            if len(db['cnf']['global']['hide_tables']) > 0:
-                table_exception_list = db['cnf']['global']['hide_tables']
+        if 'hide_tables' in db['cnf']['servers'][server]:
+            table_exception_list = db['cnf']['servers'][server]['hide_tables']
         else:
-                table_exception_list = db['cnf']['servers'][server]['hide_tables']
+            # Fall back to the global list. Both the section and the key are
+            # optional: _form_global_section only writes hide_tables when it is
+            # non-empty, so a config saved with an empty list has neither.
+            table_exception_list = db['cnf'].get('global', {}).get('hide_tables') or []
 
         for i in db['cnf']['servers'][server]['cur'].fetchall():
 
@@ -769,37 +892,137 @@ def get_all_dbs_and_tables(db, server):
         raise ValueError(e)
 
 
-def _build_hash_map(data):
+# Identifying (primary key) columns per config table. Used by the config diff
+# to tell "the same row" apart across the disk/memory/runtime layers. Sent to
+# the browser with the diff (``identity_columns``) so config_diff.html uses the
+# same map instead of keeping its own copy.
+_DIFF_IDENTITY_COLUMNS = {
+    'mysql_query_rules': ['rule_id'],
+    'pgsql_query_rules': ['rule_id'],
+    'mysql_users': ['username'],
+    'pgsql_users': ['username'],
+    'mysql_servers': ['hostgroup_id', 'hostname', 'port'],
+    'pgsql_servers': ['hostgroup_id', 'hostname', 'port'],
+    'mysql_replication_hostgroups': ['writer_hostgroup'],
+    'mysql_group_replication_hostgroups': ['writer_hostgroup'],
+    'mysql_galera_hostgroups': ['writer_hostgroup'],
+    'mysql_aws_aurora_hostgroups': ['writer_hostgroup'],
+    'global_variables': ['variable_name'],
+    'admin_variables': ['variable_name'],
+    'mysql_variables': ['variable_name'],
+    'pgsql_variables': ['variable_name'],
+    'proxysql_servers': ['hostname', 'port'],
+    'scheduler': ['id'],
+    'restapi_routes': ['id'],
+}
+
+
+def _normalize_diff_row(table_name, row):
+    """
+    Return a copy of `row` with layer-specific artefacts flattened, so the same
+    logical row hashes identically in every layer.
+
+    ProxySQL's runtime layer does not round-trip every value verbatim:
+    `default_schema` is stored as NULL on disk/in memory but surfaces as an
+    empty string in runtime_mysql_users. That is not a configuration
+    difference. (The split frontend/backend runtime rows are folded by
+    _merge_user_rows before diffing, so the flags themselves are compared.)
+    """
+    normalized = dict(row)
+    if table_name in ('mysql_users', 'pgsql_users'):
+        if normalized.get('default_schema') in ('', 'null', None):
+            normalized['default_schema'] = None
+    return normalized
+
+
+_USER_FLAGS = ('frontend', 'backend')
+
+
+def _merge_user_rows(table_name, rows):
+    """
+    Fold a users table's split rows back into one row per user.
+
+    runtime_mysql_users carries a separate row per role for a user that is both
+    frontend and backend (one with frontend=1, one with backend=1). Rows that
+    are identical apart from the two flags are merged with the flags OR-ed, so
+    the runtime layer lines up with the single disk/memory row while a real
+    flag change (e.g. frontend 1 -> 0 in memory) still shows as a difference.
+    Only used where runtime is involved: disk vs memory compares the original
+    rows. Other tables are returned unchanged.
+    """
+    if table_name not in ('mysql_users', 'pgsql_users'):
+        return rows
+    merged = {}
+    for row in rows:
+        key = json.dumps({k: v for k, v in _normalize_diff_row(table_name, row).items()
+                          if k not in _USER_FLAGS},
+                         sort_keys=True, default=str)
+        if key not in merged:
+            merged[key] = dict(row)
+            continue
+        target = merged[key]
+        for flag in _USER_FLAGS:
+            if str(row.get(flag)) == '1':
+                target[flag] = row[flag]
+    return list(merged.values())
+
+
+def _is_inactive_row(row):
+    """
+    True when the row carries an `active` column set to 0.
+
+    ProxySQL never loads such a row into the runtime layer (query rules, users,
+    scheduler entries, galera/group-replication hostgroups ...), so its absence
+    from runtime is expected rather than configuration drift.
+    """
+    return 'active' in row and str(row['active']) == '0'
+
+
+def _row_identity(table_name, row):
+    """
+    Return a hashable identity for `row` — its primary key values when the
+    table is known, otherwise every column except `active` (so that an
+    otherwise identical row still matches across the active flag).
+    """
+    identity_cols = _DIFF_IDENTITY_COLUMNS.get(table_name)
+    if identity_cols:
+        return json.dumps({col: row.get(col) for col in identity_cols},
+                          sort_keys=True, default=str)
+    return json.dumps({k: v for k, v in row.items() if k != 'active'},
+                      sort_keys=True, default=str)
+
+
+def _build_hash_map(data, table_name=None):
     """
     Build a mapping from a deterministic serialized representation of each row
     to the original row, for set-based diffing.
 
     Parameters:
         data (iterable): An iterable of JSON-serializable rows (e.g., dicts).
+        table_name (str): Config table the rows belong to, used to normalize
+            layer-specific artefacts before hashing (see _normalize_diff_row).
 
     Returns:
-        dict: Keys are deterministic serializations (stable key order), values
-        are the original row objects.
+        dict: Keys are deterministic serializations (stable key order) of the
+        normalized row, values are the original row objects.
     """
-    return {json.dumps(row, sort_keys=True): row for row in data}
+    return {
+        json.dumps(_normalize_diff_row(table_name, row), sort_keys=True, default=str): row
+        for row in data
+    }
 
 
-def _list_config_tables(server, hide_tables):
+def _list_config_tables(query_db, server, hide_tables):
     """
     Return the ProxySQL configuration tables on `server` that should be diffed:
     base tables only (no runtime_ twins), with hidden and internal tables
     filtered out.
     """
-    query_db = {}
-    db_connect(query_db, server=server, dictionary=False)
     conn = query_db['cnf']['servers'][server]['conn']
-    try:
-        conn.database = 'main'
-        cur = query_db['cnf']['servers'][server]['cur']
-        cur.execute("SHOW TABLES")
-        all_tables = [table[0] for table in cur.fetchall()]
-    finally:
-        conn.close()
+    conn.database = 'main'
+    cur = query_db['cnf']['servers'][server]['cur']
+    cur.execute("SHOW TABLES")
+    all_tables = [table[0] for table in cur.fetchall()]
 
     tables_to_diff = []
     for table in all_tables:
@@ -817,63 +1040,86 @@ def _list_config_tables(server, hide_tables):
     return tables_to_diff
 
 
-def _query_config_layer(server, query):
+def _query_config_layer(query_db, server, query):
     """
-    Run one layer query (disk/memory/runtime) and return its rows as dicts.
+    Run one layer query (disk/memory/runtime) on the diff's shared connection
+    and return its rows as dicts.
 
     Returns:
         dict: {'row_count', 'data', 'column_order'} on success; the same shape
         with empty values plus an 'error' key when the query fails (a table
-        may not exist in every layer).
+        may not exist in every layer). Callers must treat the 'error' case as
+        "not compared" rather than "empty layer".
     """
-    query_db = {}
     try:
-        db_connect(query_db, server=server, dictionary=False)
-        try:
-            cur = query_db['cnf']['servers'][server]['cur']
-            cur.execute(query)
-            rows = cur.fetchall()
+        cur = query_db['cnf']['servers'][server]['cur']
+        cur.execute(query)
+        rows = cur.fetchall()
 
-            if rows:
-                column_names = [desc[0] for desc in cur.description]
-                dict_rows = [dict(zip(column_names, row)) for row in rows]
-            else:
-                column_names = []
-                dict_rows = []
+        if rows:
+            column_names = [desc[0] for desc in cur.description]
+            dict_rows = [dict(zip(column_names, row)) for row in rows]
+        else:
+            column_names = []
+            dict_rows = []
 
-            return {
-                'row_count': len(dict_rows),
-                'data': dict_rows,
-                'column_order': column_names,
-            }
-        finally:
-            query_db['cnf']['servers'][server]['conn'].close()
+        return {
+            'row_count': len(dict_rows),
+            'data': dict_rows,
+            'column_order': column_names,
+        }
     except Exception as e:
         # Log the real error server-side; the dict is sent to the browser via
         # get_config_diff, so keep connector/SQL details out of it.
         logging.warning(f"config diff layer query failed on {server}: {e}")
+        try:
+            # A failed statement can leave the admin connection unusable; make
+            # sure the remaining layers are not all reported as failures too.
+            db_connect(query_db, server=server, dictionary=False)
+        except Exception as reconnect_error:
+            logging.warning(f"config diff reconnect failed on {server}: {reconnect_error}")
         return {'row_count': 0, 'data': [], 'column_order': [], 'error': 'layer query failed'}
 
 
-def _calculate_table_differences(disk_data, memory_data, runtime_data):
+def _calculate_table_differences(disk_data, memory_data, runtime_data, table_name=None):
     """
     Compare the three layers row-wise and return (differences, has_differences).
 
     `differences` carries the rows present in only one side of each pair
     (disk vs memory, memory vs runtime).
+
+    Rows that ProxySQL deliberately keeps out of the runtime layer are not
+    reported as memory-vs-runtime differences: a row with `active = 0` whose
+    identity has no runtime counterpart is expected to be missing there.
     """
-    disk_map = _build_hash_map(disk_data)
-    memory_map = _build_hash_map(memory_data)
-    runtime_map = _build_hash_map(runtime_data)
+    # Disk and memory hold the same row format, so they are compared as-is:
+    # folding them could make distinct rows (users has PK (username, backend))
+    # look identical. Runtime splits a user into one row per role, so memory vs
+    # runtime compares both sides folded by _merge_user_rows (a no-op for other
+    # tables); the flags are still compared, OR-ed per user.
+    runtime_data = _merge_user_rows(table_name, runtime_data)
+    memory_folded = _merge_user_rows(table_name, memory_data)
+
+    disk_map = _build_hash_map(disk_data, table_name)
+    memory_map = _build_hash_map(memory_data, table_name)
+    memory_folded_map = _build_hash_map(memory_folded, table_name)
+    runtime_map = _build_hash_map(runtime_data, table_name)
 
     disk_hashes = set(disk_map.keys())
     memory_hashes = set(memory_map.keys())
+    memory_folded_hashes = set(memory_folded_map.keys())
     runtime_hashes = set(runtime_map.keys())
+
+    runtime_identities = {_row_identity(table_name, row) for row in runtime_data}
 
     only_in_disk = [disk_map[h] for h in (disk_hashes - memory_hashes)]
     only_in_memory = [memory_map[h] for h in (memory_hashes - disk_hashes)]
-    only_in_memory_not_runtime = [memory_map[h] for h in (memory_hashes - runtime_hashes)]
-    only_in_runtime = [runtime_map[h] for h in (runtime_hashes - memory_hashes)]
+    only_in_memory_not_runtime = [
+        memory_folded_map[h] for h in (memory_folded_hashes - runtime_hashes)
+        if not (_is_inactive_row(memory_folded_map[h])
+                and _row_identity(table_name, memory_folded_map[h]) not in runtime_identities)
+    ]
+    only_in_runtime = [runtime_map[h] for h in (runtime_hashes - memory_folded_hashes)]
 
     differences = {
         'disk_vs_memory': {
@@ -902,7 +1148,6 @@ def get_config_diff(server=None):
             - summary: Mapping with counts:
                 - total_tables (int)
                 - tables_with_differences (int)
-                - total_changes (dict) with keys 'added', 'modified', 'deleted'
             - tables: List of per-table diff objects. Each table object contains:
                 - table_name (str)
                 - databases (dict): Per-layer entries ('disk', 'memory', 'runtime') each with:
@@ -916,6 +1161,7 @@ def get_config_diff(server=None):
                 - stats: Counters and flags ('disk_rows', 'memory_rows', 'runtime_rows', 'has_differences')
             - config_diff_skip_variable: List of variable names from config to ignore during diffing.
     """
+    query_db = {}
     try:
         # Get config to access hide_tables and skip_variables
         config = get_config()
@@ -934,28 +1180,29 @@ def get_config_diff(server=None):
             'summary': {
                 'total_tables': 0,
                 'tables_with_differences': 0,
-                'total_changes': {
-                    'added': 0,
-                    'modified': 0,
-                    'deleted': 0
-                }
             },
             'tables': [],
-            'config_diff_skip_variable': skip_variables
+            'config_diff_skip_variable': skip_variables,
+            'identity_columns': _DIFF_IDENTITY_COLUMNS,
         }
 
-        tables_to_diff = _list_config_tables(server, hide_tables)
+        # One admin connection for the whole diff: this used to open (and
+        # close) a fresh one per layer per table — 3*N+1 connects per refresh.
+        db_connect(query_db, server=server, dictionary=False)
+        tables_to_diff = _list_config_tables(query_db, server, hide_tables)
 
         for table_name in tables_to_diff:
             table_diff = {
                 'table_name': table_name,
                 'databases': {},
-                'differences': [],
+                'differences': {},
                 'stats': {
                     'disk_rows': 0,
                     'memory_rows': 0,
                     'runtime_rows': 0,
-                    'has_differences': False
+                    'has_differences': False,
+                    'comparison_unavailable': False,
+                    'failed_layers': [],
                 }
             }
 
@@ -966,15 +1213,41 @@ def get_config_diff(server=None):
                 'runtime': f"SELECT * FROM main.runtime_{table_name}"
             }
 
+            failed_layers = []
             for layer_name, query in queries.items():
-                layer = _query_config_layer(server, query)
+                layer = _query_config_layer(query_db, server, query)
+                if layer_name == 'runtime' and layer.get('data'):
+                    # Show one runtime row per user, lined up with memory. Only
+                    # the displayed rows are folded; row_count stays the real
+                    # count and the diff folds on its own (see
+                    # _calculate_table_differences).
+                    layer['data'] = _merge_user_rows(table_name, layer['data'])
                 table_diff['databases'][layer_name] = layer
                 table_diff['stats'][f'{layer_name}_rows'] = layer['row_count']
+                if layer.get('error'):
+                    failed_layers.append(layer_name)
+
+            if failed_layers:
+                # A layer we could not read comes back with zero rows, which is
+                # indistinguishable from an empty layer: diffing against it
+                # would report every row of the other two as drift. Flag the
+                # table instead so the UI can say the comparison is unavailable.
+                table_diff['stats']['comparison_unavailable'] = True
+                table_diff['stats']['failed_layers'] = failed_layers
+                table_diff['differences'] = {
+                    'disk_vs_memory': {'only_in_disk': [], 'only_in_memory': []},
+                    'memory_vs_runtime': {'only_in_memory': [], 'only_in_runtime': []},
+                }
+                table_diff['stats']['has_differences'] = False
+                diff_result['summary']['total_tables'] += 1
+                diff_result['tables'].append(table_diff)
+                continue
 
             differences, has_diffs = _calculate_table_differences(
                 table_diff['databases'].get('disk', {}).get('data', []),
                 table_diff['databases'].get('memory', {}).get('data', []),
                 table_diff['databases'].get('runtime', {}).get('data', []),
+                table_name,
             )
             table_diff['differences'] = differences
             table_diff['stats']['has_differences'] = has_diffs
@@ -990,42 +1263,31 @@ def get_config_diff(server=None):
     except Exception as e:
         logging.error(f"Error in get_config_diff: {e}")
         raise
+    finally:
+        servers = (query_db.get('cnf') or {}).get('servers') or {}
+        if isinstance(servers.get(server), dict):
+            _close_handles(servers[server])
 
 
-def get_table_content(db, server, database, table):
+def get_column_names(db, server, database, table):
     """
-    Return the rows, column names, and miscellaneous config for a specific table.
-    
-    Retrieves all rows from the given database.table ordered by the first column, records the result rows and column names, and includes the global 'misc' section from the loaded configuration.
-    
-    Parameters:
-        db (dict): Application DB context dict used by db_connect to store connection/cursor.
-        server (str): Server name as defined in the configuration.
-        database (str): Database name containing the table.
-        table (str): Table name to fetch.
-    
-    Returns:
-        content (dict): Dictionary with keys:
-            - 'rows' (list of tuples): All table rows returned by the query.
-            - 'column_names' (list of str): Column names in result order.
-            - 'misc' (dict): The 'misc' section from the loaded configuration.
-    
+    Return the column names of a table, in schema order.
+
+    Used to build the identifier whitelist for the row-mutation APIs. Reads the
+    columns from the cursor description of a ``LIMIT 0`` query rather than
+    selecting the rows — the previous helper fetched the whole table just to
+    read its ``description``.
+
     Raises:
         ValueError: If a MySQL connector error or warning occurs while querying.
     """
-    content = {}
     try:
-        logging.debug("server: {} - db: {} - table:{}".format(server, database, table))
         db_connect(db, server=server, dictionary=False)
-        string = f"SELECT * FROM {_quote_ident(database)}.{_quote_ident(table)} ORDER BY 1"
-        logging.debug("query: {}".format(string))
-
-        db['cnf']['servers'][server]['cur'].execute(string)
-
-        content['rows'] = db['cnf']['servers'][server]['cur'].fetchall()
-        content['column_names'] = [i[0] for i in db['cnf']['servers'][server]['cur'].description]
-        content['misc'] = get_config()['misc']
-        return content
+        cur = db['cnf']['servers'][server]['cur']
+        cur.execute(f"SELECT * FROM {_quote_ident(database)}.{_quote_ident(table)} LIMIT 0")
+        column_names = [i[0] for i in cur.description]
+        cur.fetchall()
+        return column_names
     except (mysql.connector.Error, mysql.connector.Warning) as e:
         _safe_close_conn(db, server)
         raise ValueError(e)
@@ -1250,12 +1512,16 @@ def execute_adhoc_report(db, server):
         if 'adhoc_report' in config['misc']:
             for item in config['misc']['adhoc_report']:
                 logging.debug("query: {}".format(item))
-                db['cnf']['servers'][server]['cur'].execute(item['sql'])
+                item_sql = item.get('sql')
+                if not item_sql:
+                    logging.warning("Skipping adhoc report item with no SQL: %s", item)
+                    continue
+                db['cnf']['servers'][server]['cur'].execute(item_sql)
 
                 result['rows'] = db['cnf']['servers'][server]['cur'].fetchall()
-                result['title'] = item['title']
-                result['sql'] = item['sql']
-                result['info'] = item['info']
+                result['title'] = item.get('title', '')
+                result['sql'] = item_sql
+                result['info'] = item.get('info', '')
                 result['column_names'] = [i[0] for i in db['cnf']['servers'][server]['cur'].description]
                 adhoc_results.append(result.copy())
 
@@ -1516,20 +1782,7 @@ def get_table_schema(db, server, database, table_name):
         if not create_table_result:
             raise ValueError(f"Table '{table_name}' not found in database '{database}'")
 
-        # The result contains two fields: Table and Create Table
-        # Field names may vary, so we need to handle both possibilities
-        create_table_sql = None
-        if 'Create Table' in create_table_result:
-            create_table_sql = create_table_result['Create Table']
-        elif isinstance(create_table_result, dict):
-            # Handle alternative key casing
-            for key, value in create_table_result.items():
-                if 'create table' in key.lower():
-                    create_table_sql = value
-                    break
-        else:
-            # Handle tuple result
-            create_table_sql = create_table_result[1]
+        create_table_sql = _create_table_sql(create_table_result)
 
         logging.debug(f"CREATE TABLE statement:\n{create_table_sql}")
 
@@ -1631,6 +1884,24 @@ def _parse_inline_primary_keys(create_table_sql):
     return pk_cols
 
 
+def _create_table_sql(row):
+    """Pull the CREATE TABLE text out of a SHOW CREATE TABLE result row.
+
+    The row is a dict or a tuple depending on the cursor, and the column label
+    varies in casing by server, so match case-insensitively before falling back
+    to positional access. Returns None when the text cannot be located.
+    """
+    if isinstance(row, dict):
+        for key, value in row.items():
+            if 'create table' in str(key).lower():
+                return value
+        return None
+    try:
+        return row[1]
+    except (IndexError, TypeError, KeyError):
+        return None
+
+
 def get_primary_key_columns(db, server, database, table_name):
     """
     Return the primary key column names defined for the specified table.
@@ -1638,7 +1909,11 @@ def get_primary_key_columns(db, server, database, table_name):
     Parses the table's CREATE TABLE SQL and extracts the PRIMARY KEY column list.
 
     Returns:
-        list: Primary key column names in definition order. Returns an empty list if the table has no primary key or if the primary key cannot be determined.
+        list: Primary key column names in definition order, or an empty list if
+        the table genuinely has no primary key.
+        None: If the lookup failed. Callers must not treat this as "no primary
+        key" — the fallback for that case is the caller-supplied column list,
+        which would silently widen an UPDATE/DELETE WHERE clause.
     """
     try:
         db_connect(db, server=server, dictionary=True)
@@ -1650,14 +1925,12 @@ def get_primary_key_columns(db, server, database, table_name):
 
         if not create_table_result:
             logging.warning(f"Table '{table_name}' not found")
-            return []
+            return None
 
-        # Extract CREATE TABLE SQL
-        create_table_sql = None
-        if 'Create Table' in create_table_result:
-            create_table_sql = create_table_result['Create Table']
-        else:
-            create_table_sql = create_table_result[1]
+        create_table_sql = _create_table_sql(create_table_result)
+        if not create_table_sql:
+            logging.warning(f"Could not read CREATE TABLE for '{table_name}'")
+            return None
 
         # Block form: PRIMARY KEY (column1, column2, ...)
         pk_pattern = r'PRIMARY\s+KEY\s*\(([^)]+)\)'
@@ -1680,7 +1953,7 @@ def get_primary_key_columns(db, server, database, table_name):
 
     except Exception as e:
         logging.error(f"Error extracting primary key for {table_name}: {e}")
-        return []
+        return None
     finally:
         try:
             db['cnf']['servers'][server]['cur'].close()
@@ -2067,7 +2340,8 @@ def update_row(db, server, database, table, pk_values, column_names, data):
         database (str): Database/schema name containing the table.
         table (str): Table name to update.
         pk_values (dict): Mapping of primary key column names to their identifying values; values of None match IS NULL.
-        column_names (Iterable[str]): Iterable of valid column names for the target table used to validate incoming columns.
+        column_names (Iterable[str]): Caller-supplied column list. Retained for
+            the API shape only — the whitelist is read from the live schema.
         data (dict): Mapping of column names to new values; omit keys or set value to None to use NULL/DEFAULT behavior.
     
     Returns:
@@ -2082,18 +2356,35 @@ def update_row(db, server, database, table, pk_values, column_names, data):
             result['error'] = 'No primary key values provided'
             return result
 
-        # Validate column names from caller against the full column list
-        allowed_columns = set(column_names)
-        for col in data:
+        # Validate every column that reaches the SQL — the values being set and
+        # the ones identifying the row — against the live schema. This used to
+        # check them against the caller's own column_names list, i.e. against
+        # itself, which whitelisted nothing.
+        allowed_columns = set(get_column_names(db, server, database, table))
+        for col in set(data) | set(pk_values):
             if col not in allowed_columns:
                 result['success'] = False
                 result['error'] = f'Unknown column: {col!r}'
                 return result
 
-        # Determine which columns form the primary key
+        # Determine which columns form the primary key. None means the lookup
+        # failed — falling back to the caller's columns there would widen the
+        # WHERE clause on a transient error, so refuse instead.
         pk_cols = get_primary_key_columns(db, server, database, table)
+        if pk_cols is None:
+            result['success'] = False
+            result['error'] = 'Could not determine the primary key for this table'
+            return result
         if not pk_cols:
-            pk_cols = list(pk_values.keys())  # fallback: use whatever was sent
+            pk_cols = list(pk_values.keys())  # no PK: use whatever was sent
+        missing = [col for col in pk_cols if col not in pk_values]
+        if missing:
+            # A missing key column used to become `col IS NULL`, which matches
+            # nothing on a NOT NULL key — the call reported success and changed
+            # zero rows. A key column that is really NULL must be sent as null.
+            result['success'] = False
+            result['error'] = f'Missing primary key column(s): {", ".join(missing)}'
+            return result
 
         # Build WHERE clause from pk_values
         where_conditions = []
@@ -2133,7 +2424,7 @@ def update_row(db, server, database, table, pk_values, column_names, data):
         logging.debug("Update SQL: {}".format(sql))
         error = execute_change(db, server, sql)
 
-        if "ERROR" in error:
+        if error:
             result['success'] = False
             result['error'] = error
 
@@ -2165,10 +2456,33 @@ def delete_row(db, server, database, table, pk_values):
             result['error'] = 'No primary key values provided'
             return result
 
-        # Determine which columns form the primary key
+        # Validate the caller's column names against the live schema; this path
+        # previously did no column validation at all.
+        allowed_columns = set(get_column_names(db, server, database, table))
+        for col in pk_values:
+            if col not in allowed_columns:
+                result['success'] = False
+                result['error'] = f'Unknown column: {col!r}'
+                return result
+
+        # Determine which columns form the primary key. None means the lookup
+        # failed — falling back to the caller's columns there would widen the
+        # WHERE clause on a transient error, so refuse instead.
         pk_cols = get_primary_key_columns(db, server, database, table)
+        if pk_cols is None:
+            result['success'] = False
+            result['error'] = 'Could not determine the primary key for this table'
+            return result
         if not pk_cols:
-            pk_cols = list(pk_values.keys())  # fallback: use whatever was sent
+            pk_cols = list(pk_values.keys())  # no PK: use whatever was sent
+        missing = [col for col in pk_cols if col not in pk_values]
+        if missing:
+            # A missing key column used to become `col IS NULL`, which matches
+            # nothing on a NOT NULL key — the call reported success and changed
+            # zero rows. A key column that is really NULL must be sent as null.
+            result['success'] = False
+            result['error'] = f'Missing primary key column(s): {", ".join(missing)}'
+            return result
 
         # Build WHERE clause from pk_values
         where_conditions = []
@@ -2191,7 +2505,7 @@ def delete_row(db, server, database, table, pk_values):
         logging.debug(f"Delete SQL: {sql}")
         error = execute_change(db, server, sql)
 
-        if "ERROR" in error:
+        if error:
             result['success'] = False
             result['error'] = error
 
@@ -2223,8 +2537,7 @@ def insert_row(db, server, database, table, column_names, data):
     result = {'success': True, 'error': None}
     try:
         # Fetch live schema to build identifier whitelist
-        content = get_table_content(db, server, database, table)
-        allowed_columns = set(content['column_names'])
+        allowed_columns = set(get_column_names(db, server, database, table))
 
         # Validate caller-supplied column names against the live schema
         for col in column_names:
@@ -2264,7 +2577,7 @@ def insert_row(db, server, database, table, column_names, data):
         logging.debug("Insert SQL: {}".format(sql))
         error = execute_change(db, server, sql)
 
-        if "ERROR" in error:
+        if error:
             result['success'] = False
             result['error'] = error
 
