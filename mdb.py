@@ -187,7 +187,7 @@ def invalidate_config_cache(config=None):
             _config_cache.pop(config, None)
 
 
-def get_config(config="config/config.yml"):
+def get_config(config="config/config.yml", apply_env=True):
     """
     Load and parse a YAML configuration file into a Python dictionary.
 
@@ -198,6 +198,10 @@ def get_config(config="config/config.yml"):
 
     Parameters:
         config (str): Path to the YAML configuration file.
+        apply_env (bool): Apply PROXYWEB_* environment overrides (the default).
+            Pass False for anything that is shown in the settings editor or can
+            be written back to disk, so env-supplied servers and secrets are
+            never persisted into the file.
 
     Returns:
         dict: Parsed configuration dictionary.
@@ -215,25 +219,65 @@ def get_config(config="config/config.yml"):
 
         with _config_cache_lock:
             cached = _config_cache.get(config)
-        if cached and cached[0] == stat_key:
-            return copy.deepcopy(cached[1])
+        reparsed = not (cached and cached[0] == stat_key)
+        if not reparsed:
+            cfg = copy.deepcopy(cached[1])
+        else:
+            with open(config, 'r') as yml:
+                raw = yaml.safe_load(yml)
+            with _config_cache_lock:
+                _config_cache[config] = (stat_key, raw)
+            cfg = copy.deepcopy(raw)
 
-        with open(config, 'r') as yml:
-            cfg = yaml.safe_load(yml)
-        cfg = _apply_env_overrides(cfg)
-
-        with _config_cache_lock:
-            _config_cache[config] = (stat_key, cfg)
-        return copy.deepcopy(cfg)
+        # The cache holds the file as written; env overrides are applied to
+        # each caller's copy so apply_env=False can see the file untouched.
+        return _apply_env_overrides(cfg, verbose=reparsed) if apply_env else cfg
     except Exception as e:
         logging.error("Error opening or parsing %s: %s", config, e)
         raise ValueError("Error opening or parsing the file: %s" % config)
 
 
-def _apply_env_overrides(cfg):
-    """Override config values with PROXYWEB_* environment variables when set."""
+# DSN given to a server that exists only in PROXYWEB_SERVERS: ProxySQL's
+# out-of-the-box admin interface on the same host (the sidecar deployment).
+_ENV_SERVER_DEFAULT_DSN = {
+    'host': '127.0.0.1',
+    'port': 6032,
+    'user': 'admin',
+    'passwd': 'admin',
+    'db': 'main',
+}
+# Server names end up in URL paths and in env variable names.
+_ENV_SERVER_NAME_RE = re.compile(r'^[A-Za-z0-9_-]+$')
+# Invalid names already warned about; the list is re-read on every get_config().
+_env_server_names_warned = set()
+
+
+def get_env_managed_servers():
+    """Return the server names listed in PROXYWEB_SERVERS (comma-separated),
+    in order, skipping blanks, duplicates and names that are not URL-safe."""
+    names = []
+    for name in os.environ.get('PROXYWEB_SERVERS', '').split(','):
+        name = name.strip()
+        if not name or name in names:
+            continue
+        if not _ENV_SERVER_NAME_RE.match(name):
+            if name not in _env_server_names_warned:
+                _env_server_names_warned.add(name)
+                logging.warning("PROXYWEB_SERVERS: ignoring invalid server name %r", name)
+            continue
+        names.append(name)
+    return names
+
+
+def _apply_env_overrides(cfg, verbose=True):
+    """Override config values with PROXYWEB_* environment variables when set.
+
+    ``verbose`` logs each override at INFO; get_config() only asks for that
+    when it re-parses the file, since it applies the overrides on every call.
+    """
     if not cfg:
         return cfg
+    log = logging.info if verbose else logging.debug
 
     # Auth credentials
     _ENV_AUTH_MAP = {
@@ -246,7 +290,7 @@ def _apply_env_overrides(cfg):
         value = os.environ.get(env_key)
         if value is not None:
             cfg.setdefault(section, {})[key] = value
-            logging.info("Config override: %s.%s from env %s", section, key, env_key)
+            log("Config override: %s.%s from env %s", section, key, env_key)
 
     # Okta SSO settings: PROXYWEB_OKTA_* → auth.okta.* (booleans parsed like
     # checkboxes so '1'/'true'/'yes'/'on' all work).
@@ -265,7 +309,18 @@ def _apply_env_overrides(cfg):
         if value is not None:
             okta = cfg.setdefault('auth', {}).setdefault('okta', {})
             okta[key] = _form_checkbox(value) if is_bool else value
-            logging.info("Config override: auth.okta.%s from env %s", key, env_key)
+            log("Config override: auth.okta.%s from env %s", key, env_key)
+
+    # Env-defined servers: PROXYWEB_SERVERS=name1,name2 adds each listed server
+    # that config.yml does not already define, with ProxySQL's default admin
+    # DSN. The per-server overrides below then fill in the real values.
+    for server_name in get_env_managed_servers():
+        if not isinstance(cfg.get('servers'), dict):
+            cfg['servers'] = {}
+        if server_name not in cfg['servers']:
+            cfg['servers'][server_name] = {'dsn': [dict(_ENV_SERVER_DEFAULT_DSN)]}
+            log("Config override: server %s defined from env PROXYWEB_SERVERS",
+                         server_name)
 
     # Per-server DSN overrides: PROXYWEB_SERVER_<NAME>_{USER,PASSWORD,HOST,PORT,DATABASE}
     _DSN_FIELD_MAP = {
@@ -284,7 +339,7 @@ def _apply_env_overrides(cfg):
                 overrides[dsn_key] = int(value) if dsn_key == 'port' else value
 
         if overrides:
-            logging.info("Config override: server %s DSN fields %s from env",
+            log("Config override: server %s DSN fields %s from env",
                          server_name, list(overrides.keys()))
             for dsn in server_cfg.get('dsn', []):
                 dsn.update(overrides)

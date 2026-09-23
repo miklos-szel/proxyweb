@@ -9,6 +9,12 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
 ## [Unreleased]
 
 ### Added
+- **Env-defined servers**: `PROXYWEB_SERVERS=name1,name2` defines servers
+  entirely from the environment. Each listed name that `config.yml` doesn't
+  define starts from ProxySQL's default admin DSN and is filled in by the
+  existing `PROXYWEB_SERVER_<NAME>_*` variables. Useful for Kubernetes sidecars
+  configured through a mounted `.env`. These servers live only in memory and
+  are listed in a note on the settings page.
 - **Okta SSO (OIDC)**: optional "Sign in with Okta" login via the OIDC
   Authorization Code flow (`auth.okta` config section, `/login/okta` +
   `/login/okta/callback` routes). Roles are mapped from Okta group
@@ -26,6 +32,12 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
   the configured issuer, the userinfo `sub` must match the ID token `sub`
   (OIDC Core 5.3.2), and the client secret is never sent to the browser by the
   settings UI (left blank preserves the stored value).
+
+### Fixed
+- The structured settings editor, Export and the Okta secret-preserving UI
+  save read the env-overridden config, so saving from the UI (or exporting
+  and re-importing) wrote `PROXYWEB_*` passwords into `config.yml`. They now
+  read the file as written.
 
 ## [2.2.1] — 2026-07-07
 

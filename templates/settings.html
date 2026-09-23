@@ -336,6 +336,15 @@
             </a>
         </div>
     {% else %}
+        {% if env_servers %}
+        <div class="alert alert-info py-2 small" role="note" id="env-servers-note">
+            <i class="fas fa-info-circle me-1"></i>
+            Also configured via <code>PROXYWEB_SERVERS</code>:
+            {% for name in env_servers %}<code>{{ name }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.
+            These servers are defined by <code>PROXYWEB_SERVER_&lt;NAME&gt;_*</code> environment
+            variables and are never saved to this file.
+        </div>
+        {% endif %}
         <!-- Editor Mode Toggle -->
         <div class="editor-mode-toggle">
             <button type="button" class="btn btn-outline-primary active" id="btn-ui-editor" onclick="switchMode('ui')">

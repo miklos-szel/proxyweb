@@ -742,7 +742,17 @@ def render_settings(action):
         raw = request.form.get("settings", "")
         _backup_and_write_config(raw)
         message = "success"
-    return render_template("settings.html", config_file_content=config_file_content, message=message)
+    # Servers that exist only because of PROXYWEB_SERVERS (not in the file),
+    # so the editor can explain why they are missing from it.
+    # A broken file must not stop the editor from loading (it is how the file
+    # gets fixed), so fall back to listing every env server.
+    try:
+        file_servers = mdb.get_config(config, apply_env=False).get('servers') or {}
+    except Exception:
+        file_servers = {}
+    env_servers = [n for n in mdb.get_env_managed_servers() if n not in file_servers]
+    return render_template("settings.html", config_file_content=config_file_content, message=message,
+                           env_servers=env_servers)
 
 
 @app.route('/settings/ui_save/', methods=['POST'])
@@ -774,7 +784,7 @@ def settings_ui_save():
             form_data.get('auth_okta_issuer', '').strip() or
             form_data.get('auth_okta_client_id', '').strip())
         if okta_configured and not form_data.get('auth_okta_client_secret', '').strip():
-            existing = (mdb.get_config(config).get('auth', {}) or {}).get('okta') or {}
+            existing = (mdb.get_config(config, apply_env=False).get('auth', {}) or {}).get('okta') or {}
             if isinstance(existing, dict) and existing.get('client_secret'):
                 form_data['auth_okta_client_secret'] = existing['client_secret']
 
@@ -809,7 +819,9 @@ def settings_load_ui():
     if session.get('role') == 'readonly':
         abort(403)
     try:
-        config_data = mdb.get_config(config)
+        # Read the file without env overrides: whatever the UI shows it saves
+        # back, and env-supplied servers/secrets must never land in config.yml.
+        config_data = mdb.get_config(config, apply_env=False)
         # Never send the Okta client_secret to the browser. get_config returns
         # a freshly parsed dict per call, so blanking it here is safe. The
         # settings UI leaves the field blank and preserves the stored secret on
@@ -839,7 +851,9 @@ def settings_export():
     if session.get('role') == 'readonly':
         abort(403)
     try:
-        config_data = mdb.get_config(config)
+        # Export the file as written, not the env-overridden view (see
+        # settings_load_ui): an exported file may be imported straight back.
+        config_data = mdb.get_config(config, apply_env=False)
         yaml_content = mdb.dict_to_yaml(config_data)
         filename = f"config-{datetime.now().strftime('%Y%m%d-%H%M%S')}.yml"
         return jsonify({'success': True, 'yaml': yaml_content, 'filename': filename})

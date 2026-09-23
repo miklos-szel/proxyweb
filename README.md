@@ -139,6 +139,18 @@ export PROXYWEB_SERVER_PROXYSQL_USER=myuser
 export PROXYWEB_SERVER_PROXYSQL_PASSWORD=mypassword
 ```
 
+**Servers defined entirely from the environment:** the variables above only override servers that already exist in `config.yml`. To add servers without editing the file (e.g. a Kubernetes sidecar configured through a mounted `.env`), list them in `PROXYWEB_SERVERS` (comma-separated). Each listed server that `config.yml` doesn't already define starts from ProxySQL's default admin DSN (`127.0.0.1:6032`, `admin`/`admin`, db `main`). The `PROXYWEB_SERVER_<NAME>_*` variables then override individual fields.
+
+```bash
+PROXYWEB_SERVERS=core_0
+PROXYWEB_SERVER_CORE_0_HOST=127.0.0.1
+PROXYWEB_SERVER_CORE_0_PORT=6032
+PROXYWEB_SERVER_CORE_0_USER=admin
+PROXYWEB_SERVER_CORE_0_PASSWORD=secret
+```
+
+Env-defined servers exist only in memory. They never appear in the settings editor or Export, and are never written to `config.yml`. Server names may contain only letters, digits, `_` and `-`. Environment variable names can't contain `-`, so use `_` in names you want to configure. If `global.default_server` doesn't name an existing server, the first server is used.
+
 When running in Docker, place variables in a `.env` file mounted at `/app/.env` (or set `PROXYWEB_ENV_FILE` to a custom path). The entrypoint loads it automatically before startup.
 
 ### Okta SSO (OIDC)

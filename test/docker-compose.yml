@@ -211,6 +211,36 @@ services:
     networks:
       - proxyweb-test
 
+  # Same app and config.yml as `proxyweb`, plus a server that exists only in
+  # env (PROXYWEB_SERVERS). Kept separate so the main instance's server list
+  # stays exactly what config.yml says (TestNoServersRedirect empties it).
+  # envadmin/envsecret42 appear nowhere in config.yml, so test_env_config.py
+  # can check that neither the server nor its secret leaks into settings or
+  # export. 'bad/name' must be skipped as an invalid server name.
+  proxyweb-env:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile
+    environment:
+      PROXYWEB_ALLOW_NONATOMIC_WRITE: "1"
+      PROXYWEB_SERVERS: "envserver, bad/name"
+      PROXYWEB_SERVER_ENVSERVER_HOST: proxysql2
+      PROXYWEB_SERVER_ENVSERVER_USER: envadmin
+      PROXYWEB_SERVER_ENVSERVER_PASSWORD: envsecret42
+    volumes:
+      - ./config/config.yml:/app/config/config.yml
+    depends_on:
+      proxysql2-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:5000/login')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - proxyweb-test
+
   test-runner:
     build:
       context: ..
@@ -218,6 +248,7 @@ services:
     profiles: ["tests"]
     environment:
       PROXYWEB_URL: http://proxyweb:5000
+      PROXYWEB_ENV_URL: http://proxyweb-env:5000
       PROXYWEB_USER: admin
       PROXYWEB_PASS: admin42
       PROXYSQL_MYSQL_HOST: proxysql2
@@ -226,6 +257,8 @@ services:
       PY_COLORS: "1"
     depends_on:
       proxyweb:
+        condition: service_healthy
+      proxyweb-env:
         condition: service_healthy
       mock-okta:
         condition: service_healthy

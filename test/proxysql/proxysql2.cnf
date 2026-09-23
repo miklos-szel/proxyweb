@@ -3,7 +3,7 @@ datadir="/var/lib/proxysql"
 admin_variables=
 {
     # "admin:admin" is the default admin user; "radmin:radmin" is used by proxyweb
-    admin_credentials="admin:admin;radmin:radmin"
+    admin_credentials="admin:admin;radmin:radmin;envadmin:envsecret42"
     mysql_ifaces="0.0.0.0:6032"
     refresh_interval=2000
 }

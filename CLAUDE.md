@@ -132,6 +132,8 @@ On Docker single-file bind-mounts `os.replace()` raises EXDEV/EBUSY; set `PROXYW
 
 Every config write goes through `_backup_and_write_config()`, which validates YAML syntax and shape (`mdb.validate_yaml` + `mdb.validate_config_shape`), backs the current file up to `config.yml.bak`, writes, and then drops the config cache. Handlers must not re-validate beforehand — that just parses the file twice.
 
+Env overrides (`mdb._apply_env_overrides`, including servers defined only by `PROXYWEB_SERVERS`) are applied to each caller's copy, not cached. Anything shown in the settings editor, exported, or written back to disk must use `mdb.get_config(config, apply_env=False)` so env servers and secrets never land in the file (`TestEnvServerNotPersisted`).
+
 `mdb.get_config()` caches the parsed YAML per path, keyed by the file's `(inode, mtime_ns, ctime_ns, size)` (so another gunicorn worker's same-size save is still seen), and returns a **deep copy** to each caller — `db_connect()` stores live connection and cursor objects inside the returned dict, so the cached object must never be shared. Any code that writes the config outside `_backup_and_write_config` must call `mdb.invalidate_config_cache()`.
 
 ### Session State for Templates
@@ -187,6 +189,7 @@ The `test/` directory contains a Docker Compose stack and a Python test suite. T
 | `proxysql2-init` / `proxysql3-init` | mysql:8.0 (one-shot) | Register backends, users, and query rules via admin SQL |
 | `mock-okta` | built from `test/mock_okta/` | Mock Okta OIDC provider for hermetic SSO tests (identity controlled via `mock_*` query params on `/authorize`) |
 | `proxyweb` | built from repo root | App under test on :5000 |
+| `proxyweb-env` | built from repo root | Same app and `config.yml`, plus the env-only server `envserver` (`PROXYWEB_SERVERS`); used by `test_env_config.py` via `PROXYWEB_ENV_URL` |
 | `test-runner` | built from `test/Dockerfile.runner` (profile: `tests`) | Runs the Python suite on the Compose network; invoked by `run_tests.sh` via `docker compose run --rm` |
 
 Config names the servers `proxysql_mysql` and `proxysql_postgres`.
@@ -251,4 +254,6 @@ Rules:
 | config diff kept only `runtime_mysql_users` rows with `frontend=1`, so an in-sync backend-only user (`frontend=0`) was reported as memory-only drift | `TestConfigDiffBackendOnlyUser` |
 | `show_table_info.html` serialised misc items with `subitem['info']\|tojson`; a missing `info` key is Jinja `Undefined`, which `tojson` cannot serialise → every table view 500'd | `TestOptionalConfigSections.test_table_view_renders_without_info_field` |
 | priming the navbar session made `render_config_diff` connect to list tables, so an unreachable server 500'd the config diff page instead of letting its diff request report the error; `_prime_session` now falls back to an empty nav | `TestUnreachableServerConfigDiff` |
+| `PROXYWEB_SERVER_<NAME>_*` only overrode servers already in `config.yml` (shipped with `servers: {}`), so env-only deployments couldn't define a server; added `PROXYWEB_SERVERS` | `TestEnvDefinedServer` |
+| settings editor/Export/Okta-secret save read the env-overridden config → a UI save or export+import wrote `PROXYWEB_*` secrets into `config.yml` | `TestEnvServerNotPersisted` |
 | `update_row`/`delete_row` turned a PK column missing from `pkValues` into `col IS NULL` → zero rows matched on a NOT NULL key but the API reported success (e.g. `mysql_users` deleted by `username` only, PK is `(username, backend)`); now rejected | `TestPartialPrimaryKeyRejected` |
