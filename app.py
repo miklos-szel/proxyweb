@@ -25,10 +25,7 @@ from datetime import datetime
 from flask import Flask, g, render_template, request, session, url_for, flash, redirect, jsonify, abort, Response
 from functools import wraps
 import re
-import errno
 import os
-import tempfile
-import yaml
 import mdb
 import oidc
 
@@ -73,100 +70,17 @@ def inject_prod_warning():
     return {'prod_warning_enabled': enabled}
 
 
-def _atomic_write(path, content):
-    """
-    Write the given content to a file at `path` atomically.
-    
-    This creates a temporary file in the same directory as `path`, writes `content` to it, flushes and fsyncs the data, then atomically replaces the target file with the temp file. If an error occurs during write or replace, the temporary file is removed (best-effort) and the original exception is re-raised.
-    
-    Parameters:
-        path (str): Filesystem path to write to. The final file at this path will be created or replaced.
-        content (str): Data to write to the file.
-    
-    Raises:
-        Exception: Propagates any exception raised while writing, syncing, or replacing the file after attempting to remove the temporary file.
-    """
-    dir_ = os.path.dirname(os.path.abspath(path))
-    fd, tmp_path = tempfile.mkstemp(dir=dir_)
-    try:
-        with os.fdopen(fd, 'w') as f:
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
-        try:
-            os.replace(tmp_path, path)
-        except OSError as exc:
-            # Docker file bind-mount can return EXDEV/EBUSY from rename(). A
-            # non-atomic open(path, 'w') fallback has worse semantics than a
-            # 500 (partial write on crash leaves the config corrupt), so let
-            # the error propagate unless PROXYWEB_ALLOW_NONATOMIC_WRITE=1.
-            if (exc.errno in (errno.EXDEV, errno.EBUSY)
-                    and os.environ.get('PROXYWEB_ALLOW_NONATOMIC_WRITE') == '1'):
-                logging.warning(
-                    "_atomic_write: rename errno=%s fallback — writing directly to %s",
-                    exc.errno, path,
-                )
-                with open(path, 'w') as f:
-                    f.write(content)
-                    f.flush()
-                    os.fsync(f.fileno())
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-            else:
-                raise
-        # fsync the directory so the rename is durable across power loss.
-        try:
-            dir_fd = os.open(dir_, os.O_RDONLY)
-            try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
-        except OSError:
-            pass
-    except BaseException:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
-
-
-def _validate_config(yaml_str):
-    """Validate YAML syntax and required config shape; raises ValueError on failure."""
-    mdb.validate_yaml(yaml_str)
-    mdb.validate_config_shape(yaml.safe_load(yaml_str))
-
-
 def _backup_and_write_config(yaml_content):
     """Validate the new content, back up the current config file to
     <config>.bak, then write the new content — both writes atomic."""
-    _validate_config(yaml_content)
+    mdb.validate_config(yaml_content)
     with open(config, "r") as src:
         current_content = src.read()
-    _atomic_write(config + ".bak", current_content)
-    _atomic_write(config, yaml_content)
+    mdb.atomic_write(config + ".bak", current_content)
+    mdb.atomic_write(config, yaml_content)
     # get_config() caches the parse keyed by (mtime, size); drop it explicitly
     # so a save is visible even within one filesystem timestamp tick.
     mdb.invalidate_config_cache(config)
-
-
-# Dict keys matching these substrings (case-insensitive) get their values
-# redacted in API debug logs — row payloads can carry ProxySQL credentials
-# (e.g. mysql_users.password).
-SENSITIVE_KEYS = ('password', 'passwd', 'token', 'secret', 'auth')
-
-
-def _redact_sensitive(value):
-    """Recursively redact dict values whose key looks credential-like."""
-    if isinstance(value, dict):
-        return {k: ('<REDACTED>' if any(s in str(k).lower() for s in SENSITIVE_KEYS)
-                    else _redact_sensitive(v))
-                for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_redact_sensitive(v) for v in value]
-    return value
 
 
 def _log_api_request(endpoint, params):
@@ -180,7 +94,7 @@ def _log_api_request(endpoint, params):
     logging.debug(f"API REQUEST: {endpoint}")
     logging.debug("=" * 80)
     for key, value in params.items():
-        logging.debug(f"{key}: {_redact_sensitive(value)}")
+        logging.debug(f"{key}: {mdb.redact_sensitive(value)}")
     logging.debug("=" * 80)
 
 
@@ -197,8 +111,6 @@ for key in flask_custom_config['flask']:
 if not isinstance(app.config.get('SECRET_KEY'), (str, bytes)):
     app.config['SECRET_KEY'] = str(app.config['SECRET_KEY'])
 
-
-mdb.logging.debug(flask_custom_config)
 
 def _okta_redirect_uri():
     """Build the OIDC redirect_uri and hold it to the same HTTPS rule as the
@@ -335,6 +247,16 @@ def login_required(f):
     return decorated_function
 
 
+def admin_required(f):
+    """Reject the readonly role with 403. Stack under ``@login_required``."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if session.get('role') == 'readonly':
+            abort(403)
+        return f(*args, **kwargs)
+    return decorated_function
+
+
 def _require_known_server(server):
     """Abort with 404 when ``server`` is not in the configured server list.
 
@@ -344,6 +266,33 @@ def _require_known_server(server):
     """
     if server not in mdb.get_servers():
         abort(404)
+
+
+def _requested_server(source):
+    """Server an API call targets: the one the page sent in ``source``
+    (``request.args`` or ``request.form``), else the session's, else the
+    default. The session is only a fallback — it holds the server visited last
+    in *any* tab, so relying on it sent LOAD/SAVE to another tab's server."""
+    return source.get('server') or session.get('server') or mdb.get_default_server()
+
+
+def _unknown_server_response(server):
+    """JSON 400 for a server that is not configured, else None (the API
+    counterpart of ``_require_known_server``)."""
+    if server not in mdb.get_servers():
+        return jsonify({'success': False, 'error': 'Invalid server'}), 400
+    return None
+
+
+def _row_write_rejection(server, table):
+    """Error response when a row API may not write ``table`` on ``server``
+    (unknown server, read-only server/role, runtime_* table), else None."""
+    rejection = _unknown_server_response(server)
+    if rejection:
+        return rejection
+    if mdb.get_read_only(server) or table.startswith('runtime_') or session.get('role') == 'readonly':
+        return jsonify({'success': False, 'error': 'table is read-only'}), 403
+    return None
 
 
 def _prime_session(server, database=None, table=None, refresh_dblist=False):
@@ -434,7 +383,8 @@ def csrf_protect():
     if request.method == 'POST' and request.endpoint != 'login':
         token = (request.form.get('_csrf_token')
                  or request.headers.get('X-CSRF-Token'))
-        if not token or token != session.get('csrf_token'):
+        expected = session.get('csrf_token')
+        if not token or not expected or not hmac.compare_digest(str(token), str(expected)):
             abort(403)
 
 # Fixed SSO error codes → user-facing messages. The Okta routes redirect to
@@ -684,8 +634,17 @@ def render_change(server, database, table):
             content = mdb.get_table_metadata(g.db, server, database, table)
             return render_template("show_table_info.html", content=content, error=error, message="")
     if select:
-        content = mdb.execute_adhoc_query(g.db, server, session['sql'])
-        content['order'] = 'true'
+        try:
+            content = mdb.execute_adhoc_query(g.db, server, session['sql'])
+            content['order'] = 'true'
+        except ValueError as e:
+            # A typo in the user's SELECT is not a server fault: show the
+            # database's message in the editor instead of the 500 page. Only
+            # mysql.connector errors reach here (wrapped by execute_adhoc_query),
+            # and those describe the statement, not the connection DSN.
+            content = mdb.get_table_metadata(g.db, server, database, table)
+            return render_template("show_table_info.html", content=content,
+                                   error=str(e), message="")
     else:
         ret = mdb.execute_change(g.db, server, session['sql'])
         content = mdb.get_table_metadata(g.db, server, database, table)
@@ -716,6 +675,7 @@ def adhoc_report(server):
 
 @app.route('/settings/<action>/', methods=['GET', 'POST'])
 @login_required
+@admin_required
 def render_settings(action):
     """
     Render the settings page and optionally persist updated configuration.
@@ -729,19 +689,28 @@ def render_settings(action):
     Raises:
         ValueError: If YAML validation, file I/O, or write operations fail.
     """
-    if session.get('role') == 'readonly':
-        abort(403)
     if action not in ('edit', 'save'):
         abort(404)
     config_file_content = ""
     message = ""
+    save_error = ""
+    config_file_original = None
     if action == 'edit':
         with open(config, "r") as f:
-            config_file_content = f.read()
+            config_file_content = config_file_original = f.read()
     if action == 'save':
         raw = request.form.get("settings", "")
-        _backup_and_write_config(raw)
-        message = "success"
+        try:
+            # Validates before writing; on failure nothing was written.
+            _backup_and_write_config(raw)
+            message = "success"
+        except mdb.ConfigValidationError as e:
+            # Re-show the editor with the submitted text: a 500 page here
+            # threw away everything the user had typed.
+            config_file_content = raw
+            save_error = str(e)
+            with open(config, "r") as f:
+                config_file_original = f.read()
     # Servers that exist only because of PROXYWEB_SERVERS (not in the file),
     # so the editor can explain why they are missing from it.
     # A broken file must not stop the editor from loading (it is how the file
@@ -752,11 +721,13 @@ def render_settings(action):
         file_servers = {}
     env_servers = [n for n in mdb.get_env_managed_servers() if n not in file_servers]
     return render_template("settings.html", config_file_content=config_file_content, message=message,
-                           env_servers=env_servers)
+                           env_servers=env_servers, save_error=save_error,
+                           config_file_original=config_file_original), (400 if save_error else 200)
 
 
 @app.route('/settings/ui_save/', methods=['POST'])
 @login_required
+@admin_required
 def settings_ui_save():
     """
     Save UI-submitted settings to the application's configuration after validation and backup.
@@ -768,8 +739,6 @@ def settings_ui_save():
         dict: On validation failure, JSON {'success': False, 'error': <message>} with HTTP 400.
         dict: On other errors, JSON {'success': False, 'error': <message>}.
     """
-    if session.get('role') == 'readonly':
-        abort(403)
     try:
         # Get form data and build YAML
         form_data = request.form.to_dict()
@@ -790,14 +759,13 @@ def settings_ui_save():
 
         yaml_config = mdb.form_data_to_yaml(form_data)
 
-        # Validate before touching the existing config
+        # _backup_and_write_config validates before touching the file; its
+        # ConfigValidationError describes the config, safe to show the user.
         try:
-            _validate_config(yaml_config)
-        except Exception as ve:
+            _backup_and_write_config(yaml_config)
+        except mdb.ConfigValidationError as ve:
             logging.error(f"settings_ui_save validation failed: {ve}")
             return jsonify({'success': False, 'error': str(ve)}), 400
-
-        _backup_and_write_config(yaml_config)
 
         return jsonify({'success': True, 'message': 'Settings saved successfully'})
     except Exception as e:
@@ -807,6 +775,7 @@ def settings_ui_save():
 
 @app.route('/settings/load_ui/', methods=['GET'])
 @login_required
+@admin_required
 def settings_load_ui():
     """
     Return the current application configuration formatted for the UI.
@@ -816,8 +785,6 @@ def settings_load_ui():
             - {'success': True, 'config': <dict>} on success, or
             - {'success': False, 'error': '<error message>'} on failure.
     """
-    if session.get('role') == 'readonly':
-        abort(403)
     try:
         # Read the file without env overrides: whatever the UI shows it saves
         # back, and env-supplied servers/secrets must never land in config.yml.
@@ -839,6 +806,7 @@ def settings_load_ui():
 
 @app.route('/settings/export/', methods=['GET'])
 @login_required
+@admin_required
 def settings_export():
     """
     Provide the YAML representation of the current configuration.
@@ -848,8 +816,6 @@ def settings_export():
             - {'success': True, 'yaml': <str>} on success, where <str> is the config YAML, or
             - {'success': False, 'error': <str>} on failure, where <str> is the error message.
     """
-    if session.get('role') == 'readonly':
-        abort(403)
     try:
         # Export the file as written, not the env-overridden view (see
         # settings_load_ui): an exported file may be imported straight back.
@@ -864,6 +830,7 @@ def settings_export():
 
 @app.route('/settings/import/', methods=['POST'])
 @login_required
+@admin_required
 def settings_import():
     """
     Import a new application configuration from uploaded YAML content.
@@ -874,14 +841,19 @@ def settings_import():
         dict: JSON-serializable mapping. On success: `{'success': True, 'message': 'Configuration imported successfully'}`.
               On error: `{'success': False, 'error': '<error message>'}`.
     """
-    if session.get('role') == 'readonly':
-        abort(403)
     try:
         # Get uploaded YAML content
         yaml_content = request.form.get('yaml_content', '')
 
         # _backup_and_write_config validates syntax and shape before writing.
-        _backup_and_write_config(yaml_content)
+        # Its ConfigValidationError describes the uploaded file, so report it instead of
+        # the generic redacted error — otherwise the user can't tell why the
+        # import was refused.
+        try:
+            _backup_and_write_config(yaml_content)
+        except mdb.ConfigValidationError as ve:
+            logging.error(f"settings_import validation failed: {ve}")
+            return jsonify({'success': False, 'error': str(ve)}), 400
 
         return jsonify({'success': True, 'message': 'Configuration imported successfully'})
     except Exception as e:
@@ -931,6 +903,7 @@ def get_config_diff(server):
 
 @app.route('/<server>/dump/', methods=['GET'])
 @login_required
+@admin_required
 def dump_database(server):
     """
     Download a data-only mysqldump of the server's `main` database
@@ -946,8 +919,6 @@ def dump_database(server):
         `proxysql_<server>_<yyyymmdd-hhmmss>.sql`, or a redirect to the
         main page with a flashed error if the dump fails.
     """
-    if session.get('role') == 'readonly':
-        abort(403)
     if server not in mdb.get_servers():
         abort(404)
     try:
@@ -966,6 +937,7 @@ def dump_database(server):
 
 @app.route('/api/update_config_skip_variables', methods=['POST'])
 @login_required
+@admin_required
 def update_config_skip_variables():
     """
     Update the list of variables to skip when computing configuration differences.
@@ -978,23 +950,29 @@ def update_config_skip_variables():
         dict: JSON response with `{'success': True}` on success, or
               `{'success': False, 'error': <message>}` on failure describing the error.
     """
-    if session.get('role') == 'readonly':
-        abort(403)
     try:
         data = request.get_json(silent=True)
         if not data:
             return jsonify({'success': False, 'error': 'Invalid request'}), 400
         skip_variables = data.get('skip_variables', [])
+        if (not isinstance(skip_variables, list)
+                or not all(isinstance(v, str) for v in skip_variables)):
+            return jsonify({'success': False,
+                            'error': 'skip_variables must be a list of strings'}), 400
 
-        # Load current config
-        config_data = mdb.get_config(config)
+        # Read the file as written: this dict is saved back to disk, so the
+        # env-overridden view would persist PROXYWEB_* servers and secrets.
+        config_data = mdb.get_config(config, apply_env=False)
 
         # Update skip_variables in global section
         if 'global' not in config_data:
             config_data['global'] = {}
         config_data['global']['config_diff_skip_variable'] = skip_variables
 
-        _backup_and_write_config(mdb.dict_to_yaml(config_data))
+        try:
+            _backup_and_write_config(mdb.dict_to_yaml(config_data))
+        except mdb.ConfigValidationError as ve:
+            return jsonify({'success': False, 'error': str(ve)}), 400
 
         logging.info(f"Updated config_diff_skip_variable: {skip_variables}")
         return jsonify({'success': True})
@@ -1041,15 +1019,16 @@ def api_update_row():
         column_names = data['columnNames']
         row_data = data['data']
 
-        if mdb.get_read_only(server) or table.startswith('runtime_') or session.get('role') == 'readonly':
-            return jsonify({'success': False, 'error': 'table is read-only'}), 403
+        rejection = _row_write_rejection(server, table)
+        if rejection:
+            return rejection
 
         _log_api_request('/api/update_row', {
             'Server': server, 'Database': database, 'Table': table,
             'PK Values': pk_values, 'Column Names': column_names, 'Row Data': row_data,
         })
 
-        result = mdb.update_row(g.db, server, database, table, pk_values, column_names, row_data)
+        result = mdb.update_row(g.db, server, database, table, pk_values, row_data)
         logging.debug(f"Update result: {result}")
         return jsonify(result)
     except Exception as e:
@@ -1087,8 +1066,9 @@ def api_delete_row():
         table = data['table']
         pk_values = data['pkValues']
 
-        if mdb.get_read_only(server) or table.startswith('runtime_') or session.get('role') == 'readonly':
-            return jsonify({'success': False, 'error': 'table is read-only'}), 403
+        rejection = _row_write_rejection(server, table)
+        if rejection:
+            return rejection
 
         _log_api_request('/api/delete_row', {
             'Server': server, 'Database': database, 'Table': table,
@@ -1128,8 +1108,9 @@ def api_insert_row():
         column_names = data['columnNames']
         row_data = data['data']
 
-        if mdb.get_read_only(server) or table.startswith('runtime_') or session.get('role') == 'readonly':
-            return jsonify({'success': False, 'error': 'table is read-only'}), 403
+        rejection = _row_write_rejection(server, table)
+        if rejection:
+            return rejection
 
         _log_api_request('/api/insert_row', {
             'Server': server, 'Database': database, 'Table': table,
@@ -1161,9 +1142,11 @@ def api_get_schema():
         if not table_name:
             return jsonify({'success': False, 'error': 'Table name required'})
 
-        # Get server from session
-        server = session.get('server') or mdb.get_default_server()
-        database = session.get('database', 'main')
+        server = _requested_server(request.args)
+        rejection = _unknown_server_response(server)
+        if rejection:
+            return rejection
+        database = request.args.get('database') or session.get('database', 'main')
 
         schema_info = mdb.get_table_schema(g.db, server, database, table_name)
         return jsonify({'success': True, 'schema': schema_info})
@@ -1234,8 +1217,10 @@ def api_execute_proxysql_command():
             logging.warning(f"Rejected disallowed command in execute_proxysql_command: {sql[:200]}")
             return jsonify({'success': False, 'error': 'Only ProxySQL LOAD/SAVE administrative commands are allowed'})
 
-        # Get server from session
-        server = session.get('server') or mdb.get_default_server()
+        server = _requested_server(request.form)
+        rejection = _unknown_server_response(server)
+        if rejection:
+            return rejection
 
         if mdb.get_read_only(server) or session.get('role') == 'readonly':
             return jsonify({'success': False, 'error': 'Server is in read-only mode'})
@@ -1291,8 +1276,9 @@ def api_clear_query_history():
     """
     data = request.get_json(silent=True) or {}
     server = data.get('server', session.get('server'))
-    if server not in mdb.get_servers():
-        return jsonify({'success': False, 'error': 'Invalid server'}), 400
+    rejection = _unknown_server_response(server)
+    if rejection:
+        return rejection
     if mdb.get_read_only(server) or session.get('role') == 'readonly':
         abort(403)
     mdb.clear_query_history(server)

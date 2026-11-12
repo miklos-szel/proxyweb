@@ -223,13 +223,14 @@ class TestCopySqlScopedToConfigDatabases(unittest.TestCase):
     same convention as the other classes in this file.
     """
 
-    # Matches the rendered copySqlEnabled() helper and captures the database
-    # literal Jinja substituted into it for the current page.
+    # The rendered copySqlEnabled() helper, which gates on the page's database.
     GATE_FN = re.compile(
         r"function\s+copySqlEnabled\s*\(\)\s*\{\s*"
-        r"const database = '([^']*)';\s*"
+        r"const database = PAGE_DATABASE;\s*"
         r"return database === 'main' \|\| database === 'disk';"
     )
+    # The page's database, rendered once by Jinja (|tojson → double quotes).
+    PAGE_DB = re.compile(r'const PAGE_DATABASE = "([^"]*)";')
     # enableInlineEditing must bail out before adding the actions column
     # when the table is neither editable nor copy-eligible.
     SKIP_GUARD = "if (!tableIsEditable && !copySqlEnabled()) return;"
@@ -251,13 +252,15 @@ class TestCopySqlScopedToConfigDatabases(unittest.TestCase):
         self.pw.login(USERNAME, PASSWORD)
 
     def _gate_database(self, html, where):
-        """Return the database literal rendered into copySqlEnabled()."""
+        """Return the database the page renders for copySqlEnabled() to gate on."""
         self.assertIn(self.SKIP_GUARD, html,
                       f"{where}: actions-column skip guard missing")
         self.assertIn(self.COPY_TERNARY, html,
                       f"{where}: copy button not conditional on copySqlEnabled()")
-        m = self.GATE_FN.search(html)
-        self.assertIsNotNone(m, f"{where}: copySqlEnabled() gate JS missing")
+        self.assertIsNotNone(self.GATE_FN.search(html),
+                             f"{where}: copySqlEnabled() gate JS missing")
+        m = self.PAGE_DB.search(html)
+        self.assertIsNotNone(m, f"{where}: PAGE_DATABASE not rendered")
         return m.group(1)
 
     def test_config_pages_gate_open(self):

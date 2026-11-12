@@ -561,5 +561,24 @@ class TestStoredValueHtmlEscaping(unittest.TestCase):
         self.assertIn("&lt;img src=x onerror=alert(1)&gt;", resp.text)
 
 
+class TestCancelEditApostrophe(unittest.TestCase):
+    """Cancelling an inline edit must work when a cell contains a quote.
+
+    Bug guarded: editRow interpolated the row's original values unescaped
+    into a single-quoted ``data-original-values='[...]'`` attribute on the
+    Cancel button. A value containing ``'`` (e.g. a comment "it's prod")
+    ended the attribute early, so Cancel threw a JSON parse error and left
+    the row stuck in edit mode. cancelEdit now reads ``row.dataset``.
+    The suite has no JS engine, so this checks the served page source.
+    """
+
+    def test_cancel_button_has_no_inline_original_values(self):
+        s = ProxyWebSession()
+        s.login()
+        html = s.get(f"/{SERVER}/{DATABASE}/mysql_servers/").text
+        self.assertNotIn("data-original-values='${", html)
+        self.assertIn("JSON.parse(row.dataset.originalValues", html)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -165,20 +165,26 @@
             return meta ? meta.content : '';
         }
 
+        // The server/database this page was rendered for. Page-scoped API
+        // calls must send these: session['server'] is the server visited
+        // last in *any* tab, so the backend only falls back to it.
+        const PAGE_SERVER = {{ session.get('server', '') | tojson }};
+        const PAGE_DATABASE = {{ session.get('database', '') | tojson }};
+
     </script>
 
     <script>
         // Schema information for the current table
         let tableSchema = null;
 
-        // Helper function to check if table is editable
+        // Whether rows on this page can be edited, added and deleted.
         function isTableEditable() {
-            const database = '{{ session.get('database', '') }}';
+            const database = PAGE_DATABASE;
             const tableName = '{{ session.get('table', '') }}';
             const isReadOnly = {{ session.get('read_only', false) | tojson }};
 
 
-            // Table can only be edited if:
+            // Rows can only be edited or added if:
             // 1. Database is 'main'
             // 2. Table name does NOT start with 'runtime_'
             // 3. Not read-only
@@ -190,31 +196,20 @@
         // 'disk' and 'main'; runtime_* tables live in 'main'). Stats/monitor
         // rows aren't pasteable config, so they get no copy button.
         function copySqlEnabled() {
-            const database = '{{ session.get('database', '') }}';
+            const database = PAGE_DATABASE;
             return database === 'main' || database === 'disk';
-        }
-
-        // Helper function to check if rows can be added
-        function canAddRows() {
-            const database = '{{ session.get('database', '') }}';
-            const tableName = '{{ session.get('table', '') }}';
-            const isReadOnly = {{ session.get('read_only', false) | tojson }};
-
-
-            // Rows can only be added if:
-            // 1. Database is 'main'
-            // 2. Table name does NOT start with 'runtime_'
-            // 3. Not read-only
-            return database === 'main' &&
-                   !tableName.startsWith('runtime_') &&
-                   !isReadOnly;
         }
 
         // Load table schema on page load
         async function loadTableSchema() {
             const tableName = '{{ session.get('table', '') }}';
             try {
-                const response = await fetch(`/api/get_schema?table=${encodeURIComponent(tableName)}`);
+                const params = new URLSearchParams({
+                    table: tableName,
+                    server: PAGE_SERVER,
+                    database: PAGE_DATABASE,
+                });
+                const response = await fetch(`/api/get_schema?${params}`);
                 const data = await response.json();
                 if (data.success) {
                     tableSchema = data.schema;
@@ -292,8 +287,9 @@
             // so there is nothing to set up (and no schema to fetch).
             if (!tableIsEditable && !copySqlEnabled()) return;
 
-            // First, load the table schema
-            await loadTableSchema();
+            // Only the add-row form uses the schema (column defaults). It is
+            // fetched once per page, not on every DataTables redraw.
+            if (tableIsEditable && !tableSchema) await loadTableSchema();
 
             const table = document.getElementById('proxywebtable');
             if (!table) return;
@@ -319,7 +315,7 @@
             const actualDataRows = Array.from(rows).filter(row => isValidDataRow(row));
 
             // Show the Add Row button for non-empty tables with data (AND meets other criteria)
-            if (actualDataRows.length > 0 && !hasVariableNameColumn && canAddRows()) {
+            if (actualDataRows.length > 0 && !hasVariableNameColumn && isTableEditable()) {
                 const addRowContainer = document.getElementById('add-row-container');
                 if (addRowContainer) {
                     addRowContainer.style.display = 'block';
@@ -332,7 +328,7 @@
                 // 1. Table is empty
                 // 2. Has no variable_name column
                 // 3. Can add rows (not runtime_ table)
-                if (!hasVariableNameColumn && canAddRows()) {
+                if (!hasVariableNameColumn && isTableEditable()) {
                     const addRowContainer = document.getElementById('add-row-container');
                     if (addRowContainer) {
                         addRowContainer.style.display = 'block';
@@ -560,9 +556,8 @@
             row.classList.add('editing');
 
             let cellIndex = 0;
-            let valueIndex = 0;
             // Iterate through header cells to properly align with cells
-            headerCells.forEach((th, index) => {
+            headerCells.forEach((th) => {
                 const cell = cells[cellIndex];
                 if (!cell) return;
 
@@ -613,7 +608,7 @@
                     <button type="button" class="btn btn-sm btn-success" onclick="saveRow(this)">
                         <i class="fas fa-check"></i>
                     </button>
-                    <button type="button" class="btn btn-sm btn-secondary" onclick="cancelEdit(this)" data-original-values='${JSON.stringify(originalValues)}'>
+                    <button type="button" class="btn btn-sm btn-secondary" onclick="cancelEdit(this)">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
@@ -628,30 +623,10 @@
 
         function cancelEdit(button) {
             const row = button.closest('tr');
-            const cells = row.querySelectorAll('td:not(.edit-controls)');
-            const allHeaderCells = row.closest('table').querySelectorAll('thead th');
-            const headerCells = Array.from(allHeaderCells).filter(th => !th.classList.contains('actions-header'));
-            const originalValues = button.dataset.originalValues;
-            const values = JSON.parse(originalValues);
-
-            let cellIndex = 0;
-            let valueIndex = 0;
-            // Iterate through header cells to properly align with cells
-            headerCells.forEach((th, index) => {
-                const cell = cells[cellIndex];
-                if (!cell) return;
-
-                const columnName = th.textContent.trim();
-
-                if (cell.classList.contains('edit-controls') || columnName === 'variable_name') {
-                    cellIndex++;
-                    return;
-                }
-
-                cell.textContent = values[valueIndex];
-                valueIndex++;
-                cellIndex++;
-            });
+            // Values come from row.dataset (set by editRow). They used to be
+            // interpolated unescaped into a single-quoted data-original-values
+            // attribute, so a cell containing ' broke Cancel.
+            revertRowCells(row);
 
             // Remove keyboard event listener
             if (row.keydownHandler) {
@@ -671,8 +646,8 @@
             const allHeaderCells = row.closest('table').querySelectorAll('thead th');
             const headerCells = Array.from(allHeaderCells).filter(th => !th.classList.contains('actions-header'));
             const tableName = '{{ session.get('table', '') }}';
-            const database = '{{ session.get('database', '') }}';
-            const server = '{{ session.get('server', '') }}';
+            const database = PAGE_DATABASE;
+            const server = PAGE_SERVER;
 
             const updatedData = {};
             const columnNames = [];
@@ -836,8 +811,8 @@
             const row = button.closest('tr');
             const table = row.closest('table');
             const tableName = '{{ session.get('table', '') }}';
-            const database = '{{ session.get('database', '') }}';
-            const server = '{{ session.get('server', '') }}';
+            const database = PAGE_DATABASE;
+            const server = PAGE_SERVER;
             const storedColNames = JSON.parse(row.dataset.columnNames || '[]');
             const storedRowData  = JSON.parse(row.dataset.rowData   || '[]');
             const pkValues = {};
@@ -981,8 +956,8 @@
             const allHeaderCells = row.closest('table').querySelectorAll('thead th');
             const headerCells = Array.from(allHeaderCells).filter(th => !th.classList.contains('actions-header'));
             const tableName = '{{ session.get('table', '') }}';
-            const database = '{{ session.get('database', '') }}';
-            const server = '{{ session.get('server', '') }}';
+            const database = PAGE_DATABASE;
+            const server = PAGE_SERVER;
 
             const rowData = {};
             const columnNames = [];
@@ -1304,7 +1279,10 @@
                         'Content-Type': 'application/x-www-form-urlencoded',
                         'X-CSRF-Token': getCsrfToken(),
                     },
+                    // The page's own server: the session's last-visited
+                    // server can belong to another open tab.
                     body: 'sql=' + encodeURIComponent(sql)
+                        + '&server=' + encodeURIComponent(PAGE_SERVER)
                 })
                 .then(response => {
                     // Check if response is ok

@@ -8,6 +8,40 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
 
 ## [Unreleased]
 
+## [2.5.0] — 2026-11-12
+
+### Security
+- Credentials no longer reach the debug log: the startup dump of the whole
+  config (admin/readonly passwords, DSN passwords, `SECRET_KEY`, Okta client
+  secret) is gone, and the per-connection DSN log is redacted.
+- Saving the config-diff "skip variables" list read the env-overridden
+  config, so env-only servers and `PROXYWEB_*` secrets were written into
+  `config.yml`. It now reads the file as written and validates the payload.
+- The CSRF token is compared in constant time.
+
+### Fixed
+- LOAD/SAVE commands and the inline-edit schema lookup now act on the page's
+  own server. They used the server last visited in any tab, so with two tabs
+  open a LOAD/SAVE could run against the wrong ProxySQL.
+- Cancelling an inline row edit failed (and left the row stuck in edit mode)
+  when a cell contained an apostrophe, e.g. a comment `it's prod`.
+- Concurrent SQL submissions could lose query-history entries or 500 on a
+  shared temp file. History writes are now locked, use unique temp files,
+  and keep the newest 1000 entries.
+- A SELECT with an error in the SQL editor shows the database's message
+  inline instead of the generic error page.
+- Saving invalid YAML in the raw settings editor keeps your edits and shows
+  the validation error instead of a 500 page that discarded them.
+- Import reports why a config was rejected (e.g. a missing required section)
+  instead of "Internal error".
+- One failing adhoc report no longer breaks the whole adhoc page; it shows its
+  own error and the other reports still render.
+- Row APIs reject an unknown server with a clear 400.
+- Writes no longer open an unused admin connection before shelling out to the
+  `mysql` client.
+- An empty `servers:` key or a non-numeric `PROXYWEB_SERVER_<NAME>_PORT` no
+  longer surfaces as "Error opening or parsing the file".
+
 ## [2.4.0] — 2026-09-23
 
 ### Added

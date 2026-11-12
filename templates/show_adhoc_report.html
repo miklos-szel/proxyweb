@@ -177,6 +177,12 @@
             </div>
         </div>
 
+        {% if result.get('error') %}
+        <div class="alert alert-danger m-3 adhoc-report-error" role="alert">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            <strong>This report failed:</strong> {{ result['error'] }}
+        </div>
+        {% else %}
         <div class="report-stats">
             <div class="stat-item">
                 <i class="fas fa-columns"></i>
@@ -214,6 +220,7 @@
                 </table>
             </div>
         </div>
+        {% endif %}
     </div>
 {% endfor %}
 {% endblock %}

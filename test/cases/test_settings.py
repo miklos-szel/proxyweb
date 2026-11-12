@@ -58,6 +58,65 @@ class TestSettingsSave(unittest.TestCase):
                             "YAML missing auth section was accepted without error")
 
 
+class TestRawSettingsInvalidYamlKeepsEdits(unittest.TestCase):
+    """A rejected raw-YAML save must re-show the editor with the user's text.
+
+    Bug guarded: /settings/save/ let the validation ValueError reach the
+    global error handler, so a typo produced a generic 500 page
+    ("ValueError: see server logs") and every edit in the textarea was lost.
+    """
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        self.s.get("/settings/edit/")
+
+    def test_invalid_yaml_rerenders_editor_with_submitted_text(self):
+        marker = "keep_this_marker_42"
+        bad = f"global:\n  default_server: {marker}\n  oops: [unclosed\n"
+        resp = self.s.session.post(
+            f"{BASE_URL}/settings/save/",
+            data={"settings": bad, "_csrf_token": self.s.csrf_token}, timeout=10)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('id="settings-save-error"', resp.text)
+        self.assertIn("Invalid YAML syntax", resp.text)
+        self.assertIn(marker, resp.text, "submitted YAML was not kept in the editor")
+
+    def test_missing_section_names_the_section(self):
+        bad = "global:\n  default_server: x\n"
+        resp = self.s.session.post(
+            f"{BASE_URL}/settings/save/",
+            data={"settings": bad, "_csrf_token": self.s.csrf_token}, timeout=10)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("Missing required", resp.text)
+
+
+class TestImportShowsValidationError(unittest.TestCase):
+    """A rejected import must say why.
+
+    Bug guarded: /settings/import/ caught the validation ValueError in its
+    catch-all handler and returned the redacted "Internal error — see server
+    logs", so a user importing a file missing ``auth`` had no idea what was
+    wrong.
+    """
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        self.s.get("/settings/edit/")
+
+    def test_missing_section_is_reported(self):
+        bad = "global:\n  default_server: x\n"
+        resp = self.s.session.post(
+            f"{BASE_URL}/settings/import/",
+            data={"yaml_content": bad},
+            headers={"X-CSRF-Token": self.s.csrf_token}, timeout=10)
+        self.assertEqual(resp.status_code, 400)
+        body = resp.json()
+        self.assertFalse(body.get("success"))
+        self.assertIn("Missing required", body.get("error", ""))
+
+
 class TestHideTables(unittest.TestCase):
     """Verify that the hide_tables config removes tables from the nav and restores them."""
 
@@ -575,6 +634,22 @@ class TestOptionalConfigSections(unittest.TestCase):
         resp = self.s.session.get(f"{BASE_URL}/{SERVER}/adhoc/", timeout=10)
         self.assertEqual(resp.status_code, 200,
                          "adhoc report 500s when an item has no info field")
+
+    def test_adhoc_report_partial_failure_renders_others(self):
+        """Bug guarded: the first failing report raised out of
+        execute_adhoc_report, so one bad query (e.g. a table missing on this
+        ProxySQL version) turned the whole adhoc page into a 500."""
+        cfg = yaml.safe_load(self._original_yaml)
+        cfg.setdefault("misc", {})["adhoc_report"] = [
+            {"title": "Broken report", "sql": "SELECT * FROM no_such_table_xyz"},
+            {"title": "Working report", "sql": "SELECT 1 AS working_marker"},
+        ]
+        self._save_config(cfg)
+
+        resp = self.s.session.get(f"{BASE_URL}/{SERVER}/adhoc/", timeout=10)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("adhoc-report-error", resp.text)
+        self.assertIn("working_marker", resp.text)
 
     def test_table_view_renders_without_info_field(self):
         """show_table_info.html serialises every misc item's sql/info with

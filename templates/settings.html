@@ -336,6 +336,13 @@
             </a>
         </div>
     {% else %}
+        {% if save_error %}
+        <div class="alert alert-danger" role="alert" id="settings-save-error">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            <strong>Configuration not saved:</strong> {{ save_error }}
+            <div class="small mt-1">Your edits are kept in the YAML editor below — fix them and save again.</div>
+        </div>
+        {% endif %}
         {% if env_servers %}
         <div class="alert alert-info py-2 small" role="note" id="env-servers-note">
             <i class="fas fa-info-circle me-1"></i>
@@ -648,7 +655,7 @@
 (function() {
     var btn = document.getElementById('reset-raw-yaml-btn');
     if (btn) {
-        var original = {{ config_file_content | tojson }};
+        var original = {{ config_file_original | tojson }};
         btn.addEventListener('click', function() {
             document.getElementById('settings-raw').value = original;
         });
@@ -656,4 +663,12 @@
 })();
 </script>
 <script src="/static/js/settings.js"></script>
+{% if save_error %}
+<script>
+// A rejected raw-YAML save re-renders with the submitted text: open the raw
+// editor so the user lands on their edits rather than the structured UI.
+// reload=false: reloading the textarea from the saved config would discard the edits.
+document.addEventListener('DOMContentLoaded', function() { switchMode('raw', false); });
+</script>
+{% endif %}
 {% endblock %}

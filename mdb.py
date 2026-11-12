@@ -20,7 +20,10 @@ __license__ = "GPLv3"
 
 import mysql.connector
 import copy
+import errno
+import fcntl
 import logging
+import tempfile
 import os
 import threading
 import yaml
@@ -39,6 +42,68 @@ HISTORY_DIR = os.path.join(os.path.dirname(__file__), 'data', 'history')
 _autocommit_warned = set()
 
 
+def atomic_write(path, content):
+    """
+    Write the given content to a file at `path` atomically.
+    
+    This creates a temporary file in the same directory as `path`, writes `content` to it, flushes and fsyncs the data, then atomically replaces the target file with the temp file. If an error occurs during write or replace, the temporary file is removed (best-effort) and the original exception is re-raised.
+    
+    Parameters:
+        path (str): Filesystem path to write to. The final file at this path will be created or replaced.
+        content (str): Data to write to the file.
+    
+    Used for config.yml (and its .bak) and the query-history files.
+
+    Raises:
+        Exception: Propagates any exception raised while writing, syncing, or replacing the file after attempting to remove the temporary file.
+    """
+    dir_ = os.path.dirname(os.path.abspath(path))
+    fd, tmp_path = tempfile.mkstemp(dir=dir_)
+    try:
+        with os.fdopen(fd, 'w') as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.replace(tmp_path, path)
+        except OSError as exc:
+            # Docker file bind-mount can return EXDEV/EBUSY from rename(). A
+            # non-atomic open(path, 'w') fallback has worse semantics than a
+            # 500 (partial write on crash leaves the config corrupt), so let
+            # the error propagate unless PROXYWEB_ALLOW_NONATOMIC_WRITE=1.
+            if (exc.errno in (errno.EXDEV, errno.EBUSY)
+                    and os.environ.get('PROXYWEB_ALLOW_NONATOMIC_WRITE') == '1'):
+                logging.warning(
+                    "atomic_write: rename errno=%s fallback — writing directly to %s",
+                    exc.errno, path,
+                )
+                with open(path, 'w') as f:
+                    f.write(content)
+                    f.flush()
+                    os.fsync(f.fileno())
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+            else:
+                raise
+        # fsync the directory so the rename is durable across power loss.
+        try:
+            dir_fd = os.open(dir_, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            pass
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 def _valid_history_server(server):
     """
     Determine whether a server name is safe to use as a filesystem path component.
@@ -54,12 +119,41 @@ def _valid_history_server(server):
     return True
 
 
+# Oldest entries are dropped beyond this; every append rewrites the file.
+HISTORY_MAX_ENTRIES = 1000
+
+
+def _history_path(server):
+    return os.path.join(HISTORY_DIR, f'{server}.json')
+
+
+def _read_history_file(path):
+    """Return the history list stored at ``path`` ([] if missing/unreadable)."""
+    try:
+        with open(path, 'r') as f:
+            history = json.load(f)
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError) as e:
+        logging.warning("Unreadable history file %s, ignoring it: %s", path, e)
+        return []
+    if not isinstance(history, list):
+        logging.warning("History file %s is not a list, ignoring it", path)
+        return []
+    return history
+
+
 def append_query_history(server, sql, user='admin'):
     """
     Append a SQL query entry to the per-server JSON history file.
-    
-    If `server` is invalid (fails validation), the function is a no-op. The function ensures the history directory exists and writes the updated history atomically.
-    
+
+    If `server` is invalid (fails validation), the function is a no-op. The
+    read-modify-write runs under an exclusive ``flock`` on ``<server>.lock`` so
+    concurrent gunicorn threads/workers cannot lose each other's entries, and
+    the file is replaced via atomic_write (a shared ``.tmp`` name used to let
+    two writers clobber each other's temp file). Only the newest
+    HISTORY_MAX_ENTRIES entries are kept.
+
     Parameters:
         server (str): Server name used to select the history file (safe name required).
         sql (str): The SQL statement to record.
@@ -68,40 +162,32 @@ def append_query_history(server, sql, user='admin'):
     if not _valid_history_server(server):
         return
     os.makedirs(HISTORY_DIR, exist_ok=True)
-    path = os.path.join(HISTORY_DIR, f'{server}.json')
+    path = _history_path(server)
     entry = {"sql": sql, "timestamp": datetime.now().isoformat(), "user": user}
-    history = load_query_history(server)
-    history.append(entry)
-    tmp_path = path + '.tmp'
-    with open(tmp_path, 'w') as f:
-        json.dump(history, f, indent=2)
-    os.replace(tmp_path, path)
+    # Closing the lock file releases the flock.
+    with open(os.path.join(HISTORY_DIR, f'{server}.lock'), 'a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        history = _read_history_file(path)
+        history.append(entry)
+        atomic_write(path, json.dumps(history[-HISTORY_MAX_ENTRIES:], indent=2))
 
 
 def load_query_history(server, limit=None):
     """
     Load stored query history for a server.
-    
-    Returns the server's history entries in chronological order (oldest first, most recent last). If `limit` is provided, returns only the last `limit` entries. Returns an empty list when the server name is invalid or no history exists.
-    
+
+    Returns the server's history entries in chronological order (oldest first, most recent last). If `limit` is provided, returns only the last `limit` entries. Returns an empty list when the server name is invalid, no history exists, or the file is unreadable or not a JSON list.
+
     Parameters:
         server (str): Server identifier (validated for safe file-path use).
         limit (int | None): If set, return only the most recent `limit` entries.
-    
+
     Returns:
         list: A list of history entry dictionaries (each typically contains keys such as `sql`, `ts`/`timestamp`, and `user`).
     """
     if not _valid_history_server(server):
         return []
-    path = os.path.join(HISTORY_DIR, f'{server}.json')
-    if not os.path.exists(path):
-        return []
-    try:
-        with open(path, 'r') as f:
-            history = json.load(f)
-    except (json.JSONDecodeError, ValueError):
-        logging.warning(f"Corrupted history file for server '{server}', resetting")
-        return []
+    history = _read_history_file(_history_path(server))
     if limit:
         return history[-limit:]
     return history
@@ -123,6 +209,23 @@ def clear_query_history(server):
         os.remove(path)
 
 
+# Dict keys matching these substrings (case-insensitive) get their values
+# redacted before logging — DSNs and row payloads carry credentials
+# (dsn.passwd, mysql_users.password, auth.okta.client_secret, SECRET_KEY).
+SENSITIVE_KEYS = ('password', 'passwd', 'token', 'secret', 'auth')
+
+
+def redact_sensitive(value):
+    """Recursively redact dict values whose key looks credential-like."""
+    if isinstance(value, dict):
+        return {k: ('<REDACTED>' if any(s in str(k).lower() for s in SENSITIVE_KEYS)
+                    else redact_sensitive(v))
+                for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [redact_sensitive(v) for v in value]
+    return value
+
+
 def _quote_ident(name):
     """
     Backtick-quote a SQL identifier, doubling any embedded backticks.
@@ -137,21 +240,18 @@ def _quote_ident(name):
 
 
 def _safe_close_conn(db, server):
-    """Close a server connection if one was stored, swallowing any error.
+    """Close the cursor and connection stored for ``server``, swallowing errors.
 
-    Error paths must not assume ``db_connect`` got far enough to store a
-    ``conn`` — reaching into ``db['cnf']['servers'][server]['conn']`` blindly
-    can raise KeyError/TypeError and mask the original exception.
+    Error paths must not assume ``db_connect`` got far enough to store them —
+    reaching into ``db['cnf']['servers'][server]`` blindly can raise
+    KeyError/TypeError and mask the original exception.
     """
     try:
-        conn = db.get('cnf', {}).get('servers', {}).get(server, {}).get('conn')
+        info = db.get('cnf', {}).get('servers', {}).get(server)
     except AttributeError:
         return
-    if conn is not None:
-        try:
-            conn.close()
-        except Exception as e:
-            logging.debug(f"_safe_close_conn: ignoring close error for {server}: {e}")
+    if isinstance(info, dict):
+        _close_handles(info)
 
 
 def _close_handles(server_info):
@@ -330,18 +430,31 @@ def _apply_env_overrides(cfg, verbose=True):
         'PORT': 'port',
         'DATABASE': 'db',
     }
-    for server_name, server_cfg in cfg.get('servers', {}).items():
+    # `servers:` with nothing under it parses as None, not {}.
+    for server_name, server_cfg in (cfg.get('servers') or {}).items():
+        if not isinstance(server_cfg, dict):
+            continue
         prefix = f"PROXYWEB_SERVER_{server_name.upper()}_"
         overrides = {}
         for env_suffix, dsn_key in _DSN_FIELD_MAP.items():
             value = os.environ.get(prefix + env_suffix)
-            if value is not None:
-                overrides[dsn_key] = int(value) if dsn_key == 'port' else value
+            if value is None:
+                continue
+            if dsn_key == 'port':
+                try:
+                    value = int(value)
+                except ValueError:
+                    # Surfaced by get_config as "Error opening or parsing the
+                    # file", which sent people hunting in config.yml.
+                    logging.error("Ignoring %s%s=%r: not a port number",
+                                  prefix, env_suffix, value)
+                    continue
+            overrides[dsn_key] = value
 
         if overrides:
             log("Config override: server %s DSN fields %s from env",
                          server_name, list(overrides.keys()))
-            for dsn in server_cfg.get('dsn', []):
+            for dsn in server_cfg.get('dsn') or []:
                 dsn.update(overrides)
 
     return cfg
@@ -455,6 +568,22 @@ def format_yaml_value(value):
     return _yaml_double_quote(str(value))
 
 
+class ConfigValidationError(ValueError):
+    """A submitted config is invalid. The message describes the user's YAML,
+    so unlike other ValueErrors here (which wrap connector errors) it is safe
+    to show to the user."""
+
+
+def validate_config(yaml_content):
+    """Validate YAML syntax and the required config shape.
+
+    Raises:
+        ConfigValidationError: describing the first problem found.
+    """
+    validate_yaml(yaml_content)
+    validate_config_shape(yaml.safe_load(yaml_content))
+
+
 def validate_yaml(yaml_content):
     """
     Validate YAML syntax for the provided content.
@@ -472,7 +601,7 @@ def validate_yaml(yaml_content):
         yaml.safe_load(yaml_content)
         return True
     except Exception as e:
-        raise ValueError(f"Invalid YAML syntax: {str(e)}")
+        raise ConfigValidationError(f"Invalid YAML syntax: {str(e)}")
 
 
 def validate_config_shape(cfg):
@@ -483,10 +612,10 @@ def validate_config_shape(cfg):
         cfg (dict): Configuration mapping parsed from YAML to validate.
     
     Raises:
-        ValueError: If `cfg` is not a mapping.
-        ValueError: If a required top-level section is missing.
-        ValueError: If a required top-level section exists but is not a mapping.
-        ValueError: If a required key is missing from a section (format: 'section.key').
+        ConfigValidationError: If `cfg` is not a mapping.
+        ConfigValidationError: If a required top-level section is missing.
+        ConfigValidationError: If a required top-level section exists but is not a mapping.
+        ConfigValidationError: If a required key is missing from a section (format: 'section.key').
     
     Notes:
         Required sections and keys enforced:
@@ -497,7 +626,7 @@ def validate_config_shape(cfg):
           - misc: (must be a mapping)
     """
     if not isinstance(cfg, dict):
-        raise ValueError("Config must be a YAML mapping")
+        raise ConfigValidationError("Config must be a YAML mapping")
     required = {
         'auth': ['admin_user', 'admin_password'],
         'global': ['default_server'],
@@ -507,17 +636,17 @@ def validate_config_shape(cfg):
     }
     for section, keys in required.items():
         if section not in cfg:
-            raise ValueError(f"Missing required config section: '{section}'")
+            raise ConfigValidationError(f"Missing required config section: '{section}'")
         if not isinstance(cfg[section], dict):
-            raise ValueError(f"Config section '{section}' must be a mapping")
+            raise ConfigValidationError(f"Config section '{section}' must be a mapping")
         for key in keys:
             if key not in cfg[section]:
-                raise ValueError(f"Missing required key: '{section}.{key}'")
+                raise ConfigValidationError(f"Missing required key: '{section}.{key}'")
     # auth.okta is optional, but when present it must be a mapping. Its keys
     # (client_id/client_secret/...) are never required here because they may
     # be supplied via PROXYWEB_OKTA_* env overrides instead of the file.
     if 'okta' in cfg['auth'] and not isinstance(cfg['auth']['okta'], dict):
-        raise ValueError("Config section 'auth.okta' must be a mapping")
+        raise ConfigValidationError("Config section 'auth.okta' must be a mapping")
 
 
 OKTA_DEFAULT_SCOPES = "openid profile email groups"
@@ -788,7 +917,7 @@ def db_connect(db, server, dictionary=True):
         db['cnf'] = cfg
 
         config = db['cnf']['servers'][server]['dsn'][0]
-        logging.debug(db['cnf']['servers'][server]['dsn'][0])
+        logging.debug(redact_sensitive(config))
         conn = mysql.connector.MySQLConnection()
         try:
             conn.connect(**config, raise_on_warnings=True, get_warnings=True, connection_timeout=3)
@@ -847,6 +976,16 @@ def should_hide_table(table_name, hide_patterns):
     return False
 
 
+def _hide_tables_for(cfg, server):
+    """The table-hiding patterns for ``server``: its own ``hide_tables`` when
+    set, else ``global.hide_tables``. Both keys are optional (the settings UI
+    only writes non-empty lists), and an explicit null means none."""
+    server_cfg = (cfg.get('servers') or {}).get(server) or {}
+    if 'hide_tables' in server_cfg:
+        return server_cfg['hide_tables'] or []
+    return (cfg.get('global') or {}).get('hide_tables') or []
+
+
 def get_all_dbs_and_tables(db, server):
     """
     Collects visible databases and their tables for a given server, applying global or server-specific hide patterns.
@@ -866,15 +1005,7 @@ def get_all_dbs_and_tables(db, server):
 
         db_connect(db, server=server)
         db['cnf']['servers'][server]['cur'].execute(sql_get_databases)
-        table_exception_list = []
-
-        if 'hide_tables' in db['cnf']['servers'][server]:
-            table_exception_list = db['cnf']['servers'][server]['hide_tables']
-        else:
-            # Fall back to the global list. Both the section and the key are
-            # optional: _form_global_section only writes hide_tables when it is
-            # non-empty, so a config saved with an empty list has neither.
-            table_exception_list = db['cnf'].get('global', {}).get('hide_tables') or []
+        table_exception_list = _hide_tables_for(db['cnf'], server)
 
         for i in db['cnf']['servers'][server]['cur'].fetchall():
 
@@ -1167,13 +1298,7 @@ def get_config_diff(server=None):
         config = get_config()
         if server is None:
             server = get_default_server()
-        # Use per-server hide_tables if defined, otherwise fall back to global
-        # (matches the logic in get_all_dbs_and_tables)
-        server_config = config.get('servers', {}).get(server, {})
-        if 'hide_tables' in server_config:
-            hide_tables = server_config['hide_tables']
-        else:
-            hide_tables = config.get('global', {}).get('hide_tables', [])
+        hide_tables = _hide_tables_for(config, server)
         skip_variables = config.get('global', {}).get('config_diff_skip_variable', [])
 
         diff_result = {
@@ -1208,9 +1333,9 @@ def get_config_diff(server=None):
 
             # Define queries for each layer using correct naming convention
             queries = {
-                'disk': f"SELECT * FROM disk.{table_name}",
-                'memory': f"SELECT * FROM main.{table_name}",
-                'runtime': f"SELECT * FROM main.runtime_{table_name}"
+                'disk': f"SELECT * FROM disk.{_quote_ident(table_name)}",
+                'memory': f"SELECT * FROM main.{_quote_ident(table_name)}",
+                'runtime': f"SELECT * FROM main.{_quote_ident('runtime_' + table_name)}"
             }
 
             failed_layers = []
@@ -1317,7 +1442,6 @@ def get_table_metadata(db, server, database, table, server_side_threshold=1000):
                     'rows': rows,
                     'column_names': column_names,
                     'row_count': row_count,
-                    'misc': get_config()['misc'],
                     'server_side': False,
                 }
                 process_table_content(table, content)
@@ -1331,15 +1455,12 @@ def get_table_metadata(db, server, database, table, server_side_threshold=1000):
                     'rows': [],
                     'column_names': column_names,
                     'row_count': row_count,
-                    'misc': get_config()['misc'],
                     'server_side': True,
                 }
         finally:
             cur.close()
     except (mysql.connector.Error, mysql.connector.Warning) as e:
-        conn = db['cnf']['servers'][server].get('conn')
-        if conn:
-            conn.close()
+        _safe_close_conn(db, server)
         raise ValueError(e)
 
 
@@ -1424,9 +1545,7 @@ def get_table_content_paginated(db, server, database, table,
         finally:
             cur.close()
     except (mysql.connector.Error, mysql.connector.Warning) as e:
-        conn = db['cnf']['servers'][server].get('conn')
-        if conn:
-            conn.close()
+        _safe_close_conn(db, server)
         raise ValueError(e)
 
 
@@ -1504,41 +1623,43 @@ def execute_adhoc_report(db, server):
         ValueError: If a MySQL error or warning occurs while executing reports.
     """
     adhoc_results = []
-    result = {}
-    try:
-        db_connect(db, server=server, dictionary=False)
+    db_connect(db, server=server, dictionary=False)  # raises ValueError
 
-        config = get_config()
-        if 'adhoc_report' in config['misc']:
-            for item in config['misc']['adhoc_report']:
-                logging.debug("query: {}".format(item))
-                item_sql = item.get('sql')
-                if not item_sql:
-                    logging.warning("Skipping adhoc report item with no SQL: %s", item)
-                    continue
-                db['cnf']['servers'][server]['cur'].execute(item_sql)
+    config = get_config()
+    for item in config['misc'].get('adhoc_report') or []:
+        logging.debug("query: {}".format(item))
+        item_sql = item.get('sql')
+        if not item_sql:
+            logging.warning("Skipping adhoc report item with no SQL: %s", item)
+            continue
+        result = {
+            'title': item.get('title', ''),
+            'sql': item_sql,
+            'info': item.get('info', ''),
+            'rows': [],
+            'column_names': [],
+        }
+        # One broken report (e.g. a table missing on this ProxySQL version)
+        # used to raise out of the loop and 500 the whole page; it now carries
+        # its own error and the other reports still render.
+        try:
+            cur = db['cnf']['servers'][server]['cur']
+            cur.execute(item_sql)
+            result['rows'] = cur.fetchall()
+            result['column_names'] = [i[0] for i in cur.description or []]
+        except (mysql.connector.Error, mysql.connector.Warning) as e:
+            logging.warning("Adhoc report %r failed on %s: %s", result['title'], server, e)
+            result['error'] = str(e)
+        adhoc_results.append(result)
 
-                result['rows'] = db['cnf']['servers'][server]['cur'].fetchall()
-                result['title'] = item.get('title', '')
-                result['sql'] = item_sql
-                result['info'] = item.get('info', '')
-                result['column_names'] = [i[0] for i in db['cnf']['servers'][server]['cur'].description]
-                adhoc_results.append(result.copy())
-
-        return adhoc_results
-    except (mysql.connector.Error, mysql.connector.Warning) as e:
-        _safe_close_conn(db, server)
-        raise ValueError(e)
+    return adhoc_results
 
 
 def get_servers():
-    proxysql_servers = []
+    """Names of the configured servers, in config order."""
     try:
-        servers_dict = get_config()
-        for server in servers_dict['servers']:
-            proxysql_servers.append(server)
-        return proxysql_servers
-    except Exception as e:
+        return list(get_config()['servers'] or {})
+    except (KeyError, TypeError, ValueError):
         raise ValueError("Cannot get the serverlist from the config file")
 
 
@@ -1581,66 +1702,58 @@ def get_read_only(server):
 
 
 
+def _run_mysql_cli(server, binary, args, input_sql=None, timeout=30):
+    """Run the ``mysql``/``mysqldump`` client against ``server``'s first DSN.
+
+    The password goes in MYSQL_PWD, which keeps it off argv (and out of
+    ps/proc). Returns the CompletedProcess; raises subprocess.TimeoutExpired,
+    and KeyError/IndexError/TypeError when the server has no usable DSN.
+    """
+    dsn = get_config()['servers'][server]['dsn'][0]
+    cmd = [binary, '-h', str(dsn['host']), '-P', str(dsn['port']), '-u', str(dsn['user'])] + args
+    env = os.environ.copy()
+    env['MYSQL_PWD'] = str(dsn['passwd'])
+    return subprocess.run(
+        cmd,
+        input=input_sql.encode('utf-8') if input_sql is not None else None,
+        capture_output=True,
+        env=env,
+        timeout=timeout,
+        check=False,
+    )
+
+
 def execute_change(db, server, sql):
     """
-    Execute a write operation (INSERT/UPDATE/DELETE) against the specified server and return any error output.
-    
+    Execute a write (INSERT/UPDATE/DELETE, LOAD/SAVE, …) against ``server``.
+
+    We shell out to the mysql CLI because mysql.connector returns wrong
+    results for some ProxySQL admin writes (LOAD/SAVE and runtime_* tables).
+
     Parameters:
-        db: Mutable container used to establish or hold a database connection (passed-through to connection helper).
+        db: Unused — kept so every mdb query helper shares one call shape.
         server (str): Name of the server from configuration to target.
-        sql (str): SQL statement to execute.
-    
+        sql (str): SQL statement(s) to execute.
+
     Returns:
-        error_msg (str): Error output from the client if the command failed, or an empty string if execution succeeded.
+        str: The client's error output, or an empty string on success.
     """
+    logging.debug("Executing change on %s: %s", server, sql)
     try:
-        # We shell out to the mysql CLI because mysql.connector returns wrong
-        # results for some ProxySQL admin writes (LOAD/SAVE and runtime_* tables).
-        db_connect(db, server=server, dictionary=False)
-        logging.debug("=" * 80)
-        logging.debug("EXECUTING SQL (UPDATE/INSERT/DELETE):")
-        logging.debug("=" * 80)
-        logging.debug(f"Server: {server}")
-        logging.debug(f"SQL: {sql}")
-        logging.debug("=" * 80)
-        dsn = get_config()['servers'][server]['dsn'][0]
+        proc = _run_mysql_cli(server, 'mysql', ['main'], input_sql=sql)
+    except subprocess.TimeoutExpired:
+        logging.error("mysql CLI timed out after 30s for server %s", server)
+        return "ERROR: mysql command timed out"
+    except (KeyError, IndexError, TypeError) as e:
+        logging.error("No usable DSN for server %s: %r", server, e)
+        return f"ERROR: no DSN configured for server {server}"
 
-        cmd = [
-            'mysql',
-            '-h', str(dsn['host']),
-            '-P', str(dsn['port']),
-            '-u', str(dsn['user']),
-            'main',
-        ]
-        # MYSQL_PWD keeps the password off argv (and out of ps/proc).
-        env = os.environ.copy()
-        env['MYSQL_PWD'] = str(dsn['passwd'])
-
-        try:
-            proc = subprocess.run(
-                cmd,
-                input=sql.encode('utf-8'),
-                capture_output=True,
-                env=env,
-                timeout=30,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            logging.error("mysql CLI timed out after 30s for server %s", server)
-            return "ERROR: mysql command timed out"
-
-        error_msg = proc.stderr.decode('utf-8', errors='replace')
-        if proc.returncode != 0 and not error_msg:
-            error_msg = f"mysql CLI exited with status {proc.returncode}"
-        if error_msg:
-            logging.error(f"SQL execution error: {error_msg}")
-        else:
-            logging.debug("SQL executed successfully")
-
-        return error_msg
-    except (mysql.connector.Error, mysql.connector.Warning) as e:
-        logging.error(f"MySQL Connector error: {str(e)}")
-        return str(e)
+    error_msg = proc.stderr.decode('utf-8', errors='replace')
+    if proc.returncode != 0 and not error_msg:
+        error_msg = f"mysql CLI exited with status {proc.returncode}"
+    if error_msg:
+        logging.error(f"SQL execution error: {error_msg}")
+    return error_msg
 
 
 def dump_database(db, server):
@@ -1676,36 +1789,20 @@ def dump_database(db, server):
     if not tables:
         raise ValueError("no tables found to dump in database 'main'")
 
-    dsn = get_config()['servers'][server]['dsn'][0]
-    cmd = [
-        'mysqldump',
-        '-h', str(dsn['host']),
-        '-P', str(dsn['port']),
-        '-u', str(dsn['user']),
-        '--skip-comments',
-        '--skip-set-charset',
-        '--skip-tz-utc',
-        '--compact',
-        '--no-tablespaces',
-        '--no-create-info',
-        '--no-create-db',
-        '--skip-triggers',
-        # no --network-timeout: MariaDB's mysqldump (used on arm64 images)
-        # doesn't support it, and the subprocess timeout below covers hangs.
-        'main',
-    ] + tables
-    # MYSQL_PWD keeps the password off argv (and out of ps/proc).
-    env = os.environ.copy()
-    env['MYSQL_PWD'] = str(dsn['passwd'])
-
     try:
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            env=env,
-            timeout=60,
-            check=False,
-        )
+        proc = _run_mysql_cli(server, 'mysqldump', [
+            '--skip-comments',
+            '--skip-set-charset',
+            '--skip-tz-utc',
+            '--compact',
+            '--no-tablespaces',
+            '--no-create-info',
+            '--no-create-db',
+            '--skip-triggers',
+            # no --network-timeout: MariaDB's mysqldump (used on arm64 images)
+            # doesn't support it, and the subprocess timeout covers hangs.
+            'main',
+        ] + tables, timeout=60)
     except subprocess.TimeoutExpired:
         logging.error("mysqldump timed out after 60s for server %s", server)
         raise ValueError("mysqldump timed out")
@@ -1717,26 +1814,6 @@ def dump_database(db, server):
         raise ValueError(error_msg)
 
     return proc.stdout.decode('utf-8', errors='replace')
-
-
-def extract_default_value(column_def):
-    """
-    Extract the DEFAULT clause value from a SQL column definition string.
-    
-    Parameters:
-        column_def (str): A single-column definition fragment from a CREATE TABLE statement.
-    
-    Returns:
-        The extracted default token as a string (includes surrounding quotes for quoted defaults) or `None` if no DEFAULT clause is present.
-    """
-    # Pattern to match DEFAULT clause
-    default_pattern = r'DEFAULT\s+(?:NULL|(\'[^\']*\'|\"[^\"]*\"|\w+|\d+))'
-    match = re.search(default_pattern, column_def, re.IGNORECASE)
-
-    if match:
-        return match.group(1)
-
-    return None
 
 
 def get_table_schema(db, server, database, table_name):
@@ -1789,9 +1866,6 @@ def get_table_schema(db, server, database, table_name):
         # Extract column definitions from CREATE TABLE
         columns_info = parse_column_definitions(create_table_sql)
 
-        # Get known constraints from ProxySQL table definitions for additional info
-        proxysql_constraints = get_proxysql_table_constraints(table_name)
-
         # Process each column
         for col_name, col_info in columns_info.items():
             # Build column info from parsed CREATE TABLE
@@ -1805,13 +1879,6 @@ def get_table_schema(db, server, database, table_name):
             if 'check_constraint' in col_info:
                 column_info['check_constraint'] = col_info['check_constraint']
 
-            # Merge with known ProxySQL constraints if available
-            if table_name in proxysql_constraints and col_name in proxysql_constraints[table_name]:
-                # Use CREATE TABLE parsing as primary, but supplement with known constraints
-                for key, value in proxysql_constraints[table_name][col_name].items():
-                    if key not in column_info or column_info[key] is None:
-                        column_info[key] = value
-
             result['columns'][col_name] = column_info
 
         logging.debug(f"Successfully extracted schema for table '{table_name}'")
@@ -1823,14 +1890,7 @@ def get_table_schema(db, server, database, table_name):
         logging.error(f"Unexpected error: {e}")
         raise ValueError(f"Unexpected error while extracting schema: {e}")
     finally:
-        try:
-            db['cnf']['servers'][server]['cur'].close()
-        except Exception:
-            pass
-        try:
-            db['cnf']['servers'][server]['conn'].close()
-        except Exception:
-            pass
+        _safe_close_conn(db, server)
 
     return result
 
@@ -1955,14 +2015,7 @@ def get_primary_key_columns(db, server, database, table_name):
         logging.error(f"Error extracting primary key for {table_name}: {e}")
         return None
     finally:
-        try:
-            db['cnf']['servers'][server]['cur'].close()
-        except Exception:
-            pass
-        try:
-            db['cnf']['servers'][server]['conn'].close()
-        except Exception:
-            pass
+        _safe_close_conn(db, server)
 
 
 def parse_column_definitions(create_table_sql):
@@ -2013,30 +2066,8 @@ def parse_column_definitions(create_table_sql):
 
 
 def split_sql_columns(text):
-    """
-    Split SQL column definitions by comma, handling nested parentheses.
-    """
-    columns = []
-    current = ''
-    paren_depth = 0
-
-    for char in text:
-        if char == '(':
-            paren_depth += 1
-            current += char
-        elif char == ')':
-            paren_depth -= 1
-            current += char
-        elif char == ',' and paren_depth == 0:
-            columns.append(current.strip())
-            current = ''
-        else:
-            current += char
-
-    if current.strip():
-        columns.append(current.strip())
-
-    return columns
+    """Split SQL column definitions on top-level commas, dropping blanks."""
+    return [c.strip() for c in _split_top_level_commas(text) if c.strip()]
 
 
 def parse_column_definition(col_def):
@@ -2119,471 +2150,125 @@ def parse_column_definition(col_def):
         return None
 
 
-def get_proxysql_table_constraints(table_name):
+def _sql_literal(value):
+    """Render a value as a SQL literal: NULL, or a single-quoted string with
+    embedded quotes doubled (ProxySQL's admin is SQLite-based, where ''
+    is the only string escape)."""
+    if value is None:
+        return "NULL"
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _pk_where(db, server, database, table, pk_values, extra_columns=()):
+    """Build the WHERE clause that identifies one row by its primary key.
+
+    Every caller-supplied column (``pk_values`` keys and ``extra_columns``) is
+    validated against the live schema first. Returns ``(where_sql, None)`` or
+    ``(None, error_message)``.
     """
-    Retrieve known column constraints for a ProxySQL runtime table.
-    
-    Parameters:
-        table_name (str): Name of the ProxySQL table to look up.
-    
+    if not pk_values:
+        return None, 'No primary key values provided'
+
+    allowed_columns = set(get_column_names(db, server, database, table))
+    for col in set(pk_values) | set(extra_columns):
+        if col not in allowed_columns:
+            return None, f'Unknown column: {col!r}'
+
+    # None means the lookup failed — falling back to the caller's columns
+    # there would widen the WHERE clause on a transient error, so refuse.
+    pk_cols = get_primary_key_columns(db, server, database, table)
+    if pk_cols is None:
+        return None, 'Could not determine the primary key for this table'
+    if not pk_cols:
+        pk_cols = list(pk_values)  # no PK: use whatever was sent
+    missing = [col for col in pk_cols if col not in pk_values]
+    if missing:
+        # A missing key column used to become `col IS NULL`, which matches
+        # nothing on a NOT NULL key — the call reported success and changed
+        # zero rows. A key column that is really NULL must be sent as null.
+        return None, f'Missing primary key column(s): {", ".join(missing)}'
+
+    conditions = [
+        f"{_quote_ident(col)} IS NULL" if pk_values[col] is None
+        else f"{_quote_ident(col)} = {_sql_literal(pk_values[col])}"
+        for col in pk_cols
+    ]
+    return " AND ".join(conditions), None
+
+
+def _run_row_change(db, server, sql):
+    """Execute a row mutation and wrap the outcome in the row-API result shape."""
+    logging.debug("Row change SQL: %s", sql)
+    error = execute_change(db, server, sql)
+    return {'success': not error, 'error': error or None}
+
+
+def update_row(db, server, database, table, pk_values, data):
+    """
+    Update the row identified by ``pk_values`` (every PK column; None matches
+    IS NULL) with the ``data`` mapping (None sets NULL).
+
     Returns:
-        constraints (dict): A mapping where the key is the requested `table_name` and the value is a dict of column names to their constraint metadata (keys may include `type`, `nullable`, `default`, `check_constraint`, and `is_primary_key`). If the table is unknown, an empty dict is returned.
+        dict: ``{'success': bool, 'error': str | None}``.
     """
-    constraints = {}
-
-    # Define known ProxySQL table constraints
-    # These are based on the actual ProxySQL table structures
-    proxysql_constraints = {
-        'runtime_global_variables': {
-            'variable_name': {
-                'type': 'VARCHAR(128)',
-                'nullable': False,
-                'is_primary_key': True
-            },
-            'variable_value': {
-                'type': 'VARCHAR(2048)',
-                'nullable': True,
-                'default': ''
-            }
-        },
-        'runtime_mysql_servers': {
-            'hostname': {
-                'type': 'VARCHAR(255)',
-                'nullable': False,
-                'default': ''
-            },
-            'port': {
-                'type': 'INT',
-                'nullable': False,
-                'default': 3306
-            },
-            'status': {
-                'type': 'VARCHAR(50)',
-                'nullable': False,
-                'check_constraint': "IN ('ONLINE', 'SHUNNED', 'OFFLINE_HARD')",
-                'default': 'ONLINE'
-            },
-            'weight': {
-                'type': 'INT',
-                'nullable': False,
-                'default': 1
-            },
-            'compression': {
-                'type': 'INT',
-                'nullable': False,
-                'default': 0
-            },
-            'max_connections': {
-                'type': 'INT',
-                'nullable': False,
-                'default': 1000
-            }
-        },
-        'runtime_mysql_users': {
-            'username': {
-                'type': 'VARCHAR(64)',
-                'nullable': False,
-                'is_primary_key': True
-            },
-            'password': {
-                'type': 'VARCHAR(1024)',
-                'nullable': True
-            },
-            'active': {
-                'type': 'INT',
-                'nullable': False,
-                'check_constraint': "IN (0, 1)",
-                'default': 1
-            },
-            'use_ssl': {
-                'type': 'INT',
-                'nullable': False,
-                'check_constraint': "IN (0, 1)",
-                'default': 0
-            },
-            'default_hostgroup': {
-                'type': 'INT',
-                'nullable': False,
-                'default': 0
-            },
-            'default_schema': {
-                'type': 'VARCHAR(64)',
-                'nullable': True,
-                'default': ''
-            },
-            'schema_locking': {
-                'type': 'INT',
-                'nullable': False,
-                'check_constraint': "IN (0, 1)",
-                'default': 1
-            },
-            'connect_warnings': {
-                'type': 'INT',
-                'nullable': False,
-                'check_constraint': "IN (0, 1)",
-                'default': 0
-            }
-        },
-        'runtime_mysql_query_rules': {
-            'rule_id': {
-                'type': 'INT',
-                'nullable': False,
-                'is_primary_key': True
-            },
-            'active': {
-                'type': 'INT',
-                'nullable': False,
-                'check_constraint': "IN (0, 1)",
-                'default': 1
-            },
-            'username': {
-                'type': 'VARCHAR(64)',
-                'nullable': True
-            },
-            'schemaname': {
-                'type': 'VARCHAR(64)',
-                'nullable': True
-            },
-            'flagIN': {
-                'type': 'INT',
-                'nullable': False,
-                'default': 0
-            },
-            'match_pattern': {
-                'type': 'TEXT',
-                'nullable': True
-            },
-            'negate_match_pattern': {
-                'type': 'INT',
-                'nullable': False,
-                'check_constraint': "IN (0, 1)",
-                'default': 0
-            },
-            're_modifiers': {
-                'type': 'VARCHAR(255)',
-                'nullable': True,
-                'default': 'COLUMN_ENGINE=innodb'
-            }
-        },
-        'runtime_mysql_replication_hostgroups': {
-            'writer_hostgroup': {
-                'type': 'INT',
-                'nullable': False,
-                'is_primary_key': True
-            },
-            'reader_hostgroup': {
-                'type': 'INT',
-                'nullable': False
-            },
-            'comment': {
-                'type': 'VARCHAR(255)',
-                'nullable': True,
-                'default': ''
-            }
-        },
-        'runtime_mysql_group_replication_hostgroups': {
-            'writer_hostgroup': {
-                'type': 'INT',
-                'nullable': False,
-                'is_primary_key': True
-            },
-            'backup_writer_hostgroup': {
-                'type': 'INT',
-                'nullable': False
-            },
-            'reader_hostgroup': {
-                'type': 'INT',
-                'nullable': False
-            },
-            'offline_hostgroup': {
-                'type': 'INT',
-                'nullable': False
-            },
-            'active': {
-                'type': 'INT',
-                'nullable': False,
-                'check_constraint': "IN (0, 1)",
-                'default': 1
-            },
-            'max_writers': {
-                'type': 'INT',
-                'nullable': False,
-                'default': 1
-            },
-            'writer_is_also_reader': {
-                'type': 'INT',
-                'nullable': False,
-                'check_constraint': "IN (0, 1)",
-                'default': 0
-            },
-            'max_transactions_behind': {
-                'type': 'INT',
-                'nullable': False,
-                'default': 0
-            }
-        }
-    }
-
-    if table_name in proxysql_constraints:
-        return {table_name: proxysql_constraints[table_name]}
-
-    return constraints
-
-
-def update_row(db, server, database, table, pk_values, column_names, data):
-    """
-    Update a single row in the specified table identified by primary key values.
-    
-    Parameters:
-        db (dict): Execution context object where connection/cursor are stored (passed through to helpers).
-        server (str): Server name from configuration to target for the update.
-        database (str): Database/schema name containing the table.
-        table (str): Table name to update.
-        pk_values (dict): Mapping of primary key column names to their identifying values; values of None match IS NULL.
-        column_names (Iterable[str]): Caller-supplied column list. Retained for
-            the API shape only — the whitelist is read from the live schema.
-        data (dict): Mapping of column names to new values; omit keys or set value to None to use NULL/DEFAULT behavior.
-    
-    Returns:
-        dict: Result object with keys:
-            - `success` (bool): `True` if the update command was issued without detected errors, `False` otherwise.
-            - `error` (str|None): Error message when `success` is `False`, otherwise `None`.
-    """
-    result = {'success': True, 'error': None}
     try:
-        if not pk_values:
-            result['success'] = False
-            result['error'] = 'No primary key values provided'
-            return result
-
-        # Validate every column that reaches the SQL — the values being set and
-        # the ones identifying the row — against the live schema. This used to
-        # check them against the caller's own column_names list, i.e. against
-        # itself, which whitelisted nothing.
-        allowed_columns = set(get_column_names(db, server, database, table))
-        for col in set(data) | set(pk_values):
-            if col not in allowed_columns:
-                result['success'] = False
-                result['error'] = f'Unknown column: {col!r}'
-                return result
-
-        # Determine which columns form the primary key. None means the lookup
-        # failed — falling back to the caller's columns there would widen the
-        # WHERE clause on a transient error, so refuse instead.
-        pk_cols = get_primary_key_columns(db, server, database, table)
-        if pk_cols is None:
-            result['success'] = False
-            result['error'] = 'Could not determine the primary key for this table'
-            return result
-        if not pk_cols:
-            pk_cols = list(pk_values.keys())  # no PK: use whatever was sent
-        missing = [col for col in pk_cols if col not in pk_values]
-        if missing:
-            # A missing key column used to become `col IS NULL`, which matches
-            # nothing on a NOT NULL key — the call reported success and changed
-            # zero rows. A key column that is really NULL must be sent as null.
-            result['success'] = False
-            result['error'] = f'Missing primary key column(s): {", ".join(missing)}'
-            return result
-
-        # Build WHERE clause from pk_values
-        where_conditions = []
-        for col in pk_cols:
-            val = pk_values.get(col)
-            if val is None:
-                where_conditions.append(f"{_quote_ident(col)} IS NULL")
-            else:
-                escaped = str(val).replace("'", "''")
-                where_conditions.append(f"{_quote_ident(col)} = '{escaped}'")
-
-        if not where_conditions:
-            result['success'] = False
-            result['error'] = 'Could not build WHERE clause'
-            return result
-
-        where_clause = " WHERE " + " AND ".join(where_conditions)
-
-        # Build SET clause
-        set_clauses = []
-        for column, value in data.items():
-            if value is None:
-                set_clauses.append(f"{_quote_ident(column)} = NULL")
-            else:
-                escaped_value = str(value).replace("'", "''")
-                set_clauses.append(f"{_quote_ident(column)} = '{escaped_value}'")
-
-        if not set_clauses:
-            result['success'] = False
-            result['error'] = 'No columns to update'
-            return result
-
-        sql = "UPDATE {}.{} SET {}{}".format(
-            _quote_ident(database), _quote_ident(table), ', '.join(set_clauses), where_clause
-        )
-
-        logging.debug("Update SQL: {}".format(sql))
-        error = execute_change(db, server, sql)
-
+        where, error = _pk_where(db, server, database, table, pk_values, extra_columns=data)
         if error:
-            result['success'] = False
-            result['error'] = error
-
+            return {'success': False, 'error': error}
+        if not data:
+            return {'success': False, 'error': 'No columns to update'}
+        set_clause = ', '.join(f"{_quote_ident(col)} = {_sql_literal(val)}"
+                               for col, val in data.items())
+        return _run_row_change(db, server, "UPDATE {}.{} SET {} WHERE {}".format(
+            _quote_ident(database), _quote_ident(table), set_clause, where))
     except Exception as e:
-        result['success'] = False
-        result['error'] = str(e)
-
-    return result
+        logging.error(f"Error in update_row: {e}")
+        return {'success': False, 'error': str(e)}
 
 
 def delete_row(db, server, database, table, pk_values):
     """
-    Delete a row identified by primary key values from the specified table.
-    
-    If the table's primary key columns can be discovered, those columns are used; otherwise the keys of `pk_values` are used as a fallback. NULL values in `pk_values` are translated to `IS NULL` in the WHERE clause. On failure the function returns an error message and does not raise.
-    
-    Parameters:
-        pk_values (dict): Mapping of primary key column names to their values; use `None` to match SQL NULL.
-    
+    Delete the row identified by ``pk_values`` (every PK column; None matches
+    IS NULL). Tables without a primary key match on the columns sent.
+
     Returns:
-        dict: A result object with keys:
-            - `success` (bool): `True` if the delete was issued without detected error, `False` otherwise.
-            - `error` (str or None): Error message when `success` is `False`, otherwise `None`.
+        dict: ``{'success': bool, 'error': str | None}``.
     """
-    result = {'success': True, 'error': None}
     try:
-        if not pk_values:
-            result['success'] = False
-            result['error'] = 'No primary key values provided'
-            return result
-
-        # Validate the caller's column names against the live schema; this path
-        # previously did no column validation at all.
-        allowed_columns = set(get_column_names(db, server, database, table))
-        for col in pk_values:
-            if col not in allowed_columns:
-                result['success'] = False
-                result['error'] = f'Unknown column: {col!r}'
-                return result
-
-        # Determine which columns form the primary key. None means the lookup
-        # failed — falling back to the caller's columns there would widen the
-        # WHERE clause on a transient error, so refuse instead.
-        pk_cols = get_primary_key_columns(db, server, database, table)
-        if pk_cols is None:
-            result['success'] = False
-            result['error'] = 'Could not determine the primary key for this table'
-            return result
-        if not pk_cols:
-            pk_cols = list(pk_values.keys())  # no PK: use whatever was sent
-        missing = [col for col in pk_cols if col not in pk_values]
-        if missing:
-            # A missing key column used to become `col IS NULL`, which matches
-            # nothing on a NOT NULL key — the call reported success and changed
-            # zero rows. A key column that is really NULL must be sent as null.
-            result['success'] = False
-            result['error'] = f'Missing primary key column(s): {", ".join(missing)}'
-            return result
-
-        # Build WHERE clause from pk_values
-        where_conditions = []
-        for col in pk_cols:
-            val = pk_values.get(col)
-            if val is None:
-                where_conditions.append(f"{_quote_ident(col)} IS NULL")
-            else:
-                escaped = str(val).replace("'", "''")
-                where_conditions.append(f"{_quote_ident(col)} = '{escaped}'")
-
-        if not where_conditions:
-            result['success'] = False
-            result['error'] = 'Could not build WHERE clause'
-            return result
-
-        where_clause = " AND ".join(where_conditions)
-        sql = f"DELETE FROM {_quote_ident(database)}.{_quote_ident(table)} WHERE {where_clause}"
-
-        logging.debug(f"Delete SQL: {sql}")
-        error = execute_change(db, server, sql)
-
+        where, error = _pk_where(db, server, database, table, pk_values)
         if error:
-            result['success'] = False
-            result['error'] = error
-
+            return {'success': False, 'error': error}
+        return _run_row_change(db, server, "DELETE FROM {}.{} WHERE {}".format(
+            _quote_ident(database), _quote_ident(table), where))
     except Exception as e:
-        result['success'] = False
-        result['error'] = str(e)
         logging.error(f"Error in delete_row: {e}")
-
-    return result
+        return {'success': False, 'error': str(e)}
 
 
 def insert_row(db, server, database, table, column_names, data):
     """
-    Insert a new row into a table, using provided column names and values while validating against the live table schema.
-    
-    Parameters:
-        db: Execution context / connection holder used by helper functions (not a raw connection).
-        server (str): Server name from configuration to run the insert against.
-        database (str): Database/schema name containing the target table.
-        table (str): Target table name.
-        column_names (list[str]): List of column names the caller intends to set; entries named `'variable_name'` are ignored.
-        data (dict): Mapping of column name to value for the insert; missing keys or keys with value `None` are omitted so the column's DEFAULT is used.
-    
+    Insert a row. Columns in ``column_names`` (validated against the live
+    schema; ``variable_name`` is ignored) whose ``data`` value is missing or
+    None are omitted so the column's DEFAULT applies.
+
     Returns:
-        dict: A result mapping with keys:
-            - 'success' (bool): `True` if the INSERT was issued without detected errors, `False` otherwise.
-            - 'error' (str|None): Error message on failure, or `None` on success.
+        dict: ``{'success': bool, 'error': str | None}``.
     """
-    result = {'success': True, 'error': None}
     try:
-        # Fetch live schema to build identifier whitelist
         allowed_columns = set(get_column_names(db, server, database, table))
-
-        # Validate caller-supplied column names against the live schema
-        for col in column_names:
-            if col != 'variable_name' and col not in allowed_columns:
-                result['success'] = False
-                result['error'] = f'Unknown column: {col!r}'
-                return result
-
-        # Exclude variable_name from insert if it exists
         columns = [col for col in column_names if col != 'variable_name']
-        values = []
-        insert_columns = []
+        for col in columns:
+            if col not in allowed_columns:
+                return {'success': False, 'error': f'Unknown column: {col!r}'}
 
-        for column in columns:
-            if column in data and data[column] is not None:
-                value = data[column]
-                insert_columns.append(column)
-                # Handle NULL values
-                if value is None:
-                    values.append("NULL")
-                else:
-                    escaped_value = str(value).replace("'", "''")
-                    values.append("'{}'".format(escaped_value))
-            # else: column not in data OR value is None, skip it (will use DEFAULT)
-
+        insert_columns = [col for col in columns if data.get(col) is not None]
         if not insert_columns:
-            result['success'] = False
-            result['error'] = 'No columns to insert'
-            return result
+            return {'success': False, 'error': 'No columns to insert'}
 
-        sql = "INSERT INTO {}.{} ({}) VALUES ({})".format(
+        return _run_row_change(db, server, "INSERT INTO {}.{} ({}) VALUES ({})".format(
             _quote_ident(database), _quote_ident(table),
             ', '.join(_quote_ident(c) for c in insert_columns),
-            ', '.join(values)
-        )
-
-        logging.debug("Insert SQL: {}".format(sql))
-        error = execute_change(db, server, sql)
-
-        if error:
-            result['success'] = False
-            result['error'] = error
-
+            ', '.join(_sql_literal(data[c]) for c in insert_columns)))
     except Exception as e:
-        result['success'] = False
-        result['error'] = str(e)
-
-    return result
-
+        logging.error(f"Error in insert_row: {e}")
+        return {'success': False, 'error': str(e)}

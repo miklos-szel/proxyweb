@@ -304,8 +304,9 @@ function createMiscSection(miscType) {
 /**
  * Toggle the visible editor between the UI editor and the raw YAML editor.
  * @param {string} mode - If `'ui'`, show the UI editor; any other value shows the raw YAML editor.
+ * @param {boolean} [reload=true] - When showing the raw editor, refill it from the saved config.
  */
-function switchMode(mode) {
+function switchMode(mode, reload = true) {
     const uiEditor = document.getElementById('ui-editor');
     const rawYaml = document.getElementById('raw-yaml');
     const btnUiEditor = document.getElementById('btn-ui-editor');
@@ -321,6 +322,7 @@ function switchMode(mode) {
         rawYaml.style.display = 'block';
         btnRawYaml.classList.add('active');
         btnUiEditor.classList.remove('active');
+        if (!reload) return;
         // Refresh the textarea with the current saved config
         fetch('/settings/export/')
             .then(jsonOrThrow)
