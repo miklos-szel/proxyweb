@@ -70,6 +70,19 @@ def inject_prod_warning():
     return {'prod_warning_enabled': enabled}
 
 
+@app.context_processor
+def inject_admin_quick_queries():
+    """Per-direction LOAD/SAVE menus for the SQL editor's Quick Queries.
+
+    Only the module names are kept in the session (``_prime_session``); the
+    menus themselves are rebuilt per render to keep the cookie small.
+    """
+    def admin_quick_queries():
+        modules = (session.get('admin_modules') or {}).get(session.get('server'))
+        return mdb.admin_quick_queries(modules)
+    return {'admin_quick_queries': admin_quick_queries}
+
+
 def _backup_and_write_config(yaml_content):
     """Validate the new content, back up the current config file to
     <config>.bak, then write the new content — both writes atomic."""
@@ -310,12 +323,16 @@ def _prime_session(server, database=None, table=None, refresh_dblist=False):
     session['server'] = server
     session['servers'] = mdb.get_servers()
     dblist = session.get('dblist') or {}
-    if refresh_dblist or server not in dblist:
+    if (refresh_dblist or server not in dblist
+            or server not in (session.get('admin_modules') or {})):
         # An unreachable server leaves the nav empty rather than failing the
         # page: config diff renders and reports the error from its own request.
         # The failure is not cached, so the next page load retries.
         try:
             dblist.update(mdb.get_all_dbs_and_tables(g.db, server))
+            admin_modules = session.get('admin_modules') or {}
+            admin_modules[server] = mdb.get_admin_modules(g.db, server)
+            session['admin_modules'] = admin_modules
         except ValueError as e:
             logging.warning("Could not list tables for server %s: %s", server, e)
             dblist.pop(server, None)

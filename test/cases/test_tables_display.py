@@ -580,5 +580,49 @@ class TestCancelEditApostrophe(unittest.TestCase):
         self.assertIn("JSON.parse(row.dataset.originalValues", html)
 
 
+class TestQuickQueryLoadSaveMenus(unittest.TestCase):
+    """Quick Queries offers one LOAD/SAVE command per module, per direction.
+
+    Feature/bug guarded:
+    - the editor only had the "everything" LOAD/SAVE entries; it now has
+      Load to Runtime / Save to Disk / Load from Disk / Save from Runtime
+      menus with an "All modules" entry plus one entry per module;
+    - the modules come from the unfiltered admin table list, so a module
+      whose tables ``hide_tables`` hides from the nav (the test config hides
+      ``.*pgsql.*`` and ``.*mysql_firewall.*`` on proxysql_mysql) is still
+      offered;
+    - loading a multi-statement quick query did ``sql.replace(/;/g, ';\\n')``,
+      leaving a leading space on every following line (and splitting ``;``
+      inside string literals); it now goes through ``formatSqlStatements``.
+    The suite has no JS engine, so this checks the served page source.
+    """
+
+    def test_per_module_menus_present(self):
+        s = ProxyWebSession()
+        s.login()
+        html = s.get(f"/{SERVER}/{DATABASE}/mysql_servers/").text
+        for menu in ("Load to Runtime", "Save to Disk",
+                     "Load from Disk", "Save from Runtime"):
+            self.assertIn(menu, html)
+        self.assertIn("All modules", html)
+        for stmt in ("LOAD MYSQL USERS TO RUNTIME", "SAVE MYSQL QUERY RULES TO DISK",
+                     "LOAD SCHEDULER FROM DISK", "SAVE ADMIN VARIABLES FROM RUNTIME"):
+            self.assertIn(stmt, html)
+
+    def test_hidden_tables_do_not_hide_modules(self):
+        s = ProxyWebSession()
+        s.login()
+        html = s.get(f"/{SERVER}/{DATABASE}/mysql_servers/").text
+        self.assertIn("LOAD PGSQL USERS TO RUNTIME", html)
+        self.assertIn("SAVE MYSQL FIREWALL TO DISK", html)
+
+    def test_editor_formats_statements_without_leading_space(self):
+        s = ProxyWebSession()
+        s.login()
+        html = s.get(f"/{SERVER}/{DATABASE}/mysql_servers/").text
+        self.assertIn("textarea.value = formatSqlStatements(sql)", html)
+        self.assertNotIn("sql.replace(/;/g, ';\\n')", html)
+
+
 if __name__ == "__main__":
     unittest.main()

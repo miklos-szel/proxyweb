@@ -986,6 +986,82 @@ def _hide_tables_for(cfg, server):
     return (cfg.get('global') or {}).get('hide_tables') or []
 
 
+# ProxySQL config modules that LOAD/SAVE operate on, each paired with a table
+# whose presence in the admin schema shows the module exists on that server
+# (None = always present). PgSQL and firewall modules only exist on 3.x / newer
+# 2.x builds, so they are offered only when the server actually has them.
+_ADMIN_MODULES = (
+    ('MYSQL USERS', 'mysql_users'),
+    ('MYSQL SERVERS', 'mysql_servers'),
+    ('MYSQL QUERY RULES', 'mysql_query_rules'),
+    ('MYSQL VARIABLES', 'mysql_users'),
+    ('MYSQL FIREWALL', 'mysql_firewall_whitelist_rules'),
+    ('PGSQL USERS', 'pgsql_users'),
+    ('PGSQL SERVERS', 'pgsql_servers'),
+    ('PGSQL QUERY RULES', 'pgsql_query_rules'),
+    ('PGSQL VARIABLES', 'pgsql_users'),
+    ('PGSQL FIREWALL', 'pgsql_firewall_whitelist_rules'),
+    ('ADMIN VARIABLES', None),
+    ('PROXYSQL SERVERS', 'proxysql_servers'),
+    ('SCHEDULER', 'scheduler'),
+    ('RESTAPI', 'restapi_routes'),
+)
+
+# (menu title, statement template, what it does) — one menu per direction.
+_ADMIN_DIRECTIONS = (
+    ('Load to Runtime', 'LOAD {} TO RUNTIME', 'memory → runtime (activate the in-memory config)'),
+    ('Save to Disk', 'SAVE {} TO DISK', 'memory → disk (persist the in-memory config)'),
+    ('Load from Disk', 'LOAD {} FROM DISK', 'disk → memory (discard unsaved in-memory changes)'),
+    ('Save from Runtime', 'SAVE {} FROM RUNTIME', 'runtime → memory (copy the active config back into memory)'),
+)
+
+
+def get_admin_modules(db, server):
+    """Return the LOAD/SAVE module names (``_ADMIN_MODULES``) this server has.
+
+    Reads the unfiltered ``main`` table list, so ``hide_tables`` patterns
+    hiding a table from the nav do not hide its module's LOAD/SAVE commands.
+
+    Raises:
+        ValueError: on a connector error.
+    """
+    try:
+        db_connect(db, server=server)
+        cur = db['cnf']['servers'][server]['cur']
+        cur.execute("SHOW TABLES FROM main")
+        tables = {row['tables'] for row in cur.fetchall()}
+        cur.close()
+    except (mysql.connector.Error, mysql.connector.Warning) as e:
+        raise ValueError(e)
+    return [m for m, t in _ADMIN_MODULES if t is None or t in tables]
+
+
+def admin_quick_queries(modules=None):
+    """Build the built-in LOAD/SAVE Quick Query menus.
+
+    ``modules`` is the server's module list from ``get_admin_modules``; when
+    unknown (None/empty, e.g. server unreachable) the modules a stock ProxySQL
+    2.x has are assumed. Returns a list of
+    ``{'title', 'items': [{'title', 'info', 'sql'}]}`` — one menu per direction,
+    each starting with an "All modules" entry followed by one entry per module.
+    """
+    if not modules:
+        modules = [m for m, _ in _ADMIN_MODULES
+                   if not m.startswith(('PGSQL', 'MYSQL FIREWALL', 'RESTAPI'))]
+    menus = []
+    for title, template, what in _ADMIN_DIRECTIONS:
+        statements = [template.format(m) + ';' for m in modules]
+        items = [{'title': 'All modules',
+                  'info': f'{template.format("<all modules>")}: {what}.',
+                  'sql': '\n'.join(statements)}]
+        items += [{'title': template.format(m),
+                   'info': f'{template.format(m)}: {what}.',
+                   'sql': stmt}
+                  for m, stmt in zip(modules, statements)]
+        menus.append({'title': title, 'items': items})
+    return menus
+
+
 def get_all_dbs_and_tables(db, server):
     """
     Collects visible databases and their tables for a given server, applying global or server-specific hide patterns.

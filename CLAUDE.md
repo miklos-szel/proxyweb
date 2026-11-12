@@ -267,3 +267,4 @@ Rules:
 | `/settings/import/` returned the redacted generic error for validation failures → the user couldn't see why an import was rejected | `TestImportShowsValidationError` |
 | `execute_adhoc_report` raised on the first failing report → one bad query 500'd the whole adhoc page | `TestOptionalConfigSections.test_adhoc_report_partial_failure_renders_others` |
 | row APIs passed an unknown server to `get_read_only()` → opaque "Internal error" instead of 400 | `TestRowApiUnknownServer` |
+| loading a multi-statement quick query did `sql.replace(/;/g, ';\n')` → leading space on every line after the first; per-module LOAD/SAVE menus must list modules from the unfiltered table list, not the `hide_tables`-filtered nav | `TestQuickQueryLoadSaveMenus` |

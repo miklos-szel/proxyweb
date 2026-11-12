@@ -8,6 +8,21 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
 
 ## [Unreleased]
 
+### Added
+- Quick Queries has four new menus — Load to Runtime, Save to Disk, Load
+  from Disk and Save from Runtime — each with an "All modules" entry plus
+  one command per module (MySQL/PgSQL users, servers, query rules,
+  variables, firewall; admin variables, ProxySQL servers, scheduler,
+  REST API). Only the modules the server actually has are listed. The
+  configured `apply_config` "everything" shortcuts are unchanged.
+- The test config ships example `update_config` quick queries.
+
+### Fixed
+- Multi-statement quick queries load into the SQL editor one statement per
+  line, without the leading space on every line after the first; a `;`
+  inside a string literal no longer splits the line.
+- The Quick Queries dropdown was clipped by the SQL editor card.
+
 ## [2.5.0] — 2026-11-12
 
 ### Security

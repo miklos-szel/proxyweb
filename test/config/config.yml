@@ -60,7 +60,16 @@ misc:
       info: Save all config items from memory to disk.
       sql: SAVE MYSQL USERS TO DISK; SAVE MYSQL SERVERS TO DISK; SAVE MYSQL QUERY RULES TO DISK; SAVE MYSQL VARIABLES TO DISK; SAVE ADMIN VARIABLES TO DISK; SAVE PROXYSQL SERVERS TO DISK; SAVE SCHEDULER TO DISK;
 
-  update_config: []
+  update_config:
+    - title: Add a new mysql server
+      info: Add a new server to mysql_servers.
+      sql: "INSERT INTO mysql_servers(hostgroup_id,hostname,port) VALUES (1,'db1',3306);"
+    - title: Add a new mysql user
+      info: Add a new user to mysql_users.
+      sql: "INSERT INTO mysql_users(username,password,default_hostgroup,max_connections) VALUES ('world','world',1,200);"
+    - title: Update a global config variable
+      info: Modify a variable.
+      sql: "SET mysql-max_connections = '4096';"
 
   adhoc_report:
     - title: Top 10 SELECTs by sum_time
