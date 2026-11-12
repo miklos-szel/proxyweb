@@ -391,8 +391,9 @@ class TestQueryHistoryConcurrentAppend(unittest.TestCase):
 
         self.assertEqual(errors, [], f"concurrent submissions failed: {errors}")
         html = self.pw.get(f"/{SERVER}/query_history/").text
+        statements = set(re.findall(r'<td class="sql-cell"[^>]*>(.*?)</td>', html))
         missing = [i for i in range(self.WRITERS)
-                   if f"concurrent_marker_{i}" not in html]
+                   if f"SELECT {i} AS concurrent_marker_{i}" not in statements]
         self.assertEqual(missing, [], f"history lost entries: {missing}")
 
 

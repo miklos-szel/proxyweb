@@ -127,14 +127,16 @@ def _history_path(server):
     return os.path.join(HISTORY_DIR, f'{server}.json')
 
 
-def _read_history_file(path):
-    """Return the history list stored at ``path`` ([] if missing/unreadable)."""
+def _read_history_file(path, strict=False):
+    """Read history; tolerate failures unless strict, and always allow missing files."""
     try:
         with open(path, 'r') as f:
             history = json.load(f)
     except FileNotFoundError:
         return []
     except (OSError, ValueError) as e:
+        if strict:
+            raise
         logging.warning("Unreadable history file %s, ignoring it: %s", path, e)
         return []
     if not isinstance(history, list):
@@ -167,7 +169,7 @@ def append_query_history(server, sql, user='admin'):
     # Closing the lock file releases the flock.
     with open(os.path.join(HISTORY_DIR, f'{server}.lock'), 'a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        history = _read_history_file(path)
+        history = _read_history_file(path, strict=True)
         history.append(entry)
         atomic_write(path, json.dumps(history[-HISTORY_MAX_ENTRIES:], indent=2))
 
@@ -1743,7 +1745,7 @@ def get_default_server():
     """Return the configured default_server, falling back to the first server
     in the servers list if the configured name does not exist."""
     cfg = get_config()
-    servers = cfg.get('servers', {})
+    servers = cfg.get('servers') or {}
     configured = cfg.get('global', {}).get('default_server', '')
     if configured in servers:
         return configured
@@ -1814,7 +1816,7 @@ def execute_change(db, server, sql):
     Returns:
         str: The client's error output, or an empty string on success.
     """
-    logging.debug("Executing change on %s: %s", server, sql)
+    logging.debug("Executing change on server %s", server)
     try:
         proc = _run_mysql_cli(server, 'mysql', ['main'], input_sql=sql)
     except subprocess.TimeoutExpired:
@@ -2274,7 +2276,7 @@ def _pk_where(db, server, database, table, pk_values, extra_columns=()):
 
 def _run_row_change(db, server, sql):
     """Execute a row mutation and wrap the outcome in the row-API result shape."""
-    logging.debug("Row change SQL: %s", sql)
+    logging.debug("Executing row change on server %s", server)
     error = execute_change(db, server, sql)
     return {'success': not error, 'error': error or None}
 
