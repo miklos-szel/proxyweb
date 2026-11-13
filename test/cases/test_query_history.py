@@ -2,6 +2,7 @@
 """Persistent per-server query history: dropdown, full page, clear, isolation."""
 
 import re
+import threading
 import unittest
 
 from testlib import (
@@ -346,6 +347,55 @@ class TestQueryHistory(unittest.TestCase):
         )
         self.assertNotEqual(resp.status_code, 500,
                             "Malformed JSON should not cause a 500")
+
+class TestQueryHistoryConcurrentAppend(unittest.TestCase):
+    """Concurrent SQL submissions must all land in the history file.
+
+    Bug guarded: append_query_history did an unlocked read-modify-write
+    through one fixed ``<server>.json.tmp`` path, so simultaneous requests
+    (gunicorn runs several workers × threads) lost each other's entries or
+    raced on the shared temp file and 500'd after the SQL had already run.
+    """
+
+    WRITERS = 12
+
+    def setUp(self):
+        self.pw = ProxyWebSession()
+        self.pw.login()
+        self.pw.post_json("/api/clear_query_history", {"server": SERVER})
+
+    def tearDown(self):
+        self.pw.post_json("/api/clear_query_history", {"server": SERVER})
+
+    def test_concurrent_appends_are_not_lost(self):
+        sessions = []
+        for _ in range(self.WRITERS):
+            s = ProxyWebSession()
+            s.login()
+            sessions.append(s)
+        errors = []
+
+        def run(i, s):
+            try:
+                s.post_form(f"/{SERVER}/{DATABASE}/global_variables/sql/",
+                            data={"sql": f"SELECT {i} AS concurrent_marker_{i}"})
+            except Exception as e:  # noqa: BLE001 — collected and asserted below
+                errors.append(e)
+
+        threads = [threading.Thread(target=run, args=(i, s))
+                   for i, s in enumerate(sessions)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(30)
+
+        self.assertEqual(errors, [], f"concurrent submissions failed: {errors}")
+        html = self.pw.get(f"/{SERVER}/query_history/").text
+        statements = set(re.findall(r'<td class="sql-cell"[^>]*>(.*?)</td>', html))
+        missing = [i for i in range(self.WRITERS)
+                   if f"SELECT {i} AS concurrent_marker_{i}" not in statements]
+        self.assertEqual(missing, [], f"history lost entries: {missing}")
+
 
 if __name__ == "__main__":
     unittest.main()

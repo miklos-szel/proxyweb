@@ -96,7 +96,7 @@ auth:
 flask:
   SECRET_KEY: ...
 misc:
-  apply_config: [...]   # LOAD/SAVE shortcuts shown in UI
+  apply_config: [...]   # legacy LOAD/SAVE shortcuts; still parsed, no longer shown (built-in per-module menus replace them)
   update_config: [...]  # INSERT/UPDATE shortcuts shown in UI
   adhoc_report: [...]   # Predefined SQL reports
 ```
@@ -110,7 +110,7 @@ The `SECRET_KEY` placeholder `12345678901234567890` is replaced at container sta
 3. `render_show_table_content` (route `/<server>/<database>/<table>/`) fetches table metadata (column names, row count) via `mdb.get_table_metadata()`. Row data is loaded on demand via `/api/table_data` using DataTables server-side processing — only one page of rows is ever in memory at a time.
 4. Inline row edits/inserts/deletes go to `/api/update_row`, `/api/insert_row`, `/api/delete_row` — these call the corresponding `mdb.*_row()` functions which build and execute SQL against ProxySQL. All three check `mdb.get_read_only(server)` and reject `runtime_*` tables with 403 before mutating.
 5. The SQL form in `show_table_info.html` posts to `/<server>/<database>/<table>/sql/` — SELECT statements render `show_adhoc_report.html`, everything else executes as a change and refreshes the table.
-6. `/api/execute_proxysql_command` only accepts `LOAD`, `SAVE`, and `SELECT CONFIG` statements (validated per-statement after splitting on `;`).
+6. `/api/execute_proxysql_command` only accepts `LOAD`, `SAVE`, and `SELECT CONFIG` statements (validated per-statement after splitting on `;`). It and `/api/get_schema` take the target `server` from the request (the page sends it) and fall back to the session only when absent — `session['server']` is the last server visited in *any* tab, so page-scoped APIs must not rely on it.
 7. Config diff is at `/<server>/config_diff/` (parametric — works for any configured server). The route passes `server` to `mdb.get_config_diff(server)` and injects `window.configDiffServer` into the template.
 8. Okta SSO login runs through `GET /login/okta` (redirect to the IdP) and `GET /login/okta/callback` (code exchange + role mapping) — see "Okta SSO" below.
 
@@ -126,11 +126,11 @@ Optional SSO via the OIDC Authorization Code flow, configured under `auth.okta` 
 
 ### Config File Writes
 
-All writes to `config/config.yml` must go through `_atomic_write(path, content)` in `app.py`. It writes to a temp file in the same directory, fsyncs the file, calls `os.replace()` to swap atomically, then fsyncs the parent directory so the rename survives a power loss. Never use `open(config, "w")` directly for config writes.
+All writes to `config/config.yml` must go through `mdb.atomic_write(path, content)` (also used for the query-history files). It writes to a temp file in the same directory, fsyncs the file, calls `os.replace()` to swap atomically, then fsyncs the parent directory so the rename survives a power loss. Never use `open(config, "w")` directly for config writes.
 
 On Docker single-file bind-mounts `os.replace()` raises EXDEV/EBUSY; set `PROXYWEB_ALLOW_NONATOMIC_WRITE=1` (as the test compose file does) to opt into a non-atomic fallback that truncates and writes in place. The fallback is off by default to keep atomicity guarantees in production deployments.
 
-Every config write goes through `_backup_and_write_config()`, which validates YAML syntax and shape (`mdb.validate_yaml` + `mdb.validate_config_shape`), backs the current file up to `config.yml.bak`, writes, and then drops the config cache. Handlers must not re-validate beforehand — that just parses the file twice.
+Every config write goes through `_backup_and_write_config()`, which validates YAML syntax and shape (`mdb.validate_config`, raising `mdb.ConfigValidationError` — the one ValueError subclass whose message is safe to show users), backs the current file up to `config.yml.bak`, writes, and then drops the config cache. Handlers must not re-validate beforehand — that just parses the file twice.
 
 Env overrides (`mdb._apply_env_overrides`, including servers defined only by `PROXYWEB_SERVERS`) are applied to each caller's copy, not cached. Anything shown in the settings editor, exported, or written back to disk must use `mdb.get_config(config, apply_env=False)` so env servers and secrets never land in the file (`TestEnvServerNotPersisted`).
 
@@ -217,7 +217,7 @@ Rules:
 
 | Bug | Test class / method |
 |-----|---------------------|
-| `_atomic_write` fails with EBUSY/EXDEV on Docker bind-mount → config saves return 500 | `TestSettingsSave` |
+| `atomic_write` fails with EBUSY/EXDEV on Docker bind-mount → config saves return 500 | `TestSettingsSave` |
 | `hide_tables` config change not reflected in nav after save | `TestHideTables` |
 | `base.html` bare `session['key']` raises KeyError on fresh session → `/settings/edit/` returns 500, leaving broken config unrecoverable | `TestSettingsEditRecovery` |
 | hardcoded `'proxysql'` fallback in `render_list_dbs` and `execute_proxysql_command` crashes when first server is not named `proxysql` | `TestDefaultServerFallback` |
@@ -258,3 +258,14 @@ Rules:
 | settings editor/Export/Okta-secret save read the env-overridden config → a UI save or export+import wrote `PROXYWEB_*` secrets into `config.yml` | `TestEnvServerNotPersisted` |
 | config diff dropped `mysql_users` `frontend`/`backend` from every comparison (to match runtime's split per-role rows), so a memory-only flag change was reported as in sync; split rows are now merged with the flags OR-ed (`mdb._merge_user_rows`) and the flags compared — for memory vs runtime only; disk vs memory compares the original rows, since folding can make distinct rows (PK `(username, backend)`) look identical | `TestConfigDiffUserFlagChange` |
 | `update_row`/`delete_row` turned a PK column missing from `pkValues` into `col IS NULL` → zero rows matched on a NOT NULL key but the API reported success (e.g. `mysql_users` deleted by `username` only, PK is `(username, backend)`); now rejected | `TestPartialPrimaryKeyRejected` |
+| `update_config_skip_variables` saved the env-overridden config back to disk → env-only servers and `PROXYWEB_*` secrets written into `config.yml` | `TestEnvServerNotPersisted.test_skip_variables_save_keeps_env_server_out_of_file` |
+| `/api/execute_proxysql_command` and `/api/get_schema` used `session['server']` (last server visited in any tab) → LOAD/SAVE could hit another tab's server; the page now sends `server` | `TestPageScopedServerApis` |
+| `append_query_history` did an unlocked read-modify-write via a shared `.tmp` path → concurrent submissions lost entries or 500'd | `TestQueryHistoryConcurrentAppend` |
+| Cancel button carried the row's values unescaped in a single-quoted `data-original-values` attribute → a cell containing `'` broke Cancel | `TestCancelEditApostrophe` |
+| `render_change` didn't catch `execute_adhoc_query` errors → a SELECT typo gave the generic 500 page | `TestSelectSyntaxErrorShownInline` |
+| raw settings save let the validation error reach the 500 handler → the user's edits were lost | `TestRawSettingsInvalidYamlKeepsEdits` |
+| `/settings/import/` returned the redacted generic error for validation failures → the user couldn't see why an import was rejected | `TestImportShowsValidationError` |
+| `execute_adhoc_report` raised on the first failing report → one bad query 500'd the whole adhoc page | `TestOptionalConfigSections.test_adhoc_report_partial_failure_renders_others` |
+| row APIs passed an unknown server to `get_read_only()` → opaque "Internal error" instead of 400 | `TestRowApiUnknownServer` |
+| loading a multi-statement quick query did `sql.replace(/;/g, ';\n')` → leading space on every line after the first; per-module LOAD/SAVE menus: a MySQL-only server (rows only in `mysql_servers`) gets no PgSQL menus and vice versa | `TestQuickQueryLoadSaveMenus` |
+| CSRF check `hmac.compare_digest(str, str)` raises TypeError on non-ASCII → a token like `tokén` gave 500 instead of 403; now compares bytes | `TestCsrfProtection.test_non_ascii_token_is_403_not_500` |

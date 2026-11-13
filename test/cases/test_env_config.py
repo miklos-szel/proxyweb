@@ -95,6 +95,26 @@ class TestEnvServerNotPersisted(unittest.TestCase):
         resp = self.s.get(f"/{ENV_SERVER}/{DATABASE}/mysql_servers/")
         self.assertEqual(resp.status_code, 200)
 
+    def test_skip_variables_save_keeps_env_server_out_of_file(self):
+        """Bug guarded: /api/update_config_skip_variables read the
+        env-overridden config and wrote it back, persisting env servers and
+        their passwords into config.yml."""
+        current = (yaml.safe_load(self._original_yaml).get("global") or {}) \
+            .get("config_diff_skip_variable") or []
+        body = self.s.post_json("/api/update_config_skip_variables",
+                                {"skip_variables": list(current)}).json()
+        self.assertTrue(body.get("success"), body.get("error"))
+        edit_html = self.s.get("/settings/edit/").text
+        self.assertNotIn(ENV_SECRET, edit_html)
+        self.assertNotIn(f"{ENV_SERVER}:", edit_html)
+
+    def test_skip_variables_rejects_non_list(self):
+        resp = self.s.session.post(
+            f"{self.s.base_url}/api/update_config_skip_variables",
+            json={"skip_variables": "not-a-list"},
+            headers={"X-CSRF-Token": self.s.csrf_token}, timeout=10)
+        self.assertEqual(resp.status_code, 400)
+
     def test_settings_page_notes_env_server(self):
         html = self.s.get("/settings/edit/").text
         self.assertIn('id="env-servers-note"', html)

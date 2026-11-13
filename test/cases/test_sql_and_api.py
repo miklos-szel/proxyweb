@@ -391,6 +391,97 @@ class TestAPIConfigDiff(unittest.TestCase):
         self.assertIn("columns", body.get("schema", {}))
 
 
+class TestSelectSyntaxErrorShownInline(unittest.TestCase):
+    """A failing SELECT must show the database error in the editor.
+
+    Bug guarded: render_change did not catch execute_adhoc_query's ValueError,
+    so a typo in a SELECT produced the generic 500 page
+    ("ValueError: see server logs") instead of the error message.
+    """
+
+    def test_bad_select_renders_error_inline(self):
+        s = ProxyWebSession()
+        s.login()
+        s.get(f"/{SERVER}/{DATABASE}/global_variables/")
+        # post_form raises on a non-2xx status, so the old 500 page fails here.
+        resp = s.post_form(f"/{SERVER}/{DATABASE}/global_variables/sql/",
+                           {"sql": "SELECT * FROM no_such_table_xyz"})
+        self.assertIn("no_such_table_xyz", resp.text)
+        self.assertNotIn("see server logs", resp.text)
+
+
+class TestRowApiUnknownServer(unittest.TestCase):
+    """Row APIs must reject an unknown server with a clear 400.
+
+    Bug guarded: update/insert/delete_row passed the caller's server straight
+    to get_read_only(), whose ValueError fell into the catch-all and came
+    back as the opaque "Internal error — see server logs".
+    """
+
+    def test_unknown_server_rejected(self):
+        s = ProxyWebSession()
+        s.login()
+        s.get(f"/{SERVER}/{DATABASE}/mysql_servers/")
+        payloads = {
+            "/api/update_row": {"pkValues": {"hostgroup_id": 1}, "columnNames": ["comment"],
+                                "data": {"comment": "x"}},
+            "/api/insert_row": {"columnNames": ["comment"], "data": {"comment": "x"}},
+            "/api/delete_row": {"pkValues": {"hostgroup_id": 1}},
+        }
+        for path, extra in payloads.items():
+            body = {"server": "no_such_server", "database": DATABASE,
+                    "table": "mysql_servers", **extra}
+            resp = s.session.post(
+                f"{BASE_URL}{path}", json=body,
+                headers={"X-CSRF-Token": s.csrf_token}, timeout=10)
+            self.assertEqual(resp.status_code, 400, path)
+            self.assertEqual(resp.json().get("error"), "Invalid server", path)
+
+
+class TestPageScopedServerApis(unittest.TestCase):
+    """/api/get_schema and /api/execute_proxysql_command act on the page's server.
+
+    Bug guarded: both read ``session['server']``, i.e. whichever server the
+    user visited last in *any* tab, so LOAD/SAVE clicked on a proxysql_mysql
+    page could run against proxysql_postgres when that was opened in another
+    tab. The frontend now sends ``server``; the backend validates it.
+    """
+
+    def setUp(self):
+        self.s = ProxyWebSession()
+        self.s.login()
+        # Leave the session on the *other* server, like a second open tab.
+        self.s.get(f"/{PG_SERVER}/{DATABASE}/global_variables/")
+
+    def test_schema_uses_requested_server(self):
+        body = self.s.session.get(
+            f"{BASE_URL}/api/get_schema",
+            params={"table": "mysql_servers", "server": SERVER, "database": DATABASE},
+            timeout=10).json()
+        self.assertTrue(body.get("success"), body.get("error"))
+
+    def test_schema_rejects_unknown_server(self):
+        resp = self.s.session.get(
+            f"{BASE_URL}/api/get_schema",
+            params={"table": "mysql_servers", "server": "no_such_server"},
+            timeout=10)
+        self.assertEqual(resp.status_code, 400)
+
+    def test_command_rejects_unknown_server(self):
+        resp = self.s.session.post(
+            f"{BASE_URL}/api/execute_proxysql_command",
+            data={"sql": "LOAD MYSQL QUERY RULES TO RUNTIME", "server": "no_such_server"},
+            headers={"X-CSRF-Token": self.s.csrf_token}, timeout=10)
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(resp.json().get("success"))
+
+    def test_command_runs_on_requested_server(self):
+        body = self.s.post_form(
+            "/api/execute_proxysql_command",
+            {"sql": "LOAD MYSQL QUERY RULES TO RUNTIME", "server": SERVER}).json()
+        self.assertTrue(body.get("success"), body.get("error"))
+
+
 class TestConfigDiffMemoryRuntime(unittest.TestCase):
     """Config diff must detect gaps between mysql_users memory and runtime layers.
 

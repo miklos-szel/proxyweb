@@ -2,6 +2,7 @@
 """Table rendering: digest_text, DataTables pagination, client/server-side mode, ProxySQL 3.x quirks."""
 
 import os
+import re
 import unittest
 
 from testlib import HAS_PYMYSQL
@@ -559,6 +560,96 @@ class TestStoredValueHtmlEscaping(unittest.TestCase):
         self.assertNotIn(self.PAYLOAD, resp.text)
         # The escaped rendering must be present instead.
         self.assertIn("&lt;img src=x onerror=alert(1)&gt;", resp.text)
+
+
+class TestCancelEditApostrophe(unittest.TestCase):
+    """Cancelling an inline edit must work when a cell contains a quote.
+
+    Bug guarded: editRow interpolated the row's original values unescaped
+    into a single-quoted ``data-original-values='[...]'`` attribute on the
+    Cancel button. A value containing ``'`` (e.g. a comment "it's prod")
+    ended the attribute early, so Cancel threw a JSON parse error and left
+    the row stuck in edit mode. cancelEdit now reads ``row.dataset``.
+    The suite has no JS engine, so this checks the served page source.
+    """
+
+    def test_cancel_button_has_no_inline_original_values(self):
+        s = ProxyWebSession()
+        s.login()
+        html = s.get(f"/{SERVER}/{DATABASE}/mysql_servers/").text
+        self.assertNotIn("data-original-values='${", html)
+        self.assertIn("JSON.parse(row.dataset.originalValues", html)
+
+
+class TestQuickQueryLoadSaveMenus(unittest.TestCase):
+    """Quick Queries offers the ProxySQL docs' LOAD/SAVE commands per module.
+
+    Feature/bug guarded:
+    - one menu per module (MySQL Servers & Hostgroups / Users / Query Rules /
+      Variables, and the PostgreSQL equivalents), each with the six commands
+      TO RUNTIME, TO DISK, FROM DISK, TO MEMORY, FROM MEMORY, FROM CONFIG,
+      plus an "All MySQL"/"All PostgreSQL" menu;
+    - a server with only MySQL backends gets no PgSQL menus and vice versa
+      (ProxySQL 3.x has both sets of tables either way);
+    - the configured apply_config section is no longer shown;
+    - loading a multi-statement quick query did ``sql.replace(/;/g, ';\\n')``,
+      leaving a leading space on every following line (and splitting ``;``
+      inside string literals); it now goes through ``formatSqlStatements``.
+    The suite has no JS engine, so this checks the served page source.
+    """
+
+    COMMANDS = ("LOAD {} TO RUNTIME", "SAVE {} TO DISK", "LOAD {} FROM DISK",
+                "SAVE {} TO MEMORY", "LOAD {} FROM MEMORY", "LOAD {} FROM CONFIG")
+
+    @staticmethod
+    def _quick_query_sql(html):
+        """SQL of the generated LOAD/SAVE items only (the navbar's Misc menu
+        hardcodes MYSQL statements on every page)."""
+        return "\n".join(re.findall(r"window\['aqq_item_\d+_\d+'\] = (.*);", html))
+
+    def _page(self, server, table):
+        s = ProxyWebSession()
+        s.login()
+        return s.get(f"/{server}/{DATABASE}/{table}/").text
+
+    def test_mysql_server_offers_mysql_modules_only(self):
+        """proxysql_mysql has rows only in mysql_servers → no PgSQL menus."""
+        html = self._page(SERVER, "mysql_servers")
+        sql = self._quick_query_sql(html)
+        for menu in ("MySQL Servers &amp; Hostgroups", "MySQL Users",
+                     "MySQL Query Rules", "MySQL Variables", "All MySQL"):
+            self.assertIn(menu, html)
+        for module in ("MYSQL SERVERS", "MYSQL USERS", "MYSQL QUERY RULES", "MYSQL VARIABLES"):
+            for cmd in self.COMMANDS:
+                self.assertIn(cmd.format(module) + ";", sql)
+        self.assertNotIn("PGSQL", sql)
+        self.assertNotIn("PostgreSQL Users", html)
+
+    def test_pgsql_server_offers_pgsql_modules_only(self):
+        """proxysql_postgres has rows only in pgsql_servers → no MySQL menus."""
+        html = self._page(PG_SERVER, "pgsql_servers")
+        sql = self._quick_query_sql(html)
+        for menu in ("PostgreSQL Servers", "PostgreSQL Users",
+                     "PostgreSQL Query Rules", "PostgreSQL Variables", "All PostgreSQL"):
+            self.assertIn(menu, html)
+        for module in ("PGSQL SERVERS", "PGSQL USERS", "PGSQL QUERY RULES", "PGSQL VARIABLES"):
+            for cmd in self.COMMANDS:
+                self.assertIn(cmd.format(module) + ";", sql)
+        self.assertNotIn("MYSQL", sql)
+        self.assertNotIn("MySQL Users", html)
+
+    def test_apply_config_section_not_in_quick_queries(self):
+        """The configured apply_config "everything" shortcuts duplicate the
+        "All MySQL" menu, so they are no longer shown."""
+        html = self._page(SERVER, "mysql_servers")
+        self.assertNotIn("Apply Config", html)
+        self.assertNotIn("apply_config_item_", html)
+        self.assertIn("Update Config", html)
+
+    def test_editor_formats_statements_without_leading_space(self):
+        html = self._page(SERVER, "mysql_servers")
+        self.assertIn("textarea.value = formatSqlStatements(sql)", html)
+        self.assertNotIn("sql.replace(/;/g, ';\\n')", html)
 
 
 if __name__ == "__main__":

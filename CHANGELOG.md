@@ -8,6 +8,76 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
 
 ## [Unreleased]
 
+### Added
+- Quick Queries has LOAD/SAVE menus per module, following the ProxySQL
+  admin-commands docs: MySQL Servers & Hostgroups, Users, Query Rules and
+  Variables (and the PostgreSQL equivalents), each with TO RUNTIME, TO DISK,
+  FROM DISK, TO MEMORY, FROM MEMORY and FROM CONFIG, plus an "All MySQL" /
+  "All PostgreSQL" menu. A server with only MySQL backends (rows in
+  `mysql_servers`) gets no PostgreSQL menus and vice versa; with both,
+  everything is offered.
+- The test config ships example `update_config` quick queries.
+
+### Fixed
+- Multi-statement quick queries load into the SQL editor one statement per
+  line, without the leading space on every line after the first; a `;`
+  inside a string literal no longer splits the line.
+- The Quick Queries dropdown was clipped by the SQL editor card.
+- An unreadable or malformed query-history file was treated as empty when
+  appending, so the next query overwrote the whole history. Appends now
+  leave the file alone and log the error; a missing file still starts a
+  new history.
+- A `servers:` key with no entries (hand-edited config) crashed login with a
+  TypeError instead of redirecting the admin to settings.
+- When the query history can't be updated, the table page now says so
+  instead of silently no longer recording.
+- Clearing the query history while another query was being recorded could
+  bring the old history back; both now take the same lock.
+- A failing Quick Queries backend probe no longer empties the navigation.
+- A CSRF token with non-ASCII characters returned 500 instead of 403.
+- An invalid `PROXYWEB_SERVER_<NAME>_PORT` is logged once, not on every
+  config read.
+- A raw-YAML draft restored after a rejected save is marked unsaved, so
+  leaving the page warns before discarding it.
+
+### Security
+- Debug logging of row edits and other writes records the server and the
+  operation keyword only, not the SQL (which can contain passwords).
+
+## [2.5.0] — 2026-11-12
+
+### Security
+- Credentials no longer reach the debug log: the startup dump of the whole
+  config (admin/readonly passwords, DSN passwords, `SECRET_KEY`, Okta client
+  secret) is gone, and the per-connection DSN log is redacted.
+- Saving the config-diff "skip variables" list read the env-overridden
+  config, so env-only servers and `PROXYWEB_*` secrets were written into
+  `config.yml`. It now reads the file as written and validates the payload.
+- The CSRF token is compared in constant time.
+
+### Fixed
+- LOAD/SAVE commands and the inline-edit schema lookup now act on the page's
+  own server. They used the server last visited in any tab, so with two tabs
+  open a LOAD/SAVE could run against the wrong ProxySQL.
+- Cancelling an inline row edit failed (and left the row stuck in edit mode)
+  when a cell contained an apostrophe, e.g. a comment `it's prod`.
+- Concurrent SQL submissions could lose query-history entries or 500 on a
+  shared temp file. History writes are now locked, use unique temp files,
+  and keep the newest 1000 entries.
+- A SELECT with an error in the SQL editor shows the database's message
+  inline instead of the generic error page.
+- Saving invalid YAML in the raw settings editor keeps your edits and shows
+  the validation error instead of a 500 page that discarded them.
+- Import reports why a config was rejected (e.g. a missing required section)
+  instead of "Internal error".
+- One failing adhoc report no longer breaks the whole adhoc page; it shows its
+  own error and the other reports still render.
+- Row APIs reject an unknown server with a clear 400.
+- Writes no longer open an unused admin connection before shelling out to the
+  `mysql` client.
+- An empty `servers:` key or a non-numeric `PROXYWEB_SERVER_<NAME>_PORT` no
+  longer surfaces as "Error opening or parsing the file".
+
 ## [2.4.0] — 2026-09-23
 
 ### Added

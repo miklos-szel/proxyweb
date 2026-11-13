@@ -28,7 +28,9 @@
         border-radius: var(--border-radius);
         box-shadow: var(--box-shadow);
         margin-bottom: 2rem;
-        overflow: hidden;
+        /* visible, not hidden: the Quick Queries dropdown must extend past
+           the card when the editor is short. */
+        overflow: visible;
     }
 
     .sql-editor-header {
@@ -341,10 +343,10 @@
                                 <i class="fas fa-bolt"></i> Quick Queries
                             </button>
                             <ul class="dropdown-menu" aria-labelledby="quickQueriesBtn">
-                                {% for item in session.get('misc', {})|sort %}
+                                {% for item in session.get('misc', {})|sort if item != 'apply_config' %}
                                     <li class="dropdown-submenu">
                                         <button type="button" class="dropdown-item has-submenu" aria-haspopup="true" aria-expanded="false">
-                                            <i class="fas fa-folder me-2"></i>{{ item|title }}
+                                            <i class="fas fa-folder me-2"></i>{{ item|replace('_', ' ')|title }}
                                         </button>
                                         <ul class="submenu">
                                             {% for subitem in session.get('misc', {})[item] %}
@@ -357,6 +359,27 @@
                                         </ul>
                                     </li>
                                 {% endfor %}
+                                {% set aqq = admin_quick_queries() %}
+                                {% if aqq %}
+                                    <li><hr class="dropdown-divider"></li>
+                                    {% for menu in aqq %}
+                                        {% set menu_index = loop.index %}
+                                        <li class="dropdown-submenu">
+                                            <button type="button" class="dropdown-item has-submenu" aria-haspopup="true" aria-expanded="false">
+                                                <i class="fas fa-exchange-alt me-2"></i>{{ menu['title'] }}
+                                            </button>
+                                            <ul class="submenu">
+                                                {% for subitem in menu['items'] %}
+                                                    <li>
+                                                        <button type="button" class="dropdown-item" onclick="loadQueryWithInfo('aqq_item_{{ menu_index }}_{{ loop.index }}', 'aqq_info_{{ menu_index }}_{{ loop.index }}'); return false;">
+                                                            <i class="fas fa-bolt me-2"></i>{{ subitem['title'] }}
+                                                        </button>
+                                                    </li>
+                                                {% endfor %}
+                                            </ul>
+                                        </li>
+                                    {% endfor %}
+                                {% endif %}
                             </ul>
                         </div>
                         <div class="dropdown">
@@ -410,6 +433,11 @@
                         <strong>Success</strong>
                         <pre>{{ session.get('sql', '') }}</pre>
                         <strong>{{ message }}</strong>
+                    </div>
+                {% endif %}
+                {% if history_warning %}
+                    <div class="alert-custom alert-warning mt-3">
+                        <i class="fas fa-exclamation-triangle me-2"></i>{{ history_warning }}
                     </div>
                 {% endif %}
             </div>
@@ -569,6 +597,35 @@ function closeAllSubmenus(exceptSubmenu, exceptTrigger) {
 // Shared body of loadQuery/loadQueryWithInfo: close menus, fill the SQL
 // textarea, and expand the editor if collapsed. Returns false when there
 // is no SQL to load.
+// One statement per line: split on ';' outside quotes/backticks and trim
+// each piece, so "A; B;" becomes "A;\nB;" without the stray leading space
+// (and a ';' inside a string literal is left alone).
+function formatSqlStatements(sql) {
+    const parts = [];
+    let current = '';
+    let quote = null;
+    for (let i = 0; i < sql.length; i++) {
+        const ch = sql[i];
+        current += ch;
+        if (quote) {
+            if (ch === '\\' && quote !== '`' && i + 1 < sql.length) {
+                current += sql[++i];
+            } else if (ch === quote) {
+                quote = null;
+            }
+        } else if (ch === "'" || ch === '"' || ch === '`') {
+            quote = ch;
+        } else if (ch === ';') {
+            parts.push(current.trim());
+            current = '';
+        }
+    }
+    if (current.trim()) {
+        parts.push(current.trim());
+    }
+    return parts.filter(p => p && p !== ';').join('\n');
+}
+
 function loadSqlIntoEditor(sql) {
     closeAllSubmenus();
 
@@ -590,7 +647,7 @@ function loadSqlIntoEditor(sql) {
         return false;
     }
 
-    textarea.value = sql.replace(/;/g, ';\n');
+    textarea.value = formatSqlStatements(sql);
     textarea.focus();
 
     // Expand the SQL editor if collapsed
@@ -630,10 +687,17 @@ function loadQueryWithInfo(sqlVarName, infoVarName) {
 }
 
 // Define SQL query variables and info variables for quick access
-{% for item in session.get('misc', {})|sort %}
+{% for item in session.get('misc', {})|sort if item != 'apply_config' %}
 {% for subitem in session.get('misc', {})[item] %}
 window['{{ item }}_item_{{ loop.index }}'] = {{ subitem.get('sql', '')|tojson }};
 window['{{ item }}_info_{{ loop.index }}'] = {{ subitem.get('info', '')|tojson }};
+{% endfor %}
+{% endfor %}
+{% for menu in admin_quick_queries() %}
+{% set menu_index = loop.index %}
+{% for subitem in menu['items'] %}
+window['aqq_item_{{ menu_index }}_{{ loop.index }}'] = {{ subitem['sql']|tojson }};
+window['aqq_info_{{ menu_index }}_{{ loop.index }}'] = {{ subitem['info']|tojson }};
 {% endfor %}
 {% endfor %}
 
