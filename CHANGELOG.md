@@ -9,12 +9,13 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
 ## [Unreleased]
 
 ### Added
-- Quick Queries has four new menus — Load to Runtime, Save to Disk, Load
-  from Disk and Save from Runtime — each with an "All modules" entry plus
-  one command per module (MySQL/PgSQL users, servers, query rules,
-  variables, firewall; admin variables, ProxySQL servers, scheduler,
-  REST API). Only the modules the server actually has are listed. The
-  configured `apply_config` "everything" shortcuts are unchanged.
+- Quick Queries has LOAD/SAVE menus per module, following the ProxySQL
+  admin-commands docs: MySQL Servers & Hostgroups, Users, Query Rules and
+  Variables (and the PostgreSQL equivalents), each with TO RUNTIME, TO DISK,
+  FROM DISK, TO MEMORY, FROM MEMORY and FROM CONFIG, plus an "All MySQL" /
+  "All PostgreSQL" menu. A server with only MySQL backends (rows in
+  `mysql_servers`) gets no PostgreSQL menus and vice versa; with both,
+  everything is offered.
 - The test config ships example `update_config` quick queries.
 
 ### Fixed
@@ -22,6 +23,26 @@ Tagged releases live at <https://github.com/miklos-szel/proxyweb/releases>.
   line, without the leading space on every line after the first; a `;`
   inside a string literal no longer splits the line.
 - The Quick Queries dropdown was clipped by the SQL editor card.
+- An unreadable or malformed query-history file was treated as empty when
+  appending, so the next query overwrote the whole history. Appends now
+  leave the file alone and log the error; a missing file still starts a
+  new history.
+- A `servers:` key with no entries (hand-edited config) crashed login with a
+  TypeError instead of redirecting the admin to settings.
+- When the query history can't be updated, the table page now says so
+  instead of silently no longer recording.
+- Clearing the query history while another query was being recorded could
+  bring the old history back; both now take the same lock.
+- A failing Quick Queries backend probe no longer empties the navigation.
+- A CSRF token with non-ASCII characters returned 500 instead of 403.
+- An invalid `PROXYWEB_SERVER_<NAME>_PORT` is logged once, not on every
+  config read.
+- A raw-YAML draft restored after a rejected save is marked unsaved, so
+  leaving the page warns before discarding it.
+
+### Security
+- Debug logging of row edits and other writes records the server and the
+  operation keyword only, not the SQL (which can contain passwords).
 
 ## [2.5.0] — 2026-11-12
 

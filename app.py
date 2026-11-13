@@ -72,14 +72,17 @@ def inject_prod_warning():
 
 @app.context_processor
 def inject_admin_quick_queries():
-    """Per-direction LOAD/SAVE menus for the SQL editor's Quick Queries.
+    """Per-module LOAD/SAVE menus for the SQL editor's Quick Queries.
 
-    Only the module names are kept in the session (``_prime_session``); the
+    Only the protocol names are kept in the session (``_prime_session``); the
     menus themselves are rebuilt per render to keep the cookie small.
     """
     def admin_quick_queries():
-        modules = (session.get('admin_modules') or {}).get(session.get('server'))
-        return mdb.admin_quick_queries(modules)
+        # Memoised per request: the template calls this twice (menu + JS vars).
+        if 'quick_queries' not in g:
+            protocols = (session.get('quick_query_protocols') or {}).get(session.get('server'))
+            g.quick_queries = mdb.admin_quick_queries(protocols)
+        return g.quick_queries
     return {'admin_quick_queries': admin_quick_queries}
 
 
@@ -324,18 +327,26 @@ def _prime_session(server, database=None, table=None, refresh_dblist=False):
     session['servers'] = mdb.get_servers()
     dblist = session.get('dblist') or {}
     if (refresh_dblist or server not in dblist
-            or server not in (session.get('admin_modules') or {})):
+            or server not in (session.get('quick_query_protocols') or {})):
         # An unreachable server leaves the nav empty rather than failing the
         # page: config diff renders and reports the error from its own request.
         # The failure is not cached, so the next page load retries.
         try:
             dblist.update(mdb.get_all_dbs_and_tables(g.db, server))
-            admin_modules = session.get('admin_modules') or {}
-            admin_modules[server] = mdb.get_admin_modules(g.db, server)
-            session['admin_modules'] = admin_modules
         except ValueError as e:
             logging.warning("Could not list tables for server %s: %s", server, e)
             dblist.pop(server, None)
+        else:
+            # Separate try: a failing Quick Queries probe (e.g. a DSN user that
+            # can list tables but not read main.*_servers) must not empty the
+            # nav. The fallback (None → MySQL menus) is cached, not retried.
+            protocols = session.get('quick_query_protocols') or {}
+            try:
+                protocols[server] = mdb.get_quick_query_protocols(g.db, server)
+            except ValueError as e:
+                logging.warning("Could not detect Quick Query protocols for %s: %s", server, e)
+                protocols[server] = None
+            session['quick_query_protocols'] = protocols
     session['dblist'] = dblist
     session['misc'] = mdb.get_config(config)['misc']
     session['read_only'] = mdb.get_read_only(server)
@@ -401,7 +412,7 @@ def csrf_protect():
         token = (request.form.get('_csrf_token')
                  or request.headers.get('X-CSRF-Token'))
         expected = session.get('csrf_token')
-        if not token or not expected or not hmac.compare_digest(str(token), str(expected)):
+        if not token or not expected or not hmac.compare_digest(str(token).encode(), str(expected).encode()):
             abort(403)
 
 # Fixed SSO error codes → user-facing messages. The Okta routes redirect to
@@ -631,6 +642,7 @@ def render_change(server, database, table):
     Raises:
         ValueError: If an unexpected exception occurs during processing.
     """
+    history_warning = None
     error = ""
     message = ""
     ret = ""
@@ -677,9 +689,17 @@ def render_change(server, database, table):
     normalized_sql = session['sql'].replace("\r\n", "\n").strip()
     if normalized_sql not in session['history'] and not error:
         session['history'].append(normalized_sql)
-        mdb.append_query_history(server, normalized_sql, session.get('role', 'admin'))
+        try:
+            mdb.append_query_history(server, normalized_sql, session.get('role', 'admin'))
+        except (OSError, ValueError) as e:
+            # The change itself succeeded; don't fail the page over history,
+            # but say so — otherwise recording stops with no visible sign.
+            logging.error("Query history not updated for %s: %s", server, e)
+            history_warning = ("Query history was not updated: the history file "
+                               "is unreadable. Clear the history to start a new one.")
 
-    return render_template("show_table_info.html", content=content, error=error, message=message)
+    return render_template("show_table_info.html", content=content, error=error,
+                           message=message, history_warning=history_warning)
 
 @app.route('/<server>/adhoc/')
 @login_required

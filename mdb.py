@@ -128,7 +128,12 @@ def _history_path(server):
 
 
 def _read_history_file(path, strict=False):
-    """Read history; tolerate failures unless strict, and always allow missing files."""
+    """Return the history list stored at ``path`` ([] if the file is missing).
+
+    An unreadable or malformed file yields [] with a warning — fine for
+    display — unless ``strict``, where it raises (OSError/ValueError): an
+    append must not rewrite the file from [] and wipe the existing history.
+    """
     try:
         with open(path, 'r') as f:
             history = json.load(f)
@@ -140,6 +145,8 @@ def _read_history_file(path, strict=False):
         logging.warning("Unreadable history file %s, ignoring it: %s", path, e)
         return []
     if not isinstance(history, list):
+        if strict:
+            raise ValueError(f"History file {path} is not a JSON list")
         logging.warning("History file %s is not a list, ignoring it", path)
         return []
     return history
@@ -155,6 +162,9 @@ def append_query_history(server, sql, user='admin'):
     the file is replaced via atomic_write (a shared ``.tmp`` name used to let
     two writers clobber each other's temp file). Only the newest
     HISTORY_MAX_ENTRIES entries are kept.
+
+    Raises OSError/ValueError when the existing file cannot be read or is not a
+    JSON list, rather than overwriting it (a missing file starts a new history).
 
     Parameters:
         server (str): Server name used to select the history file (safe name required).
@@ -206,9 +216,15 @@ def clear_query_history(server):
     """
     if not _valid_history_server(server):
         return
-    path = os.path.join(HISTORY_DIR, f'{server}.json')
-    if os.path.exists(path):
-        os.remove(path)
+    if not os.path.isdir(HISTORY_DIR):
+        return
+    path = _history_path(server)
+    # Same lock as append_query_history, or an append that had already read
+    # the file would write the old history back after the clear.
+    with open(os.path.join(HISTORY_DIR, f'{server}.lock'), 'a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if os.path.exists(path):
+            os.remove(path)
 
 
 # Dict keys matching these substrings (case-insensitive) get their values
@@ -352,6 +368,7 @@ _ENV_SERVER_DEFAULT_DSN = {
 _ENV_SERVER_NAME_RE = re.compile(r'^[A-Za-z0-9_-]+$')
 # Invalid names already warned about; the list is re-read on every get_config().
 _env_server_names_warned = set()
+_env_bad_ports_warned = set()
 
 
 def get_env_managed_servers():
@@ -448,8 +465,11 @@ def _apply_env_overrides(cfg, verbose=True):
                 except ValueError:
                     # Surfaced by get_config as "Error opening or parsing the
                     # file", which sent people hunting in config.yml.
-                    logging.error("Ignoring %s%s=%r: not a port number",
-                                  prefix, env_suffix, value)
+                    # Once per bad value: get_config() runs many times a request.
+                    if (prefix + env_suffix, value) not in _env_bad_ports_warned:
+                        _env_bad_ports_warned.add((prefix + env_suffix, value))
+                        logging.error("Ignoring %s%s=%r: not a port number",
+                                      prefix, env_suffix, value)
                     continue
             overrides[dsn_key] = value
 
@@ -988,41 +1008,44 @@ def _hide_tables_for(cfg, server):
     return (cfg.get('global') or {}).get('hide_tables') or []
 
 
-# ProxySQL config modules that LOAD/SAVE operate on, each paired with a table
-# whose presence in the admin schema shows the module exists on that server
-# (None = always present). PgSQL and firewall modules only exist on 3.x / newer
-# 2.x builds, so they are offered only when the server actually has them.
-_ADMIN_MODULES = (
-    ('MYSQL USERS', 'mysql_users'),
-    ('MYSQL SERVERS', 'mysql_servers'),
-    ('MYSQL QUERY RULES', 'mysql_query_rules'),
-    ('MYSQL VARIABLES', 'mysql_users'),
-    ('MYSQL FIREWALL', 'mysql_firewall_whitelist_rules'),
-    ('PGSQL USERS', 'pgsql_users'),
-    ('PGSQL SERVERS', 'pgsql_servers'),
-    ('PGSQL QUERY RULES', 'pgsql_query_rules'),
-    ('PGSQL VARIABLES', 'pgsql_users'),
-    ('PGSQL FIREWALL', 'pgsql_firewall_whitelist_rules'),
-    ('ADMIN VARIABLES', None),
-    ('PROXYSQL SERVERS', 'proxysql_servers'),
-    ('SCHEDULER', 'scheduler'),
-    ('RESTAPI', 'restapi_routes'),
+# LOAD/SAVE quick queries, per the ProxySQL admin-commands docs
+# (https://proxysql.com/documentation/the-admin-schemas/admin-commands):
+# protocol -> (table whose presence shows the protocol exists, menu prefix,
+# [(menu title, module)]).
+_QUICK_QUERY_PROTOCOLS = {
+    'mysql': ('mysql_servers', 'MySQL', [
+        ('MySQL Servers & Hostgroups', 'MYSQL SERVERS'),
+        ('MySQL Users', 'MYSQL USERS'),
+        ('MySQL Query Rules', 'MYSQL QUERY RULES'),
+        ('MySQL Variables', 'MYSQL VARIABLES'),
+    ]),
+    'pgsql': ('pgsql_servers', 'PostgreSQL', [
+        ('PostgreSQL Servers', 'PGSQL SERVERS'),
+        ('PostgreSQL Users', 'PGSQL USERS'),
+        ('PostgreSQL Query Rules', 'PGSQL QUERY RULES'),
+        ('PostgreSQL Variables', 'PGSQL VARIABLES'),
+    ]),
+}
+
+# (statement template, what it does) — the six commands offered per module.
+_QUICK_QUERY_COMMANDS = (
+    ('LOAD {} TO RUNTIME', 'memory → runtime (activate the in-memory config)'),
+    ('SAVE {} TO DISK', 'memory → disk (persist the in-memory config)'),
+    ('LOAD {} FROM DISK', 'disk → memory (discard unsaved in-memory changes)'),
+    ('SAVE {} TO MEMORY', 'runtime → memory (copy the active config back into memory)'),
+    ('LOAD {} FROM MEMORY', 'memory → runtime (same as TO RUNTIME)'),
+    ('LOAD {} FROM CONFIG', 'config file → memory (read proxysql.cnf)'),
 )
 
-# (menu title, statement template, what it does) — one menu per direction.
-_ADMIN_DIRECTIONS = (
-    ('Load to Runtime', 'LOAD {} TO RUNTIME', 'memory → runtime (activate the in-memory config)'),
-    ('Save to Disk', 'SAVE {} TO DISK', 'memory → disk (persist the in-memory config)'),
-    ('Load from Disk', 'LOAD {} FROM DISK', 'disk → memory (discard unsaved in-memory changes)'),
-    ('Save from Runtime', 'SAVE {} FROM RUNTIME', 'runtime → memory (copy the active config back into memory)'),
-)
 
+def get_quick_query_protocols(db, server):
+    """Return which protocols' LOAD/SAVE menus to offer for server.
 
-def get_admin_modules(db, server):
-    """Return the LOAD/SAVE module names (``_ADMIN_MODULES``) this server has.
-
-    Reads the unfiltered ``main`` table list, so ``hide_tables`` patterns
-    hiding a table from the nav do not hide its module's LOAD/SAVE commands.
+    A protocol is a candidate when its ``*_servers`` table exists (ProxySQL
+    2.x has no PgSQL tables). ProxySQL 3.x has both, so the backends decide:
+    servers only in ``mysql_servers`` → ['mysql'], only in ``pgsql_servers``
+    → ['pgsql']; with both, or neither yet, every candidate is offered. Reads
+    the unfiltered ``main`` table list, so ``hide_tables`` has no effect.
 
     Raises:
         ValueError: on a connector error.
@@ -1032,35 +1055,43 @@ def get_admin_modules(db, server):
         cur = db['cnf']['servers'][server]['cur']
         cur.execute("SHOW TABLES FROM main")
         tables = {row['tables'] for row in cur.fetchall()}
+        has_backends = {}
+        for proto, (table, _, _) in _QUICK_QUERY_PROTOCOLS.items():
+            if table in tables:
+                cur.execute(f"SELECT COUNT(*) AS n FROM main.{_quote_ident(table)}")
+                has_backends[proto] = int(cur.fetchone()['n']) > 0
         cur.close()
     except (mysql.connector.Error, mysql.connector.Warning) as e:
         raise ValueError(e)
-    return [m for m, t in _ADMIN_MODULES if t is None or t in tables]
+    with_backends = [p for p, used in has_backends.items() if used]
+    return with_backends if len(with_backends) == 1 else list(has_backends)
 
 
-def admin_quick_queries(modules=None):
-    """Build the built-in LOAD/SAVE Quick Query menus.
+def admin_quick_queries(protocols=None):
+    """Build the LOAD/SAVE Quick Query menus for the given protocols.
 
-    ``modules`` is the server's module list from ``get_admin_modules``; when
-    unknown (None/empty, e.g. server unreachable) the modules a stock ProxySQL
-    2.x has are assumed. Returns a list of
-    ``{'title', 'items': [{'title', 'info', 'sql'}]}`` — one menu per direction,
-    each starting with an "All modules" entry followed by one entry per module.
+    ``protocols`` comes from ``get_quick_query_protocols``; when unknown
+    (None/empty, e.g. server unreachable) MySQL only is assumed. Returns a
+    list of ``{'title', 'items': [{'title', 'info', 'sql'}]}``: one menu per
+    module with its six commands, plus an "All <protocol>" menu per protocol
+    that applies each command to all of that protocol's modules.
     """
-    if not modules:
-        modules = [m for m, _ in _ADMIN_MODULES
-                   if not m.startswith(('PGSQL', 'MYSQL FIREWALL', 'RESTAPI'))]
     menus = []
-    for title, template, what in _ADMIN_DIRECTIONS:
-        statements = [template.format(m) + ';' for m in modules]
-        items = [{'title': 'All modules',
-                  'info': f'{template.format("<all modules>")}: {what}.',
-                  'sql': '\n'.join(statements)}]
-        items += [{'title': template.format(m),
-                   'info': f'{template.format(m)}: {what}.',
-                   'sql': stmt}
-                  for m, stmt in zip(modules, statements)]
-        menus.append({'title': title, 'items': items})
+    for proto in protocols or ['mysql']:
+        if proto not in _QUICK_QUERY_PROTOCOLS:
+            continue
+        _, label, modules = _QUICK_QUERY_PROTOCOLS[proto]
+        for title, module in modules:
+            menus.append({'title': title, 'items': [
+                {'title': cmd.format(module),
+                 'info': f'{cmd.format(module)}: {what}.',
+                 'sql': cmd.format(module) + ';'}
+                for cmd, what in _QUICK_QUERY_COMMANDS]})
+        menus.append({'title': f'All {label}', 'items': [
+            {'title': cmd.format(f'ALL {proto.upper()}'),
+             'info': f'{cmd.format(f"<all {label} modules>")}: {what}.',
+             'sql': '\n'.join(cmd.format(m) + ';' for _, m in modules)}
+            for cmd, what in _QUICK_QUERY_COMMANDS]})
     return menus
 
 
@@ -1745,8 +1776,9 @@ def get_default_server():
     """Return the configured default_server, falling back to the first server
     in the servers list if the configured name does not exist."""
     cfg = get_config()
+    # `servers:` with nothing under it parses as None, not {}.
     servers = cfg.get('servers') or {}
-    configured = cfg.get('global', {}).get('default_server', '')
+    configured = (cfg.get('global') or {}).get('default_server', '')
     if configured in servers:
         return configured
     # Fallback: first server in the config
@@ -1816,7 +1848,9 @@ def execute_change(db, server, sql):
     Returns:
         str: The client's error output, or an empty string on success.
     """
-    logging.debug("Executing change on server %s", server)
+    # Metadata only: the SQL can carry secrets (e.g. mysql_users passwords).
+    logging.debug("Executing change on %s: %s (%d bytes)", server,
+                  _sql_operation(sql), len(sql))
     try:
         proc = _run_mysql_cli(server, 'mysql', ['main'], input_sql=sql)
     except subprocess.TimeoutExpired:
@@ -2274,9 +2308,15 @@ def _pk_where(db, server, database, table, pk_values, extra_columns=()):
     return " AND ".join(conditions), None
 
 
+def _sql_operation(sql):
+    """Leading keyword of ``sql`` (e.g. ``UPDATE``) — safe to log, unlike the SQL."""
+    words = (sql or '').split(None, 1)
+    return words[0].upper() if words else '<empty>'
+
+
 def _run_row_change(db, server, sql):
     """Execute a row mutation and wrap the outcome in the row-API result shape."""
-    logging.debug("Executing row change on server %s", server)
+    logging.debug("Row change on %s: %s", server, _sql_operation(sql))
     error = execute_change(db, server, sql)
     return {'success': not error, 'error': error or None}
 

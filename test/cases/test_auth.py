@@ -364,6 +364,16 @@ class TestCsrfProtection(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 403)
 
+    def test_non_ascii_token_is_403_not_500(self):
+        """Bug guarded: hmac.compare_digest raises TypeError on non-ASCII str,
+        so a token containing e.g. 'é' produced a 500 instead of a 403."""
+        resp = self.s.session.post(
+            f"{BASE_URL}/api/clear_query_history",
+            data={"server": SERVER, "_csrf_token": "tokén"},
+            timeout=10,
+        )
+        self.assertEqual(resp.status_code, 403)
+
 
 class TestDefaultServerFallback(unittest.TestCase):
     """

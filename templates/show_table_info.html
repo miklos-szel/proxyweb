@@ -343,7 +343,7 @@
                                 <i class="fas fa-bolt"></i> Quick Queries
                             </button>
                             <ul class="dropdown-menu" aria-labelledby="quickQueriesBtn">
-                                {% for item in session.get('misc', {})|sort %}
+                                {% for item in session.get('misc', {})|sort if item != 'apply_config' %}
                                     <li class="dropdown-submenu">
                                         <button type="button" class="dropdown-item has-submenu" aria-haspopup="true" aria-expanded="false">
                                             <i class="fas fa-folder me-2"></i>{{ item|replace('_', ' ')|title }}
@@ -372,7 +372,7 @@
                                                 {% for subitem in menu['items'] %}
                                                     <li>
                                                         <button type="button" class="dropdown-item" onclick="loadQueryWithInfo('aqq_item_{{ menu_index }}_{{ loop.index }}', 'aqq_info_{{ menu_index }}_{{ loop.index }}'); return false;">
-                                                            <i class="fas {{ 'fa-layer-group' if loop.first else 'fa-bolt' }} me-2"></i>{% if loop.first %}<strong>{{ subitem['title'] }}</strong>{% else %}{{ subitem['title'] }}{% endif %}
+                                                            <i class="fas fa-bolt me-2"></i>{{ subitem['title'] }}
                                                         </button>
                                                     </li>
                                                 {% endfor %}
@@ -433,6 +433,11 @@
                         <strong>Success</strong>
                         <pre>{{ session.get('sql', '') }}</pre>
                         <strong>{{ message }}</strong>
+                    </div>
+                {% endif %}
+                {% if history_warning %}
+                    <div class="alert-custom alert-warning mt-3">
+                        <i class="fas fa-exclamation-triangle me-2"></i>{{ history_warning }}
                     </div>
                 {% endif %}
             </div>
@@ -682,7 +687,7 @@ function loadQueryWithInfo(sqlVarName, infoVarName) {
 }
 
 // Define SQL query variables and info variables for quick access
-{% for item in session.get('misc', {})|sort %}
+{% for item in session.get('misc', {})|sort if item != 'apply_config' %}
 {% for subitem in session.get('misc', {})[item] %}
 window['{{ item }}_item_{{ loop.index }}'] = {{ subitem.get('sql', '')|tojson }};
 window['{{ item }}_info_{{ loop.index }}'] = {{ subitem.get('info', '')|tojson }};

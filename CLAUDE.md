@@ -96,7 +96,7 @@ auth:
 flask:
   SECRET_KEY: ...
 misc:
-  apply_config: [...]   # LOAD/SAVE shortcuts shown in UI
+  apply_config: [...]   # legacy LOAD/SAVE shortcuts; still parsed, no longer shown (built-in per-module menus replace them)
   update_config: [...]  # INSERT/UPDATE shortcuts shown in UI
   adhoc_report: [...]   # Predefined SQL reports
 ```
@@ -267,4 +267,5 @@ Rules:
 | `/settings/import/` returned the redacted generic error for validation failures → the user couldn't see why an import was rejected | `TestImportShowsValidationError` |
 | `execute_adhoc_report` raised on the first failing report → one bad query 500'd the whole adhoc page | `TestOptionalConfigSections.test_adhoc_report_partial_failure_renders_others` |
 | row APIs passed an unknown server to `get_read_only()` → opaque "Internal error" instead of 400 | `TestRowApiUnknownServer` |
-| loading a multi-statement quick query did `sql.replace(/;/g, ';\n')` → leading space on every line after the first; per-module LOAD/SAVE menus must list modules from the unfiltered table list, not the `hide_tables`-filtered nav | `TestQuickQueryLoadSaveMenus` |
+| loading a multi-statement quick query did `sql.replace(/;/g, ';\n')` → leading space on every line after the first; per-module LOAD/SAVE menus: a MySQL-only server (rows only in `mysql_servers`) gets no PgSQL menus and vice versa | `TestQuickQueryLoadSaveMenus` |
+| CSRF check `hmac.compare_digest(str, str)` raises TypeError on non-ASCII → a token like `tokén` gave 500 instead of 403; now compares bytes | `TestCsrfProtection.test_non_ascii_token_is_403_not_500` |

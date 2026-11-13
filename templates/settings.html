@@ -668,7 +668,11 @@
 // A rejected raw-YAML save re-renders with the submitted text: open the raw
 // editor so the user lands on their edits rather than the structured UI.
 // reload=false: reloading the textarea from the saved config would discard the edits.
-document.addEventListener('DOMContentLoaded', function() { switchMode('raw', false); formState.dirty = true; });
+// The restored draft is unsaved: mark it dirty so leaving the page warns.
+document.addEventListener('DOMContentLoaded', function() {
+    switchMode('raw', false);
+    formState.dirty = true;
+});
 </script>
 {% endif %}
 {% endblock %}
